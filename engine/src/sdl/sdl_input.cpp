@@ -1,0 +1,71 @@
+#include "sdl/sdl_input.hpp"
+
+#include <cstdio>
+
+#include "field/map.hpp"
+
+#define FF6_STICK_DEAD_ZONE 16000  // SDL axis values range from -32768 to 32767
+
+namespace ff6 {
+
+SdlInput::~SdlInput() {
+    for (auto& entry : controllers_) SDL_GameControllerClose(entry.second);
+}
+
+void SdlInput::handle(const SDL_Event& event) {
+    if (event.type == SDL_CONTROLLERDEVICEADDED) {
+        if (SDL_GameController* pad = SDL_GameControllerOpen(event.cdevice.which)) {
+            controllers_[SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pad))] = pad;
+            std::printf("Controller connected: %s\n", SDL_GameControllerName(pad));
+        }
+    } else if (event.type == SDL_CONTROLLERDEVICEREMOVED) {
+        auto it = controllers_.find(event.cdevice.which);
+        if (it != controllers_.end()) {
+            SDL_GameControllerClose(it->second);
+            controllers_.erase(it);
+            std::printf("Controller disconnected\n");
+        }
+    }
+}
+
+InputState SdlInput::sample() {
+    InputState state;
+    state.confirm = confirmPressed();
+    state.direction = direction();
+    return state;
+}
+
+// The field code tests right, left, up, then down.
+int SdlInput::direction() const {
+    const Uint8* keys = SDL_GetKeyboardState(nullptr);
+    bool pressed[FF6_DIRECTION_COUNT] = {keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_W],
+                                         keys[SDL_SCANCODE_RIGHT] || keys[SDL_SCANCODE_D],
+                                         keys[SDL_SCANCODE_DOWN] || keys[SDL_SCANCODE_S],
+                                         keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_A]};
+    for (const auto& entry : controllers_) {
+        SDL_GameController* pad = entry.second;
+        const Sint16 x = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX);
+        const Sint16 y = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY);
+        pressed[Up] |= SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_UP) || y < -FF6_STICK_DEAD_ZONE;
+        pressed[Right] |= SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || x > FF6_STICK_DEAD_ZONE;
+        pressed[Down] |= SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_DOWN) || y > FF6_STICK_DEAD_ZONE;
+        pressed[Left] |= SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || x < -FF6_STICK_DEAD_ZONE;
+    }
+    for (int direction : {Right, Left, Up, Down}) {
+        if (pressed[direction]) return direction;
+    }
+    return FF6_NO_DIRECTION;
+}
+
+bool SdlInput::confirmPressed() {
+    const Uint8* keys = SDL_GetKeyboardState(nullptr);
+    bool held = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_KP_ENTER];
+    for (const auto& entry : controllers_) {
+        held |= SDL_GameControllerGetButton(entry.second, SDL_CONTROLLER_BUTTON_A) != 0;
+    }
+    const bool pressed = held && !confirmHeld_;
+    confirmHeld_ = held;
+    return pressed;
+}
+
+}  // namespace ff6

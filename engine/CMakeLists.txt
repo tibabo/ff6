@@ -1,0 +1,79 @@
+cmake_minimum_required(VERSION 3.20)
+project(ff6_native LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Game data and field rules, one source per file of the disassembly (src/field, src/event, src/data): no graphics library.
+add_library(ff6_core STATIC
+  src/data/pack.cpp
+  src/field/anim.cpp
+  src/field/bg.cpp
+  src/field/color.cpp
+  src/field/entrance.cpp
+  src/field/event.cpp
+  src/field/event_cmd.cpp
+  src/field/map.cpp
+  src/field/obj.cpp
+  src/field/obj_party.cpp
+  src/field/obj_script.cpp
+  src/field/player.cpp
+  src/field/scroll.cpp
+  src/field/sprite_data.cpp
+  src/field/text.cpp)
+target_include_directories(ff6_core PUBLIC src)
+
+# Game state and drawing through the abstract ff6::Renderer: still no graphics library.
+add_library(ff6_game STATIC src/game.cpp)
+target_link_libraries(ff6_game PUBLIC ff6_core)
+
+foreach(target ff6_core ff6_game)
+  if(MSVC)
+    target_compile_options(${target} PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+  endif()
+endforeach()
+
+include(CTest)
+if(BUILD_TESTING)
+  # One test file per source file; FF6_PACK (a pack built by `node ff6.mjs build-pack`) enables the data tests.
+  add_executable(ff6_tests
+    tests/main.cpp
+    tests/game_tests.cpp
+    tests/data/pack_tests.cpp
+    tests/field/anim_tests.cpp
+    tests/field/bg_tests.cpp
+    tests/field/color_tests.cpp
+    tests/field/entrance_tests.cpp
+    tests/field/event_tests.cpp
+    tests/field/event_cmd_tests.cpp
+    tests/field/map_tests.cpp
+    tests/field/obj_tests.cpp
+    tests/field/obj_script_tests.cpp
+    tests/field/obj_party_tests.cpp
+    tests/field/player_tests.cpp
+    tests/field/scroll_tests.cpp
+    tests/field/sprite_data_tests.cpp
+    tests/field/text_tests.cpp)
+  target_link_libraries(ff6_tests PRIVATE ff6_game)
+  add_test(NAME ff6_tests COMMAND ff6_tests)
+endif()
+
+# SDL2 backend (window, renderer, input) and entry point. To use another graphics library,
+# implement ff6::Renderer and an input source for ff6::InputState, then replace these files.
+option(FF6_BUILD_GAME "Build the SDL2 executable" ON)
+if(FF6_BUILD_GAME)
+  find_package(SDL2 CONFIG REQUIRED)
+  add_executable(ff6 src/main.cpp src/sdl/sdl_renderer.cpp src/sdl/sdl_input.cpp)
+  if(TARGET SDL2::SDL2main)
+    target_link_libraries(ff6 PRIVATE SDL2::SDL2main)
+  endif()
+  target_link_libraries(ff6 PRIVATE ff6_game SDL2::SDL2)
+  if(MSVC)
+    target_compile_options(ff6 PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(ff6 PRIVATE -Wall -Wextra)
+  endif()
+endif()

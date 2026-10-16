@@ -1,0 +1,11 @@
+*.smc
+*.sfc
+*.SMC
+*.SFC
+*.sav
+*.srm
+/output/
+/build/
+/.impulse/
+/.vscode/
+.DS_Store
