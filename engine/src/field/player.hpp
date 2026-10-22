@@ -15,6 +15,7 @@ public:
     bool update(const MapData& map, int direction, const Objects& objects);
     // The party is led by a script: the player stands where the lead object is.
     void follow(int pixelX, int pixelY, int facing);
+    void face(int direction) { facing_ = direction; }
     bool moving() const { return remaining_ > 0; }
     int pixelX() const { return pixelX_; }
     int pixelY() const { return pixelY_; }

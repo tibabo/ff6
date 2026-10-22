@@ -28,7 +28,18 @@ target_include_directories(ff6_core PUBLIC src)
 add_library(ff6_game STATIC src/game.cpp)
 target_link_libraries(ff6_game PUBLIC ff6_core)
 
-foreach(target ff6_core ff6_game)
+# Sound: BRR samples, the voices of the sound chip and the music (src/sound). No sound library either.
+add_library(ff6_audio STATIC
+  src/audio/akao.cpp
+  src/audio/akao_script.cpp
+  src/audio/audio_data.cpp
+  src/audio/brr.cpp
+  src/audio/dsp_voice.cpp
+  src/audio/sound_program.cpp
+  src/audio/synth.cpp)
+target_link_libraries(ff6_audio PUBLIC ff6_core)
+
+foreach(target ff6_core ff6_game ff6_audio)
   if(MSVC)
     target_compile_options(${target} PRIVATE /W4 /permissive-)
   else()
@@ -43,6 +54,11 @@ if(BUILD_TESTING)
     tests/main.cpp
     tests/game_tests.cpp
     tests/data/pack_tests.cpp
+    tests/audio/audio_data_tests.cpp
+    tests/audio/akao_tests.cpp
+    tests/audio/brr_tests.cpp
+    tests/audio/dsp_voice_tests.cpp
+    tests/audio/sound_program_tests.cpp
     tests/field/anim_tests.cpp
     tests/field/bg_tests.cpp
     tests/field/color_tests.cpp
@@ -57,8 +73,18 @@ if(BUILD_TESTING)
     tests/field/scroll_tests.cpp
     tests/field/sprite_data_tests.cpp
     tests/field/text_tests.cpp)
-  target_link_libraries(ff6_tests PRIVATE ff6_game)
+  target_link_libraries(ff6_tests PRIVATE ff6_game ff6_audio)
   add_test(NAME ff6_tests COMMAND ff6_tests)
+endif()
+
+# Renders instrument samples to a WAV file (no sound device needed).
+add_executable(ff6_audio_tool src/audio_tool.cpp)
+target_link_libraries(ff6_audio_tool PRIVATE ff6_audio)
+set_target_properties(ff6_audio_tool PROPERTIES OUTPUT_NAME ff6_audio)
+if(MSVC)
+  target_compile_options(ff6_audio_tool PRIVATE /W4 /permissive-)
+else()
+  target_compile_options(ff6_audio_tool PRIVATE -Wall -Wextra)
 endif()
 
 # SDL2 backend (window, renderer, input) and entry point. To use another graphics library,
@@ -66,11 +92,11 @@ endif()
 option(FF6_BUILD_GAME "Build the SDL2 executable" ON)
 if(FF6_BUILD_GAME)
   find_package(SDL2 CONFIG REQUIRED)
-  add_executable(ff6 src/main.cpp src/sdl/sdl_renderer.cpp src/sdl/sdl_input.cpp)
+  add_executable(ff6 src/main.cpp src/sdl/sdl_audio.cpp src/sdl/sdl_renderer.cpp src/sdl/sdl_input.cpp)
   if(TARGET SDL2::SDL2main)
     target_link_libraries(ff6 PRIVATE SDL2::SDL2main)
   endif()
-  target_link_libraries(ff6 PRIVATE ff6_game SDL2::SDL2)
+  target_link_libraries(ff6 PRIVATE ff6_game ff6_audio SDL2::SDL2)
   if(MSVC)
     target_compile_options(ff6 PRIVATE /W4 /permissive-)
   else()

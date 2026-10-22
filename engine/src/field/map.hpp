@@ -50,6 +50,7 @@ struct MapData {
     std::array<uint8_t, FF6_PARALLAX_BYTES> parallax{};
     std::array<uint8_t, FF6_COLOR_MATH_BYTES> colorMath{};
     std::vector<uint8_t> npcProps, eventTriggers, shortEntrances, longEntrances;  // raw ROM items
+    uint32_t startupEvent = 0;  // offset into the event script, run when an entrance leads here
 
     bool bg3Foreground() const { return (prop[FF6_MAP_PROP_FLAGS] & FF6_BG3_FOREGROUND_FLAG) != 0; }
     bool bgAnimEnabled() const { return prop[FF6_MAP_PROP_ANIMATION] != 0; }

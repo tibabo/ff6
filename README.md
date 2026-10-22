@@ -144,14 +144,15 @@ node ff6.mjs build-pack --rom "Final Fantasy 6 [US].smc" --out output/pack
 cmake -S engine -B build/engine -DCMAKE_BUILD_TYPE=Release
 cmake --build build/engine --config Release
 FF6_PACK="$PWD/output/pack" ctest --test-dir build/engine -C Release
-./build/engine/ff6 output/pack [--map 20]
+./build/engine/ff6 output/pack [--map 20] [--music 22]
 ```
 
 Sous Windows, l'executable est `build\engine\Release\ff6.exe`, et `SDL2.dll`
 doit se trouver a cote de lui (vcpkg l'y copie normalement).
 
 `build-pack` ecrit `common.ff6data` (police, fenetre, sprites, dialogues, script
-d'evenements) et une carte par fichier dans `maps/` ; il n'ecrase jamais un
+d'evenements), `audio.ff6data` (echantillons BRR, enveloppes et scripts des
+musiques) et une carte par fichier dans `maps/` ; il n'ecrase jamais un
 dossier existant. `--text` utilise un `dialogues.json` modifie. Un caractere
 absent de la police de la ROM, par exemple un accent, provoque une erreur
 explicite. Le pack contient des donnees du jeu : ne pas le distribuer. Le format
@@ -183,6 +184,8 @@ Limites actuelles :
 - Decor : pas d'animation de palette, pas de cartes du monde (0 a 2). La
   transparence (mathematiques de couleur : addition, soustraction, moitie)
   est reproduite pour bg1/bg2/bg3 et les sprites, avec la couleur fixe a zero.
+  Les portes s'ouvrent quand le groupe marche vers elles (haut ou bas), avec
+  leur bruit ; une porte ouverte redevient fermee si la carte est rechargee.
 - PNJ : ils errent ou restent en place selon leurs donnees, et leurs scripts
   d'objets (marche, pauses, sauts, tours, apparition, interrupteurs) sont
   executes, y compris pendant les evenements. Vehicules, PNJ a graphismes
@@ -191,11 +194,13 @@ Limites actuelles :
 - Evenements : sont executes les dialogues, les choix, les interrupteurs, les
   conditions, les boucles, les appels, les pauses, les scripts de tous les
   objets (PNJ, personnages, camera, places du groupe) avec l'attente de leur
-  fin, les changements de carte, le groupe (composition, activation, carte,
-  position), le verrouillage de l'ecran et les palettes de sprites. Un script
+  fin, les changements de carte (l'evenement continue une fois la carte
+  chargee), le groupe (composition, activation, carte,
+  position), le verrouillage de l'ecran, les palettes de sprites et les
+  modifications de tuiles du decor (portes ouvertes par un evenement). Un script
   d'objet absent (desactive, ou personnage sur une autre carte) est saute ;
   une attente d'objet est abandonnee apres 30 secondes. Les autres commandes
-  connues sont ignorees (argent, musique, fondus, changements de decor) et une
+  connues sont ignorees (argent, fondus) et une
   commande inconnue termine l'evenement avec un message sur la sortie d'erreur.
 - Personnages : le chef du groupe est un objet comme les autres, pilote par
   le joueur hors evenement et par script pendant un evenement ; il retrouve
@@ -203,7 +208,30 @@ Limites actuelles :
   depart ; les palettes par defaut des autres personnages sont approximatives,
   l'etat de sauvegarde n'est pas charge et le deplacement de groupe (0x7E) ne
   recharge pas la carte.
-- Pas de combats, de menus, d'audio, d'escaliers diagonaux ni de remappage
+- Audio : le pack contient les 63 echantillons et les 85 musiques. Le moteur
+  decode les echantillons, interprete les scripts de musique (8 voix, tempo,
+  volumes, panoramique, vibrato, tremolo, glissando, boucles, liaisons, echo,
+  bruit, modulation de hauteur) et les joue sur 32 kHz stereo avec
+  l'interpolation gaussienne de la puce sonore. Le jeu choisit la musique :
+  l'evenement de demarrage de la carte (lu dans le pack) s'execute a chaque
+  entree par une porte, et les commandes d'evenement de musique sont
+  interpretees (lecture, volume, fondus, suspension et reprise d'un morceau,
+  commande 0xFC du retard d'echo, attentes de fin ou de position du morceau).
+  `--music 22` remplace le morceau de la carte. Les effets sonores du jeu
+  (commandes F4 et F5, 256 effets) et du systeme (curseur, erreur, etc.) sont
+  joues par des scripts sur les voix 4 a 7, qui les prennent a la musique,
+  avec leur pan et leur volume. Le tempo et la hauteur du morceau changent
+  sur commande du jeu (0x84 et 0x85) et restent d'un morceau a l'autre. Un
+  glissement du volume des effets jusqu'a zero les arrete. Un morceau peut
+  lancer un effet sur sa voix (commandes E9 et EA). Non pris en charge : mode
+  mono. Les attentes du son sont abandonnees
+  au bout d'une minute. Le retard d'echo vaut 80 ms au
+  depart, comme dans le jeu ; `Synth::setEchoDelay` le change (0 a 15 pas de
+  16 ms) et `ff6_audio --echo n` l'essaie.
+  `build/engine/ff6_audio pack --song n --seconds 30 --wav out.wav` ecrit un
+  morceau dans un fichier WAV, `--sample n [--pitch p] [--hold s]` un
+  echantillon seul, et `--sfx n [--pan p]` ou `--system n` un effet sonore.
+- Pas de combats, de menus, d'escaliers diagonaux ni de remappage
   des touches ; pas de graphismes HD.
 - La compilation n'a ete validee que sur macOS arm64 (Apple clang, SDL2 2.32).
 
@@ -216,16 +244,18 @@ desassemblage de reference (`src/field`, `src/event`, `src/data`) :
 | `field/` | `map`, `bg`, `anim`, `scroll`, `color` | carte, rendu de bg1/bg2/bg3, animations, defilement et parallaxe, composition avec transparence |
 | `field/` | `player`, `obj`, `obj_party`, `obj_script`, `sprite_data` | deplacements du groupe, objets (PNJ, personnages, camera, groupe) et leurs scripts, images des sprites |
 | `field/` | `text`, `entrance`, `event`, `event_cmd` | dialogues, entrees et sorties, interprete d'evenements et taille des commandes |
-| racine | `game`, `renderer.hpp`, `input.hpp`, `constants.hpp` | jeu et son dessin, interfaces, macros `FF6_*` |
+| `audio/` | `audio_data`, `brr`, `dsp_voice`, `akao` (+ `akao_script`, `akao_tables`), `synth`, `sound_program` | donnees audio du pack, decodage BRR, voix de la puce sonore, sequenceur de musique, mixage et echo, commandes du jeu au programme sonore |
+| racine | `game`, `renderer.hpp`, `sound.hpp`, `input.hpp`, `constants.hpp` | jeu et son dessin, interfaces, macros `FF6_*` |
 | `sdl/`, `main.cpp` | | backend SDL2 (fenetre, rendu, clavier et manettes) |
 
-Les outils Node suivent la meme organisation (`tools/field/`, `tools/event/`,
+Les outils Node suivent la meme organisation (`tools/field/`, `tools/event/`, `tools/sound/`,
 `tools/data/`, `tools/common/`) et `tools/pack.mjs` assemble le pack. Les
 tests du moteur ont un fichier par fichier source dans `engine/tests/`.
 
 Seuls `sdl/` et `main.cpp` dependent de SDL2. Le jeu dessine uniquement via
 l'interface abstraite `ff6::Renderer` (textures RGBA, copie de rectangles) et
-recoit ses commandes sous forme de `ff6::InputState`. Pour utiliser une autre
+recoit ses commandes sous forme de `ff6::InputState`. Le son passe de meme par
+`ff6::Sound` (commandes du programme sonore et ports de retour). Pour utiliser une autre
 bibliotheque graphique, implementer `Renderer`, fournir un `InputState` a chaque
 tick et remplacer `sdl/` et `main.cpp`.
 
@@ -257,7 +287,7 @@ genere par `build-pack`, pour leurs tests sur les vraies donnees.
 - Commandes d'evenements restantes (fondus, defilements, changements de
   decor).
 - Portage natif des menus, combats et sauvegardes.
-- Audio natif sans emulation du SPC700.
+- Audio natif sans emulation du SPC700 : mode mono.
 - Interface adaptable aux ecrans larges et remappage des commandes.
 - Gestion des graphismes HD.
 - Validation du moteur sous Windows.

@@ -11,6 +11,12 @@ namespace {
 constexpr uint32_t kEndOfEvent = 0xFFFFFFFF;  // return address of the first stack frame
 constexpr int kPauseFrames[] = {15, 30, 45, 60, 120};  // commands 0x91 to 0x95
 
+// The song commands: bit 7 of the song asks to keep the song that plays.
+void playSong(Sound& sound, uint8_t song, uint8_t volume) {
+    const uint8_t command = (song & ~FF6_SOUND_SONG_MASK) != 0 ? FF6_SOUND_PAUSE_SONG : FF6_SOUND_PLAY_SONG;
+    sound.command(command, song & FF6_SOUND_SONG_MASK, volume);
+}
+
 }  // namespace
 
 void EventBits::init(const CommonData& common) {
@@ -60,8 +66,14 @@ void EventRunner::start(uint32_t offset) {
     pause_ = 0;
     waitObject_ = -1;
     waited_ = 0;
+    soundWaited_ = 0;
     stack_.clear();
     stack_.push_back({kEndOfEvent, offset, 1});  // returning from the event itself ends it
+}
+
+void EventRunner::call(uint32_t offset) {
+    if (!pushFrame(pc_, offset, 1)) return;
+    pc_ = offset;
 }
 
 void EventRunner::stop() {
@@ -69,6 +81,7 @@ void EventRunner::stop() {
     pause_ = 0;
     waitObject_ = -1;
     waited_ = 0;
+    soundWaited_ = 0;
 }
 
 bool EventRunner::pushFrame(uint32_t returnPc, uint32_t loopStart, int count) {
@@ -154,8 +167,10 @@ bool EventRunner::step(EventHost& host) {
         const uint16_t word = static_cast<uint16_t>(byteAt(1) | (byteAt(2) << 8));
         const uint32_t map = word & FF6_ENTRANCE_MAP_MASK;
         const int x = byteAt(3), y = byteAt(4);
-        stop();
-        host.changeMap(map, x, y, (word >> FF6_ENTRANCE_FACING_SHIFT) & FF6_NPC_DIR_MASK);
+        const int facing = (word >> FF6_ENTRANCE_FACING_SHIFT) & FF6_NPC_DIR_MASK;
+        const bool startup = (byteAt(5) & FF6_EVENT_MAP_STARTUP_FLAG) != 0;
+        next();  // the event goes on after the map is loaded, once its startup event is over
+        host.changeMap(map, x, y, facing, startup);
         return false;
     }
     if (op >= FF6_EVENT_PAUSE_15F && op <= FF6_EVENT_PAUSE_120F) {
@@ -224,6 +239,8 @@ bool EventRunner::step(EventHost& host) {
         case FF6_EVENT_UPDATE_PARTY:
         case FF6_EVENT_SET_PALETTE:
         case FF6_EVENT_PARTY_MAP:
+        case FF6_EVENT_MAP_DATA_NOW:
+        case FF6_EVENT_MAP_DATA:
         case FF6_EVENT_MOVE_PARTY: {
             const size_t at = pc_ + 1;
             host.fieldCommand(op, at < script.size() ? &script[at] : nullptr,
@@ -285,6 +302,55 @@ bool EventRunner::step(EventHost& host) {
         case FF6_EVENT_BATTLE_CLEAR:
             bits_.setBattle(byteAt(1), false);
             return next();
+        case FF6_EVENT_PLAY_SONG:
+            playSong(host.sound(), byteAt(1), FF6_SOUND_FULL_VOLUME);
+            return next();
+        case FF6_EVENT_PLAY_SONG_VOLUME:
+            playSong(host.sound(), byteAt(1), byteAt(2));
+            return next();
+        case FF6_EVENT_FADE_IN_SONG:  // starts quietly and rises to full volume
+            playSong(host.sound(), byteAt(1), FF6_SOUND_FADE_IN_VOLUME);
+            host.sound().command(FF6_SOUND_SET_SONG_VOLUME, byteAt(2), FF6_SOUND_FULL_VOLUME);
+            return next();
+        case FF6_EVENT_FADE_OUT_SONG:
+            host.sound().command(FF6_SOUND_SET_SONG_VOLUME, byteAt(1), 0);
+            return next();
+        case FF6_EVENT_FADE_IN_PREVIOUS: {
+            Sound& sound = host.sound();
+            if (sound.previousSong() >= 0) {
+                sound.command(FF6_SOUND_PLAY_SONG, static_cast<uint8_t>(sound.previousSong()), 0);
+                sound.command(FF6_SOUND_SET_SONG_VOLUME, byteAt(1), FF6_SOUND_FULL_VOLUME);
+            }
+            return next();
+        }
+        case FF6_EVENT_PLAY_SFX:
+            host.sound().command(FF6_SOUND_GAME_SFX, byteAt(1), FF6_SFX_PAN_CENTER);
+            return next();
+        case FF6_EVENT_PLAY_SFX_PAN:
+            host.sound().command(FF6_SOUND_GAME_SFX, byteAt(1), FF6_SFX_PAN_CENTER);
+            host.sound().command(FF6_SOUND_SET_SFX_PAN, byteAt(2), byteAt(3));  // the bytes go to the program as they are
+            return next();
+        case FF6_EVENT_SOUND_COMMAND:
+            host.sound().command(byteAt(1), byteAt(2), byteAt(3));
+            return next();
+        case FF6_EVENT_CONTINUE_SONG:
+            host.sound().command(FF6_SOUND_CONTINUE_SONG, 0, 0);
+            return next();
+        case FF6_EVENT_WAIT_SOUND:
+        case FF6_EVENT_WAIT_SONG_POSITION:
+        case FF6_EVENT_WAIT_SONG_END: {
+            const Sound& sound = host.sound();
+            const bool done = op == FF6_EVENT_WAIT_SOUND ? sound.port(FF6_SOUND_PORT_CONTINUE) == 0
+                              : op == FF6_EVENT_WAIT_SONG_POSITION ? sound.port(FF6_SOUND_PORT_SONG_POSITION) == byteAt(1)
+                                                                   : sound.port(FF6_SOUND_PORT_PLAYING) == 0;
+            if (!done && soundWaited_ < FF6_EVENT_SOUND_WAIT_LIMIT) {
+                ++soundWaited_;
+                return false;
+            }
+            if (!done) std::fprintf(stderr, "event: gave up waiting for the sound program\n");
+            soundWaited_ = 0;
+            return next();
+        }
         default: return next();  // a known command without an effect here
     }
 }

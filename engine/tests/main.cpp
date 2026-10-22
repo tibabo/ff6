@@ -5,6 +5,11 @@
 
 int main() {
     testPack();
+    testAudioData();
+    testBrr();
+    testDspVoice();
+    testAkao();
+    testSoundProgram();
     testMap();
     testBg();
     testColor();

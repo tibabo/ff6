@@ -46,8 +46,8 @@ struct Drawable {
 
 }  // namespace
 
-Game::Game(CommonData common, std::string packDir, uint32_t startMap, Renderer& renderer)
-    : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), event_(common_, bits_) {
+Game::Game(CommonData common, std::string packDir, uint32_t startMap, Renderer& renderer, Sound& sound)
+    : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_) {
     bits_.init(common_);
     const size_t screenBytes = static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL;
     for (auto& layer : layerPixels_) {
@@ -59,7 +59,7 @@ Game::Game(CommonData common, std::string packDir, uint32_t startMap, Renderer& 
     screen_ = renderer_.createTexture(FF6_SCREEN_WIDTH, FF6_SCREEN_HEIGHT, nullptr, TextureUsage::Dynamic);
     overlay_ = renderer_.createTexture(FF6_SCREEN_WIDTH, FF6_SCREEN_HEIGHT, nullptr, TextureUsage::Dynamic);
     objects_.resetCharacters();
-    if (!loadMapNow(startMap, -1, -1, Down)) throw std::runtime_error("the start map is not in the data pack");
+    if (!loadMapNow(startMap, -1, -1, Down, true)) throw std::runtime_error("the start map is not in the data pack");
 }
 
 int Game::stripFor(int gfx, int palette) {
@@ -115,12 +115,13 @@ void Game::startEvent(uint32_t offset) {
     event_.start(offset);
 }
 
-bool Game::loadMapNow(uint32_t mapId, int x, int y, int facing) {
+bool Game::loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEvent) {
     if (mapId < FF6_FIRST_FIELD_MAP || !mapExists(packDir_, mapId)) {
         std::fprintf(stderr, "map %u is not available in the data pack\n", static_cast<unsigned>(mapId));
         return false;
     }
     MapData next = loadMap(packDir_, mapId);
+    const bool inEvent = event_.running();  // an event that loads a map goes on once it is loaded
     map_ = std::move(next);
     anim_.init();
     scroll_.init();
@@ -139,15 +140,29 @@ bool Game::loadMapNow(uint32_t mapId, int x, int y, int facing) {
     camera.posX = player_.pixelX() * FF6_OBJ_SUBPIXELS;
     camera.posY = player_.pixelY() * FF6_OBJ_SUBPIXELS;
     screenLocked_ = false;
-    leadSavedMovement_ = FF6_OBJ_MOVE_USER;
-    restorePending_ = false;
-    eventWasRunning_ = false;
+    if (!inEvent) {
+        leadSavedMovement_ = FF6_OBJ_MOVE_USER;
+        restorePending_ = false;
+        eventWasRunning_ = false;
+    } else if (Npc* lead = objects_.lead()) {
+        lead->movement = FF6_OBJ_MOVE_ACTIVATED;
+    }
     lastTileX_ = x;
     lastTileY_ = y;
     armed_ = false;
     dialogue_.open({}, common_.fontWidths, false);
-    event_.stop();
+    if (!inEvent) event_.stop();
     followScroll();
+    // The startup event, which sets the music among other things, runs with the party out of the user's hands; in an
+    // event, it runs before the rest of that event.
+    const std::vector<uint8_t>& script = common_.eventScript;
+    if (startupEvent && map_.startupEvent < script.size() && script[map_.startupEvent] != FF6_EVENT_RETURN) {
+        if (inEvent) {
+            event_.call(map_.startupEvent);
+        } else {
+            startEvent(map_.startupEvent);
+        }
+    }
     return true;
 }
 
@@ -155,7 +170,9 @@ void Game::openDialogue(uint32_t id, uint16_t flags) {
     dialogue_.open(common_.dialogue(id), common_.fontWidths, (flags & FF6_DLG_FLAG_BOTTOM) != 0);
 }
 
-void Game::changeMap(uint32_t map, int x, int y, int facing) { loadMapNow(map, x, y, facing); }
+void Game::changeMap(uint32_t map, int x, int y, int facing, bool startupEvent) {
+    loadMapNow(map, x, y, facing, startupEvent);
+}
 
 // Characters, npcs, the camera and the party's places all run scripts, if the object is there to run it.
 bool Game::startObjectScript(int object, uint32_t offset) {
@@ -226,8 +243,28 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
         case FF6_EVENT_MOVE_PARTY:
             placeParty(byteAt(0), byteAt(1));
             break;
+        case FF6_EVENT_MAP_DATA_NOW:
+        case FF6_EVENT_MAP_DATA:  // x, layer and y, width, height, then the tiles
+            changeMapData(bytes, size);
+            break;
         default:
             break;
+    }
+}
+
+// Event commands 0x73 and 0x74: tiles written into a layer of the map (an opened door, a moved block).
+void Game::changeMapData(const uint8_t* bytes, size_t size) {
+    if (size < FF6_MAP_DATA_HEADER_BYTES) return;
+    const int x = bytes[0], y = bytes[1] & FF6_MAP_DATA_Y_MASK, width = bytes[2], height = bytes[3];
+    const int layerBits = bytes[1] >> FF6_MAP_DATA_LAYER_SHIFT;  // 0 is bg1, 1 is bg2, 2 and 3 are bg3
+    if (size < FF6_MAP_DATA_HEADER_BYTES + static_cast<size_t>(width) * height) return;
+    MapLayout& layout = map_.layers[static_cast<size_t>(layerBits == 0 ? FF6_BG1 : layerBits == 1 ? FF6_BG2 : FF6_BG3)];
+    for (int row = 0; row < height; ++row) {
+        for (int column = 0; column < width; ++column) {
+            if (x + column >= layout.width || y + row >= layout.height) continue;
+            layout.cells[static_cast<size_t>(y + row) * layout.width + x + column] =
+                bytes[FF6_MAP_DATA_HEADER_BYTES + static_cast<size_t>(row) * width + column];
+        }
     }
 }
 
@@ -235,7 +272,7 @@ void Game::leaveThroughEntrance(const EntranceTarget& target) {
     if (target.toParent) {
         if (!hasParent_) return;
         const int facing = (parentFacing_ + 2) % FF6_DIRECTION_COUNT;  // step back out of the door
-        if (loadMapNow(parentMap_, parentX_ + kDeltaX[facing], parentY_ + kDeltaY[facing], facing)) hasParent_ = false;
+        if (loadMapNow(parentMap_, parentX_ + kDeltaX[facing], parentY_ + kDeltaY[facing], facing, true)) hasParent_ = false;
         return;
     }
     const bool hadParent = hasParent_;
@@ -248,7 +285,7 @@ void Game::leaveThroughEntrance(const EntranceTarget& target) {
         parentY_ = player_.tileY();
         parentFacing_ = player_.facing();
     }
-    if (!loadMapNow(target.map, target.x, target.y, target.facing) && target.setParent) {
+    if (!loadMapNow(target.map, target.x, target.y, target.facing, true) && target.setParent) {
         hasParent_ = hadParent;
         parentMap_ = previousMap;
         parentX_ = previousX;
@@ -285,6 +322,44 @@ void Game::talkToNpc() {
     startEvent(npc->eventOffset);
 }
 
+// Port of CheckDoor: pressing up or down in front of a closed door opens it (the party does not move that frame) and
+// the door stays open. A small door is one tile wide and two tall, the big one three wide.
+bool Game::openDoor(int direction) {
+    struct Door {
+        uint8_t closed;
+        int width, offsetX;
+        std::array<std::array<uint8_t, 3>, 2> open;
+    };
+    static constexpr Door kDoors[] = {{FF6_DOOR_SMALL_1, 1, 0, {{{0x04}, {0x14}}}},
+                                      {FF6_DOOR_SMALL_2, 1, 0, {{{0x06}, {0x16}}}},
+                                      {FF6_DOOR_BIG, 3, -1, {{{0x08, 0x09, 0x0A}, {0x18, 0x19, 0x1A}}}}};
+    if ((direction != Up && direction != Down) || player_.moving()) return false;
+    player_.face(direction);
+    MapLayout& layout = map_.layers[FF6_BG1];
+    const int x = player_.tileX(), y = player_.tileY();
+    const int doorY = direction == Up ? y - 2 : y;
+    const int frontY = direction == Up ? y - 1 : y + 1;
+    if (x < 0 || x >= layout.width || frontY < 0 || frontY >= layout.height || doorY < 0) return false;
+    const uint8_t tile = layout.cells[static_cast<size_t>(frontY) * layout.width + x];
+    for (const Door& door : kDoors) {
+        if (tile != door.closed) continue;
+        const uint8_t props = map_.tileProps[tile];
+        if (props == FF6_TILE_DOOR_SOLID || (props & FF6_TILE_DOOR) == 0) return false;
+        const int left = x + door.offsetX;
+        if (left < 0 || left + door.width > layout.width || doorY + 1 >= layout.height) return false;
+        if (objects_.occupied(x, doorY + 1)) return false;
+        for (int row = 0; row < 2; ++row) {
+            for (int column = 0; column < door.width; ++column) {
+                layout.cells[static_cast<size_t>(doorY + row) * layout.width + left + column] =
+                    door.open[static_cast<size_t>(row)][static_cast<size_t>(column)];
+            }
+        }
+        sound_.command(FF6_SOUND_GAME_SFX, FF6_SFX_DOOR_OPEN, FF6_SFX_PAN_CENTER);
+        return true;
+    }
+    return false;
+}
+
 void Game::tick(const InputState& input) {
     ++frame_;
     anim_.update(map_, frame_);
@@ -307,7 +382,7 @@ void Game::tick(const InputState& input) {
     if (!eventRunning && !dialogue_.active() && userLead) {
         if (input.confirm && !wasBusy && !player_.moving()) {
             talkToNpc();
-        } else {
+        } else if (!openDoor(input.direction)) {
             player_.update(map_, input.direction, objects_);
         }
         if (!player_.moving()) checkArrival();

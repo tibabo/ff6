@@ -50,6 +50,12 @@
 #define FF6_TILE_PRIORITY_BOTTOM 0x10
 #define FF6_TILE_TYPE_MASK 0x07  // level and bridge bits
 #define FF6_TILE_IMPASSABLE 0x07  // counter or wall: every type bit set
+#define FF6_TILE_DOOR 0x20  // low byte of a tile property: the tile is a door that opens
+#define FF6_TILE_DOOR_SOLID 0xF7  // a door with this property does not open
+#define FF6_DOOR_SMALL_1 0x15  // tile numbers of the doors, when they are closed
+#define FF6_DOOR_SMALL_2 0x17
+#define FF6_DOOR_BIG 0x1C
+#define FF6_SFX_DOOR_OPEN 0x2C
 
 // ---- Font ----------------------------------------------------------------------------
 #define FF6_FONT_WIDTH_COUNT 256  // one advance width per character code
@@ -118,7 +124,7 @@
 #define FF6_PACK_MAGIC_SIZE 8
 #define FF6_COMMON_MAGIC "FF6COMMN"
 #define FF6_MAP_MAGIC "FF6MAP01"
-#define FF6_PACK_VERSION 2
+#define FF6_PACK_VERSION 4
 #define FF6_COMMON_FILE "common.ff6data"
 #define FF6_MAP_DIR "maps"
 #define FF6_MAP_FILE_EXTENSION ".ff6map"
@@ -327,6 +333,9 @@
 #define FF6_EVENT_OBJ_TOUCH_OFF 0x7D
 #define FF6_EVENT_MAP_DATA_NOW 0x73
 #define FF6_EVENT_MAP_DATA 0x74
+#define FF6_MAP_DATA_HEADER_BYTES 4  // x, layer and y, width, height
+#define FF6_MAP_DATA_Y_MASK 0x3F
+#define FF6_MAP_DATA_LAYER_SHIFT 6
 #define FF6_EVENT_PAUSE_15F 0x91  // 0x92 to 0x94: 30, 45 and 60 frames
 #define FF6_EVENT_PAUSE_120F 0x95
 #define FF6_EVENT_PAUSE 0xB4  // one argument: frames
@@ -361,4 +370,106 @@
 #define FF6_EVENT_STACK_SIZE 16
 #define FF6_EVENT_COMMANDS_PER_TICK 64
 #define FF6_EVENT_OBJECT_WAIT_LIMIT 1800  // frames: an event gives up waiting for an object after this long
+#define FF6_EVENT_SOUND_WAIT_LIMIT 3600  // and for the sound program
+#define FF6_EVENT_MAP_STARTUP_FLAG 0x80  // in the last byte of the load map commands
+#define FF6_EVENT_PLAY_SONG_VOLUME 0xEF  // song, volume
+#define FF6_EVENT_PLAY_SONG 0xF0
+#define FF6_EVENT_PLAY_SFX 0xF4  // sound effect
+#define FF6_EVENT_PLAY_SFX_PAN 0xF5  // sound effect, pan, pan speed
+#define FF6_EVENT_FADE_IN_SONG 0xF1  // song, speed
+#define FF6_EVENT_FADE_OUT_SONG 0xF2  // speed
+#define FF6_EVENT_FADE_IN_PREVIOUS 0xF3  // speed
+#define FF6_EVENT_SOUND_COMMAND 0xF6  // command and its two arguments
+#define FF6_EVENT_CONTINUE_SONG 0xF7
+#define FF6_EVENT_WAIT_SOUND 0xF8
+#define FF6_EVENT_WAIT_SONG_POSITION 0xF9
+#define FF6_EVENT_WAIT_SONG_END 0xFA
+
+#define FF6_AUDIO_MAGIC "FF6AUDIO"
+#define FF6_SONG_SAMPLE_SLOTS 16  // instruments of a song
+#define FF6_BRR_BLOCK_BYTES 9
+#define FF6_BRR_BLOCK_SAMPLES 16
+#define FF6_BRR_FLAG_END 0x01
+#define FF6_BRR_FLAG_LOOP 0x02
+#define FF6_BRR_FILTER_SHIFT 2
+#define FF6_BRR_FILTER_MASK 3
+#define FF6_BRR_SHIFT_SHIFT 4  // the range is the high nibble of the header
+#define FF6_BRR_MAX_RANGE 12  // higher ranges only keep the sign
+#define FF6_DSP_SAMPLE_RATE 32000
+#define FF6_DSP_PITCH_ONE 0x1000  // one sample of the source per output sample
+#define FF6_DSP_PITCH_MASK 0x3FFF
+#define FF6_DSP_ENV_MAX 0x7FF
+#define FF6_DSP_ENV_RELEASE_STEP 8
+#define FF6_DSP_ADSR_AR_MASK 0x0F  // ADSR1: attack, then decay in bits 4-6
+#define FF6_DSP_ADSR_DR_SHIFT 4
+#define FF6_DSP_ADSR_DR_MASK 7
+#define FF6_DSP_ADSR_SR_MASK 0x1F  // ADSR2: sustain rate, then sustain level in bits 5-7
+#define FF6_DSP_ADSR_SL_SHIFT 5
+#define FF6_DSP_RATE_COUNT 32
+#define FF6_DSP_COUNTER_RANGE 30720  // the global counter of the chip counts down from this value
+#define FF6_DSP_ATTACK_STEP 32
+#define FF6_DSP_ATTACK_FAST_STEP 1024
+#define FF6_DSP_VOLUME_SHIFT 7  // channel volumes are signed bytes, 128 is full scale
+
+#define FF6_AKAO_VOICES 8
+#define FF6_AKAO_TICK_SAMPLES 156  // the script clock of 4.875 ms, at 32 kHz
+#define FF6_AKAO_HEADER_BYTES 0x24  // base address, end pointer, 2 x 8 channel pointers
+#define FF6_AKAO_END_POINTER_OFFSET 2
+#define FF6_AKAO_CHANNEL_POINTERS_OFFSET 4
+#define FF6_AKAO_FIRST_COMMAND 0xC4  // lower codes are notes
+#define FF6_AKAO_NOTE_DIVISOR 14  // a note code is 14 * pitch + duration
+#define FF6_AKAO_TIE_FIRST 0xA8
+#define FF6_AKAO_REST_FIRST 0xB6
+#define FF6_AKAO_END 0xEB
+#define FF6_AKAO_SONG_INSTRUMENT_BASE 0x20  // the instruments of a song come after those of the sound effects
+#define FF6_AKAO_LOOP_DEPTH 4
+#define FF6_AKAO_DURATION_KEY_OFF 2  // ticks before the end of a note at which the voice is released
+#define FF6_AKAO_MASTER_VOLUME 0x3F  // the DSP master volume that the sound program sets
+#define FF6_AKAO_ECHO_DELAY 5  // the delay that the sound program starts with, in steps of 16 ms
+#define FF6_AKAO_ECHO_DELAY_MAX 15
+#define FF6_AKAO_ECHO_FRAMES_PER_DELAY 512  // 2 KB of the sound memory, 4 bytes a stereo frame
+#define FF6_AKAO_FIR_TAPS 8
+#define FF6_SPC_MEMORY_BYTES 0x10000
+#define FF6_SPC_DIRECTORY 0x1B00  // start and loop address of each instrument
+#define FF6_SPC_FREQ_MULT 0x1A00  // pitch multiplier of each instrument
+#define FF6_SPC_ADSR 0x1A80  // ADSR1 and ADSR2 of each instrument
+#define FF6_SFX_SAMPLE_COUNT 8
+#define FF6_SFX_POINTERS 0x2C00  // two script addresses for each game sound effect
+#define FF6_SFX_POINTER_BYTES 4
+#define FF6_SYSTEM_SFX_TABLE 0x17DF  // script address of each system sound effect
+#define FF6_SFX_DEFAULT_INSTRUMENT 4
+#define FF6_SFX_DEFAULT_VOLUME 0x41
+#define FF6_SFX_DEFAULT_OCTAVE 3
+#define FF6_SFX_TEMPO 0x78  // the sound effects keep their own tempo
+#define FF6_SFX_FIRST_VOICE 4  // the sound effects use the voices 4 to 7
+#define FF6_SFX_PAN_CENTER 0x80
+#define FF6_AKAO_INTERRUPT_ENV_TICKS 7  // ticks between two steps of the volume that the game sets
+
+// Commands of the game to the sound program (ExecSound), and the events that send them
+#define FF6_SOUND_PLAY_SONG 0x10  // song, volume
+#define FF6_SOUND_PAUSE_SONG 0x14  // like the play command, and the song that plays is kept to resume it
+#define FF6_SOUND_GAME_SFX 0x18  // sound effect, pan: from here to 0x1F
+#define FF6_SOUND_SYSTEM_SFX_FIRST 0x20  // the effect is in the low 4 bits
+#define FF6_SOUND_SYSTEM_SFX_LAST 0x2F
+#define FF6_SOUND_QUICK_SONG_FIRST 0x30  // the song is the low 4 bits, at full volume
+#define FF6_SOUND_QUICK_SONG_LAST 0x3F
+#define FF6_SOUND_INTERRUPT_FLAG 0x80
+#define FF6_SOUND_SET_VOLUME 0x80  // duration, volume of the song and of the sound effects
+#define FF6_SOUND_SET_SONG_VOLUME 0x81  // duration, volume of the song
+#define FF6_SOUND_SET_SFX_VOLUME 0x82  // duration, volume of the sound effects
+#define FF6_SOUND_SET_SFX_PAN 0x83  // duration, pan of the sound effects
+#define FF6_SOUND_SET_TEMPO_RATIO 0x84  // duration, ratio
+#define FF6_SOUND_SET_PITCH_SHIFT 0x85  // duration, change
+#define FF6_SOUND_CONTINUE_SONG 0x89
+#define FF6_SOUND_STOP_ALL 0xF0
+#define FF6_SOUND_STOP_SONG 0xF1
+#define FF6_SOUND_STOP_SFX 0xF2
+#define FF6_SOUND_SET_ECHO_DELAY 0xFC  // delay in steps of 16 ms
+#define FF6_SOUND_PAUSING_SONGS {0x24, 0x38, 0x14, 0x33}  // two battle songs, Nighty Night and another: PauseSongTbl
+#define FF6_SOUND_PORT_SONG_POSITION 1
+#define FF6_SOUND_PORT_CONTINUE 2
+#define FF6_SOUND_PORT_PLAYING 3
+#define FF6_SOUND_FULL_VOLUME 0xFF
+#define FF6_SOUND_FADE_IN_VOLUME 0x20  // volume at which a song starts that fades in
+#define FF6_SOUND_SONG_MASK 0x7F  // in the events, bit 7 asks to keep the song that plays
 

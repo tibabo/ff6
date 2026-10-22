@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "data/pack.hpp"
+#include "sound.hpp"
 
 namespace ff6 {
 
@@ -31,7 +32,8 @@ public:
     virtual bool dialogueBusy() const = 0;
     virtual int dialogueChoiceCount() const = 0;  // of the last dialogue
     virtual int dialogueChoice() const = 0;  // the choice the player made in it
-    virtual void changeMap(uint32_t map, int x, int y, int facing) = 0;
+    // `startupEvent`: the map runs its startup event once it is loaded.
+    virtual void changeMap(uint32_t map, int x, int y, int facing, bool startupEvent) = 0;
     // The object runs the script that starts at `offset` of the event script. False when it cannot.
     virtual bool startObjectScript(int object, uint32_t offset) = 0;
     virtual bool objectBusy(int object) const = 0;  // it runs a script or walks
@@ -40,6 +42,7 @@ public:
     // Event commands of the party, the screen and the sprite palettes (see FF6_EVENT_LOCK_SCREEN to FF6_EVENT_MOVE_PARTY);
     // `bytes` are the command bytes after the opcode.
     virtual void fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) = 0;
+    virtual Sound& sound() = 0;
 };
 
 struct EventTrigger {
@@ -56,6 +59,8 @@ class EventRunner {
 public:
     EventRunner(const CommonData& common, EventBits& bits) : common_(common), bits_(bits) {}
     void start(uint32_t offset);
+    // Runs the event at `offset` before the next command, as a subroutine of the running event.
+    void call(uint32_t offset);
     void stop();
     bool running() const { return running_; }
     // Call once per game frame.
@@ -84,6 +89,7 @@ private:
     int pause_ = 0;  // frames that the event still waits
     int waitObject_ = -1;  // the object whose script the event waits for
     int waited_ = 0;  // frames spent waiting for it
+    int soundWaited_ = 0;  // frames spent waiting for the sound program
     uint32_t seed_ = 0x9E3779B9;
 };
 

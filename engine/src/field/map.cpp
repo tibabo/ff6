@@ -86,6 +86,7 @@ MapData loadMap(const std::string& packDir, uint32_t mapId) {
     map.eventTriggers = readCounted(reader, FF6_EVENT_TRIGGER_SIZE);
     map.shortEntrances = readCounted(reader, FF6_SHORT_ENTRANCE_SIZE);
     map.longEntrances = readCounted(reader, FF6_LONG_ENTRANCE_SIZE);
+    map.startupEvent = reader.u32();
     if (reader.remaining() != 0) throw std::runtime_error("map file has trailing bytes");
     return map;
 }

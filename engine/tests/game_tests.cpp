@@ -1,18 +1,38 @@
+#include <array>
 #include <cstdlib>
 #include <utility>
 #include <vector>
 
+#include "audio/sound_program.hpp"
 #include "check.hpp"
 #include "test_helpers.hpp"
 #include "tests.hpp"
 #include "game.hpp"
+
+namespace {
+
+// The real sound program, with a log of what the game sent to it.
+struct LoggedSound : ff6::Sound {
+    explicit LoggedSound(ff6::SoundProgram& program) : program(program) {}
+    ff6::SoundProgram& program;
+    std::vector<std::array<int, 3>> commands;
+    void command(uint8_t command, uint8_t arg1, uint8_t arg2) override {
+        commands.push_back({command, arg1, arg2});
+        program.command(command, arg1, arg2);
+    }
+    uint8_t port(int index) const override { return program.port(index); }
+    int previousSong() const override { return program.previousSong(); }
+};
+
+}  // namespace
 
 // Plays the real data pack when FF6_PACK points to one (built by `node ff6.mjs build-pack`).
 void testGame() {
     const char* pack = std::getenv("FF6_PACK");
     if (!pack) return;
     test::RecordingRenderer renderer;
-    ff6::Game game(ff6::loadCommonData(pack), pack, 0x1C, renderer);  // the Narshe inn
+    test::RecordingSound sound;
+    ff6::Game game(ff6::loadCommonData(pack), pack, 0x1C, renderer, sound);  // the Narshe inn
     CHECK(game.map().id == 0x1C && game.player().tileX() == 8 && game.player().tileY() == 45);
     CHECK(game.objects().npcs().size() == 1);  // the innkeeper
 
@@ -24,6 +44,9 @@ void testGame() {
 
     // Walk up to the counter and talk to the innkeeper: a dialogue with two choices opens.
     const ff6::InputState up{ff6::Up, false}, idle{FF6_NO_DIRECTION, false}, confirm{FF6_NO_DIRECTION, true};
+    // The startup event of Narshe, which the party is in when the game starts, plays the song of the town.
+    for (int i = 0; i < 5; ++i) game.tick(idle);
+    CHECK(sound.commands.size() == 1 && sound.commands[0].command == FF6_SOUND_PLAY_SONG && sound.commands[0].arg1 == 0x17);
     for (int tile = 0; tile < 5; ++tile) {
         game.tick(up);
         for (int frame = 1; frame < FF6_STEP_FRAMES; ++frame) game.tick(idle);
@@ -46,7 +69,7 @@ void testGame() {
     CHECK(!game.dialogue().active());
 
     // Leaving through the door loads another map and puts the party there.
-    ff6::Game outside(ff6::loadCommonData(pack), pack, 0x1C, renderer);
+    ff6::Game outside(ff6::loadCommonData(pack), pack, 0x1C, renderer, sound);
     const size_t before = renderer.textures.size();
     for (int tile = 0; tile < 2 && outside.map().id == 0x1C; ++tile) {
         outside.tick({ff6::Down, false});
@@ -55,7 +78,7 @@ void testGame() {
     CHECK(outside.map().id != 0x1C && renderer.textures.size() >= before);
 
     // The npcs of the Moogle cave wander about by themselves, whatever the party does.
-    ff6::Game cave(ff6::loadCommonData(pack), pack, 52, renderer);
+    ff6::Game cave(ff6::loadCommonData(pack), pack, 52, renderer, sound);
     std::vector<std::pair<int, int>> start;
     for (const ff6::Npc& npc : cave.objects().npcs()) start.push_back({npc.pixelX(), npc.pixelY()});
     for (int i = 0; i < 600; ++i) cave.tick(idle);
@@ -66,4 +89,69 @@ void testGame() {
     }
     CHECK(moved >= 5);
     cave.draw();  // the moving sprites are drawn
+
+    {  // a closed door opens when the party walks into it, and the sound of the door plays
+        int doorMap = -1, doorX = 0, doorY = 0;
+        for (uint32_t id = FF6_FIRST_FIELD_MAP; id < 200 && doorMap < 0; ++id) {
+            if (!ff6::mapExists(pack, id)) continue;
+            const ff6::MapData map = ff6::loadMap(pack, id);
+            const ff6::MapLayout& layout = map.layers[FF6_BG1];
+            for (int y = 2; y + 1 < layout.height && doorMap < 0; ++y) {
+                for (int x = 0; x < layout.width; ++x) {
+                    const auto at = [&](int cellX, int cellY) { return layout.cells[static_cast<size_t>(cellY) * layout.width + cellX]; };
+                    const uint8_t floor = map.propAt(x, y + 1) & FF6_PROP_LOW_MASK;
+                    if (at(x, y) == FF6_DOOR_SMALL_1 && at(x, y - 1) == 0x05 && (floor & FF6_TILE_TYPE_MASK) != FF6_TILE_IMPASSABLE) {
+                        doorMap = static_cast<int>(id);
+                        doorX = x;
+                        doorY = y;
+                        break;
+                    }
+                }
+            }
+        }
+        CHECK(doorMap >= 0);
+        if (doorMap >= 0) {
+            test::RecordingSound doorSound;
+            ff6::Game doors(ff6::loadCommonData(pack), pack, static_cast<uint32_t>(doorMap), renderer, doorSound);
+            for (int i = 0; i < 600; ++i) doors.tick(idle);  // the startup event is over
+            doors.placeParty(doorX, doorY + 1);
+            const auto cell = [&](int x, int y) { return doors.map().layers[FF6_BG1].cells[static_cast<size_t>(y) * doors.map().layers[FF6_BG1].width + x]; };
+            CHECK(cell(doorX, doorY) == FF6_DOOR_SMALL_1);
+            doorSound.commands.clear();
+            doors.tick(up);
+            CHECK(cell(doorX, doorY - 1) == 0x04 && cell(doorX, doorY) == 0x14);
+            CHECK(doors.player().tileY() == doorY + 1);  // the party does not move on that frame
+            CHECK(doorSound.commands.size() == 1 && doorSound.commands[0].command == FF6_SOUND_GAME_SFX &&
+                  doorSound.commands[0].arg1 == FF6_SFX_DOOR_OPEN);
+        }
+    }
+    {  // sleeping at the inn plays another song, and the song of the town comes back once it is over
+        const ff6::AudioData audio = ff6::loadAudioData(pack);
+        ff6::SoundProgram program(audio);
+        LoggedSound logged(program);
+        ff6::Game inn(ff6::loadCommonData(pack), pack, 0x1C, renderer, logged);
+        std::array<int16_t, 2 * 1024> samples{};
+        bool doorOpened = false;
+        const auto step = [&](const ff6::InputState& input) {
+            inn.tick(input);
+            for (int i = 0; i < 9; ++i) program.render(samples.data(), samples.size() / 2);  // about a 60th of a second
+            const ff6::MapLayout& layout = inn.map().layers[FF6_BG1];
+            if (inn.map().id == 0x1C && layout.cells[static_cast<size_t>(0x24) * layout.width + 4] == 0x04) doorOpened = true;
+        };
+        for (int tile = 0; tile < 5; ++tile) {
+            step(up);
+            for (int frame = 1; frame < FF6_STEP_FRAMES; ++frame) step(idle);
+        }
+        step(confirm);
+        for (int i = 0; i < 400 && !inn.dialogue().choosing(); ++i) step(idle);
+        step(confirm);  // the first choice: stay the night
+        for (int i = 0; i < 20000; ++i) step(i % 40 == 0 ? confirm : idle);
+        const auto& commands = logged.commands;
+        const std::vector<std::array<int, 3>> expected = {
+            {FF6_SOUND_PLAY_SONG, 0x17, 0xFF}, {FF6_SOUND_SET_SONG_VOLUME, 0x60, 0x00},
+            {FF6_SOUND_PAUSE_SONG, 0x38, 0xFF}, {FF6_SOUND_PLAY_SONG, 0x17, 0x00}, {FF6_SOUND_SET_SONG_VOLUME, 0x20, 0xFF}};
+        CHECK(commands == expected);  // the town song, a fade out, Nighty Night, then the town song fading in
+        CHECK(doorOpened);  // the event opens the door of the room, with the tiles of the open door
+        CHECK(program.currentSong() == 0x17);
+    }
 }

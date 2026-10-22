@@ -13,8 +13,13 @@ import { SPRITE_GFX_COUNT, buildSpriteGfx, spriteGfxOffset } from './field/obj.m
 import { encodeDialogueForEngine } from './field/text.mjs';
 import { decodeNpcProp, readNpcProps, readNpcSwitchDefaults } from './event/npc_prop.mjs';
 import { readEventScript, readEventTriggers } from './event/event_trigger.mjs';
+import { readMapInitEvent } from './event/map_init_event.mjs';
 import { COMMON_MAGIC, MAP_MAGIC, PACK_VERSION, buildCommonData, buildMapData, writePack } from './pack.mjs';
 import { requireSupportedRom } from './rom.mjs';
+import { AUDIO_MAGIC, buildAudioData } from './sound/audio_data.mjs';
+import { SAMPLE_COUNT, readSample, readSongCount, readSongSamples } from './sound/sample_brr.mjs';
+import { readSongScript } from './sound/song_script.mjs';
+import { readSpcBlocks } from './sound/spc_blocks.mjs';
 
 const romPath = process.env.FF6_ROM;
 const skip = !romPath;
@@ -58,6 +63,12 @@ test('the Narshe inn data matches the disassembly', { skip }, () => {
   // The innkeeper's script starts with the dialogue command, then a choice.
   const script = readEventScript(rom);
   assert.deepEqual([...script.subarray(npc.eventOffset, npc.eventOffset + 4)], [0x4b, 0x0d, 0x06, 0xb6]);
+  // The startup event of Narshe plays a song (command f0), a map without one points at a return command.
+  const startup = readMapInitEvent(rom, 28);
+  assert.equal(startup, 0x2395a);
+  assert.deepEqual([...script.subarray(startup + 12, startup + 15)], [0xf0, 0x17, 0xfe]);
+  assert.equal(script[readMapInitEvent(rom, 36)], 0xfe);
+  assert.throws(() => readMapInitEvent(rom, 0x200), /Invalid map/);
   // The npc is visible in a new game.
   const defaults = readNpcSwitchDefaults(rom);
   assert.equal(defaults.length, 128);
@@ -115,9 +126,44 @@ test('a pack contains every field map and is never written over an existing one'
     assert.equal(result.written.length, 412);
     assert.deepEqual(result.skipped, []);
     assert.ok(existsSync(join(destination, 'common.ff6data')));
+    assert.ok(existsSync(join(destination, 'audio.ff6data')));
     assert.equal(readdirSync(join(destination, 'maps')).length, 412);
     assert.throws(() => writePack(rom, destination), /Refusing to overwrite/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('the audio tables match the disassembly: samples, envelopes and the sample list of the prelude', { skip }, () => {
+  const rom = loadRom();
+  assert.equal(SAMPLE_COUNT, 63);
+  assert.equal(readSongCount(rom), 85);
+  // Sample 0 (steel guitar): loop at 0x0b88, pitch multiplier $a0fd and adsr(15,7,7,17).
+  const guitar = readSample(rom, 0);
+  assert.equal(guitar.loopStart, 0x0b88);
+  assert.equal(guitar.freqMult, 0xa0fd);
+  assert.deepEqual([guitar.adsr1, guitar.adsr2], [0xff, 0xf1]);
+  for (let index = 0; index < SAMPLE_COUNT; index += 1) {
+    const sample = readSample(rom, index);
+    assert.ok(sample.brr.length > 0 && sample.loopStart <= sample.brr.length);
+  }
+  // The prelude: harp, flute, strings, voice synth, contrabass.
+  assert.deepEqual(readSongSamples(rom, 1).slice(0, 6), [26, 6, 12, 5, 43, -1]);
+  // A script starts with its header: base, end pointer and eight channel pointers twice (0x24 bytes).
+  const script = readSongScript(rom, 1);
+  assert.equal(script.readUInt16LE(0), 0x5cc6);
+  assert.equal(script.readUInt16LE(4), 0x5cc6);
+  assert.ok(script.readUInt16LE(2) > script.readUInt16LE(0));
+  const audio = buildAudioData(rom, PACK_VERSION);
+  assert.equal(audio.subarray(0, 8).toString('ascii'), AUDIO_MAGIC);
+  assert.equal(audio.readUInt32LE(8), PACK_VERSION);
+  assert.equal(audio.readUInt32LE(12), SAMPLE_COUNT);
+  // The blocks of the sound memory: the sound program, the sound effect scripts and their instruments.
+  const blocks = readSpcBlocks(rom);
+  assert.deepEqual(blocks.map(block => [block.address, block.data.length]),
+    [[0x200, 0x17b7], [0x2c00, 0x1c00], [0x4800, 0x14d], [0x1b00, 0x20], [0x1a80, 0x10], [0x1a00, 0x10]]);
+  // The system sound effect table points at the cursor sound, which starts by setting its volume.
+  const program = blocks[0].data;
+  assert.equal(program.readUInt16LE(0x17df - 0x200), 0x17ff);
+  assert.deepEqual([...program.subarray(0x17ff - 0x200, 0x17ff - 0x200 + 4)], [0xc4, 0x46, 0xdc, 0x05]);
 });

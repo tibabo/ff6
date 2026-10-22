@@ -19,11 +19,13 @@ import {
 } from './field/text.mjs';
 import { readNpcProps, readNpcSwitchDefaults } from './event/npc_prop.mjs';
 import { readEventScript, readEventTriggers } from './event/event_trigger.mjs';
+import { readMapInitEvent } from './event/map_init_event.mjs';
 import { readMapParallax } from './data/map_parallax.mjs';
+import { buildAudioData } from './sound/audio_data.mjs';
 
 export const COMMON_MAGIC = 'FF6COMMN';
 export const MAP_MAGIC = 'FF6MAP01';
-export const PACK_VERSION = 2;
+export const PACK_VERSION = 4;
 export const FIRST_FIELD_MAP = 3;  // maps 0-2 are the world maps
 
 class Writer {
@@ -154,6 +156,7 @@ export function buildMapData(rom, mapId) {
   writeCounted(out, readEventTriggers(rom, mapId), 5);
   writeCounted(out, readShortEntrances(rom, mapId), 6);
   writeCounted(out, readLongEntrances(rom, mapId), 7);
+  out.u32(readMapInitEvent(rom, mapId));
   return out.build();
 }
 
@@ -164,6 +167,7 @@ export function writePack(rom, outDir, options = {}) {
   mkdirSync(join(temp, 'maps'), { recursive: true });
   try {
     writeFileSync(join(temp, 'common.ff6data'), buildCommonData(rom, options), { flag: 'wx' });
+    writeFileSync(join(temp, 'audio.ff6data'), buildAudioData(rom, PACK_VERSION), { flag: 'wx' });
     const written = [];
     const skipped = [];
     for (let mapId = FIRST_FIELD_MAP; mapId < MAP_COUNT; mapId += 1) {

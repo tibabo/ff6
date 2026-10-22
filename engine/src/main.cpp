@@ -8,7 +8,10 @@
 #include <string>
 #include <utility>
 
+#include "audio/audio_data.hpp"
+#include "audio/sound_program.hpp"
 #include "game.hpp"
+#include "sdl/sdl_audio.hpp"
 #include "sdl/sdl_input.hpp"
 #include "sdl/sdl_renderer.hpp"
 
@@ -32,7 +35,7 @@ struct Capture {
 // Keeps SDL initialised for as long as it lives.
 struct SdlRuntime {
     SdlRuntime() {
-        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0) {
+        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0) {
             throw std::runtime_error(SDL_GetError());
         }
     }
@@ -98,24 +101,31 @@ void playGame(ff6::Game& game, ff6::SdlRenderer& renderer) {
     }
 }
 
-int run(const std::string& packDir, uint32_t startMap, const Capture* capture) {
+int run(const std::string& packDir, uint32_t startMap, const Capture* capture, long music) {
     ff6::CommonData common = ff6::loadCommonData(packDir);
     SdlRuntime sdl;
     ff6::SdlRenderer renderer(capture != nullptr);
-    ff6::Game game(std::move(common), packDir, startMap, renderer);
-    if (capture) {
+    if (capture) {  // no sound device for a capture
+        ff6::NoSound sound;
+        ff6::Game game(std::move(common), packDir, startMap, renderer, sound);
         if (capture->atX >= 0) game.placeParty(capture->atX, capture->atY);
         captureFrame(game, renderer, *capture);
-    } else {
-        playGame(game, renderer);
+        return 0;
     }
+    const ff6::AudioData audio = ff6::loadAudioData(packDir);
+    if (music >= 0 && static_cast<size_t>(music) >= audio.songs.size()) throw std::runtime_error("invalid --music");
+    ff6::SoundProgram program(audio);
+    ff6::SdlAudio sound(program);
+    ff6::Game game(std::move(common), packDir, startMap, renderer, sound);
+    if (music >= 0) sound.command(FF6_SOUND_PLAY_SONG, static_cast<uint8_t>(music), FF6_SOUND_FULL_VOLUME);  // over the song of the map
+    playGame(game, renderer);
     return 0;
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-    const char* usage = "Usage: %s <data-pack-dir> [--map n] [--capture out.bmp [--at x,y] [--wait frames] [--moves URDL...] [--talk frames]]\n";
+    const char* usage = "Usage: %s <data-pack-dir> [--map n] [--music song] [--capture out.bmp [--at x,y] [--wait frames] [--moves URDL...] [--talk frames]]\n";
     if (argc < 2) {
         std::fprintf(stderr, usage, argc > 0 ? argv[0] : "ff6");
         return 2;
@@ -123,6 +133,7 @@ int main(int argc, char** argv) {
     try {
         Capture capture;
         uint32_t startMap = FF6_DEFAULT_MAP;
+        long music = -1;
         for (int i = 2; i < argc; i += 2) {
             const std::string option = argv[i];
             if (i + 1 >= argc) throw std::runtime_error("missing value for " + option);
@@ -130,6 +141,9 @@ int main(int argc, char** argv) {
                 const long map = std::stol(argv[i + 1], nullptr, 0);
                 if (map < 0 || map > FF6_MAX_MAP_ARGUMENT) throw std::runtime_error("invalid --map");
                 startMap = static_cast<uint32_t>(map);
+            } else if (option == "--music") {
+                music = std::stol(argv[i + 1]);
+                if (music < 0) throw std::runtime_error("invalid --music");
             } else if (option == "--capture") {
                 capture.path = argv[i + 1];
             } else if (option == "--moves") {
@@ -155,7 +169,7 @@ int main(int argc, char** argv) {
         if (capture.path.empty() && (!capture.moves.empty() || capture.talkFrames >= 0 || capture.waitFrames > 0 || capture.atX >= 0)) {
             throw std::runtime_error("--at, --wait, --moves and --talk require --capture");
         }
-        return run(argv[1], startMap, capture.path.empty() ? nullptr : &capture);
+        return run(argv[1], startMap, capture.path.empty() ? nullptr : &capture, music);
     } catch (const std::exception& error) {
         std::fprintf(stderr, "Error: %s\n", error.what());
         return 1;

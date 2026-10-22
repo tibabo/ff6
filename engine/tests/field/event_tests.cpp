@@ -97,14 +97,18 @@ void testEvent() {
         test::FakeHost host;
         CHECK(play(script, host, bits).empty());
     }
-    {  // changing the map ends the event and tells the game where to go
+    {  // changing the map tells the game where to go, and the event goes on after it
         const std::vector<uint8_t> script = {0x6A, 0x20, 0x20, 0x29, 0x26, 0x80, 0x4B, 0x01, 0x00, 0xFE};
         ff6::EventBits bits = freshBits();
         test::FakeHost host;
-        CHECK(play(script, host, bits).empty());
+        CHECK(play(script, host, bits) == std::vector<uint32_t>({1}));
         CHECK(host.mapChanges.size() == 1);
         CHECK(host.mapChanges[0].map == 0x20 && host.mapChanges[0].x == 0x29 && host.mapChanges[0].y == 0x26);
-        CHECK(host.mapChanges[0].facing == ff6::Down);
+        CHECK(host.mapChanges[0].facing == ff6::Down && host.mapChanges[0].startupEvent);
+        // The startup event only runs when the command asks for it.
+        test::FakeHost quiet;
+        play({0x6B, 0x20, 0x20, 0x29, 0x26, 0x00}, quiet, bits);
+        CHECK(quiet.mapChanges.size() == 1 && !quiet.mapChanges[0].startupEvent);
     }
     {  // truncated scripts and bad offsets end the event
         ff6::EventBits bits = freshBits();
@@ -259,6 +263,65 @@ void testEvent() {
         CHECK(bits.get(FF6_NPC_SWITCH_EVENT_BIT) && bits.get(FF6_NPC_SWITCH_EVENT_BIT + 1));
         CHECK(!bits.get(FF6_NPC_SWITCH_EVENT_BIT + 2) && bits.get(FF6_NPC_SWITCH_EVENT_BIT + 15));
         CHECK(!bits.get(5) && !bits.get(-1) && !bits.get(FF6_EVENT_BIT_COUNT));
+    }
+    {  // the song commands become commands of the sound program
+        const auto sent = [](const std::vector<uint8_t>& script) {
+            ff6::EventBits bits = freshBits();
+            test::FakeHost host;
+            host.recording.previous = 7;
+            play(script, host, bits);
+            return host.recording.commands;
+        };
+        using Commands = std::vector<test::RecordingSound::Command>;
+        const auto same = [](const Commands& a, const Commands& b) {
+            if (a.size() != b.size()) return false;
+            for (size_t i = 0; i < a.size(); ++i) {
+                if (a[i].command != b[i].command || a[i].arg1 != b[i].arg1 || a[i].arg2 != b[i].arg2) return false;
+            }
+            return true;
+        };
+        CHECK(same(sent({0xF0, 0x17, 0xFE}), {{0x10, 0x17, 0xFF}}));
+        CHECK(same(sent({0xF0, 0x97, 0xFE}), {{0x14, 0x17, 0xFF}}));  // bit 7: the song that plays is kept
+        CHECK(same(sent({0xEF, 0x05, 0x80, 0xFE}), {{0x10, 0x05, 0x80}}));
+        CHECK(same(sent({0xF1, 0x05, 0x30, 0xFE}), {{0x10, 0x05, 0x20}, {0x81, 0x30, 0xFF}}));
+        CHECK(same(sent({0xF2, 0x20, 0xFE}), {{0x81, 0x20, 0x00}}));
+        CHECK(same(sent({0xF3, 0x10, 0xFE}), {{0x10, 0x07, 0x00}, {0x81, 0x10, 0xFF}}));  // the song that was stopped
+        CHECK(same(sent({0xF6, 0xFC, 0x03, 0x00, 0xF7, 0xFE}), {{0xFC, 0x03, 0x00}, {0x89, 0x00, 0x00}}));
+        CHECK(same(sent({0xF4, 0x05, 0xFE}), {{0x18, 0x05, 0x80}}));  // a sound effect, centered
+        CHECK(same(sent({0xF5, 0x06, 0x20, 0x07, 0xFB, 0xFE}), {{0x18, 0x06, 0x80}, {0x83, 0x20, 0x07}}));
+    }
+    {  // the waits for the sound program look at its ports
+        const auto framesUntilDialogue = [](const std::vector<uint8_t>& script, test::RecordingSound& sound) {
+            const ff6::CommonData common = test::makeCommon(script);
+            ff6::EventBits bits = freshBits();
+            ff6::EventRunner runner(common, bits);
+            test::FakeHost host;
+            host.recording = sound;
+            runner.start(0);
+            for (int frame = 1; frame <= FF6_EVENT_SOUND_WAIT_LIMIT + 5; ++frame) {
+                runner.update(host);
+                if (!host.opened.empty()) return frame;
+            }
+            return -1;
+        };
+        test::RecordingSound idle, playing, waiting, position;
+        playing.ports[3] = 0x01;
+        waiting.ports[2] = 0x01;
+        position.ports[1] = 0x04;
+        CHECK(framesUntilDialogue({0xFA, 0x4B, 0x01, 0x00, 0xFE}, idle) == 1);
+        CHECK(framesUntilDialogue({0xF8, 0x4B, 0x01, 0x00, 0xFE}, idle) == 1);
+        CHECK(framesUntilDialogue({0xF9, 0x04, 0x4B, 0x01, 0x00, 0xFE}, position) == 1);
+        // A wait that never ends is given up after a minute.
+        CHECK(framesUntilDialogue({0xFA, 0x4B, 0x01, 0x00, 0xFE}, playing) == FF6_EVENT_SOUND_WAIT_LIMIT + 1);
+        CHECK(framesUntilDialogue({0xF8, 0x4B, 0x01, 0x00, 0xFE}, waiting) == FF6_EVENT_SOUND_WAIT_LIMIT + 1);
+        CHECK(framesUntilDialogue({0xF9, 0x05, 0x4B, 0x01, 0x00, 0xFE}, position) == FF6_EVENT_SOUND_WAIT_LIMIT + 1);
+    }
+    {  // changing the data of the map is handed to the game with the tiles
+        ff6::EventBits bits = freshBits();
+        test::FakeHost host;
+        play({0x73, 0x04, 0x24, 0x01, 0x02, 0x04, 0x14, 0x75, 0xFE}, host, bits);
+        CHECK(host.fieldCommands.size() == 1 && host.fieldCommands[0].op == 0x73);
+        CHECK(host.fieldCommands[0].bytes == std::vector<uint8_t>({0x04, 0x24, 0x01, 0x02, 0x04, 0x14}));
     }
     const uint8_t trigger[FF6_EVENT_TRIGGER_SIZE] = {8, 46, 0xFF, 0x38, 0x02};
     const ff6::EventTrigger decoded = ff6::decodeEventTrigger(trigger);

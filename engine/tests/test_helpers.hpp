@@ -1,8 +1,10 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
+#include "audio/audio_data.hpp"
 #include "check.hpp"
 #include "data/pack.hpp"
 #include "field/event.hpp"
@@ -133,6 +135,20 @@ public:
     }
 };
 
+// Sound double: the commands that the game sent, and the ports and previous song that the tests set.
+struct RecordingSound : ff6::Sound {
+    struct Command {
+        uint8_t command, arg1, arg2;
+    };
+    std::vector<Command> commands;
+    uint8_t ports[4] = {0, 0, 0, 0};
+    int previous = -1;
+
+    void command(uint8_t command, uint8_t arg1, uint8_t arg2) override { commands.push_back({command, arg1, arg2}); }
+    uint8_t port(int index) const override { return ports[index & 3]; }
+    int previousSong() const override { return previous; }
+};
+
 // Event host double.
 struct FakeHost : ff6::EventHost {
     std::vector<uint32_t> opened;
@@ -141,8 +157,10 @@ struct FakeHost : ff6::EventHost {
     struct MapChange {
         uint32_t map;
         int x, y, facing;
+        bool startupEvent;
     };
     std::vector<MapChange> mapChanges;
+    RecordingSound recording;
     // Object scripts and commands: what the interpreter asked for, and which objects count as busy.
     struct ScriptStart {
         int object;
@@ -170,7 +188,9 @@ struct FakeHost : ff6::EventHost {
     bool dialogueBusy() const override { return busy; }
     int dialogueChoiceCount() const override { return count; }
     int dialogueChoice() const override { return choice; }
-    void changeMap(uint32_t map, int x, int y, int facing) override { mapChanges.push_back({map, x, y, facing}); }
+    void changeMap(uint32_t map, int x, int y, int facing, bool startupEvent) override {
+        mapChanges.push_back({map, x, y, facing, startupEvent});
+    }
     bool startObjectScript(int object, uint32_t offset) override {
         scripts.push_back({object, offset});
         return supportsScripts;
@@ -185,6 +205,46 @@ struct FakeHost : ff6::EventHost {
     void fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) override {
         fieldCommands.push_back({op, std::vector<uint8_t>(bytes, bytes + size)});
     }
+    ff6::Sound& sound() override { return recording; }
 };
+
+// One instrument with a pitch multiplier of 0x0100, and songs whose first channel runs `body`.
+inline ff6::AudioData makeAudio(const std::vector<uint8_t>& body, int songCount = 1) {
+    ff6::AudioData audio;
+    ff6::Sample sample;
+    sample.freqMult = 0x0100;
+    sample.adsr1 = 0xFF;
+    sample.adsr2 = 0xE0;
+    sample.brr = {0xC3, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77};  // constant, looping
+    audio.samples.push_back(sample);
+    ff6::Song song;
+    song.samples[0] = 1;
+    const uint16_t base = 0x0100;
+    const uint16_t end = static_cast<uint16_t>(base + body.size());
+    auto put = [&](uint16_t value) {
+        song.script.push_back(static_cast<uint8_t>(value));
+        song.script.push_back(static_cast<uint8_t>(value >> 8));
+    };
+    put(base);
+    put(end);
+    for (int i = 0; i < 16; ++i) put(i % 8 == 0 ? base : end);  // channel 0 starts the body; the others are unused
+    song.script.insert(song.script.end(), body.begin(), body.end());
+    for (int i = 0; i < songCount; ++i) audio.songs.push_back(song);
+    // Sound effects: instrument 0 is the same sample; game effect 0 and system effect 0 play a quarter note.
+    audio.sfxSamples.push_back(sample);
+    audio.sfxMemory.assign(FF6_SPC_MEMORY_BYTES, 0);
+    const auto poke = [&](size_t at, const std::vector<uint8_t>& bytes) {
+        std::copy(bytes.begin(), bytes.end(), audio.sfxMemory.begin() + static_cast<std::ptrdiff_t>(at));
+    };
+    const std::vector<uint8_t> effect = {0xC4, 0x7F, 0xDC, 0x00, 0xD6, 0x05, 0x04, 0xEB};
+    poke(FF6_SFX_POINTERS, {0x00, 0x30, 0x00, 0x00});
+    poke(0x3000, effect);
+    poke(FF6_SYSTEM_SFX_TABLE, {0x00, 0x31});
+    poke(0x3100, effect);
+    return audio;
+}
+
+// The script that every test starts with: tempo 120, full volume, centered, instrument 0x20, octave 5.
+inline std::vector<uint8_t> prologue() { return {0xF0, 0x78, 0xC4, 0x7F, 0xC6, 0x40, 0xDC, 0x20, 0xD6, 0x05}; }
 
 }  // namespace test

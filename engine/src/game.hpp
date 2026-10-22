@@ -19,14 +19,15 @@
 #include "field/text.hpp"
 #include "input.hpp"
 #include "renderer.hpp"
+#include "sound.hpp"
 
 namespace ff6 {
 
 // The field: game state and the drawing of it. It reaches the graphics library only through Renderer.
 class Game : private EventHost {
 public:
-    // The renderer owns the textures created here, so it must outlive the game.
-    Game(CommonData common, std::string packDir, uint32_t startMap, Renderer& renderer);
+    // The renderer owns the textures created here, so it must outlive the game; so must the sound.
+    Game(CommonData common, std::string packDir, uint32_t startMap, Renderer& renderer, Sound& sound);
 
     // Advances the game by 1/FF6_FRAMES_PER_SECOND second.
     void tick(const InputState& input);
@@ -46,13 +47,14 @@ private:
     bool dialogueBusy() const override { return dialogue_.active(); }
     int dialogueChoiceCount() const override { return dialogue_.choiceCount(); }
     int dialogueChoice() const override { return dialogue_.choice(); }
-    void changeMap(uint32_t map, int x, int y, int facing) override;
+    void changeMap(uint32_t map, int x, int y, int facing, bool startupEvent) override;
     bool startObjectScript(int object, uint32_t offset) override;
     bool objectBusy(int object) const override;
     void objectCommand(uint8_t op, int object, uint32_t arg) override;
     void fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) override;
+    Sound& sound() override { return sound_; }
 
-    bool loadMapNow(uint32_t mapId, int x, int y, int facing);
+    bool loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEvent);
     int stripFor(int gfx, int palette);
     int stripOf(Npc& object);
     void startEvent(uint32_t offset);
@@ -61,6 +63,8 @@ private:
     void invalidateStrips();
     void checkArrival();
     void talkToNpc();
+    bool openDoor(int direction);
+    void changeMapData(const uint8_t* bytes, size_t size);
     void leaveThroughEntrance(const EntranceTarget& target);
     void composeDialogue();
     void drawSprites(bool above);
@@ -68,6 +72,7 @@ private:
     CommonData common_;
     std::string packDir_;
     Renderer& renderer_;
+    Sound& sound_;
     MapData map_;
     MapAnim anim_;
     Scroll scroll_;
