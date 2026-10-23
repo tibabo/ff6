@@ -104,11 +104,43 @@ void testEvent() {
         CHECK(play(script, host, bits) == std::vector<uint32_t>({1}));
         CHECK(host.mapChanges.size() == 1);
         CHECK(host.mapChanges[0].map == 0x20 && host.mapChanges[0].x == 0x29 && host.mapChanges[0].y == 0x26);
-        CHECK(host.mapChanges[0].facing == ff6::Down && host.mapChanges[0].startupEvent);
-        // The startup event only runs when the command asks for it.
+        CHECK(host.mapChanges[0].facing == ff6::Down && host.mapChanges[0].startupEvent && host.mapChanges[0].fadeIn);
+        CHECK(host.fieldCommands.size() == 1 && host.fieldCommands[0].op == 0x97);  // the screen fades out first
+        // The startup event only runs when the command asks for it, and the flag 0x40 keeps the screen dark.
         test::FakeHost quiet;
-        play({0x6B, 0x20, 0x20, 0x29, 0x26, 0x00}, quiet, bits);
-        CHECK(quiet.mapChanges.size() == 1 && !quiet.mapChanges[0].startupEvent);
+        play({0x6B, 0x20, 0x20, 0x29, 0x26, 0x40}, quiet, bits);
+        CHECK(quiet.mapChanges.size() == 1 && !quiet.mapChanges[0].startupEvent && !quiet.mapChanges[0].fadeIn);
+        CHECK(quiet.fieldCommands.empty());  // and this command does not fade out
+        // The first command waits for the fade out to be over.
+        const ff6::CommonData common = test::makeCommon(script);
+        ff6::EventRunner runner(common, bits);
+        test::FakeHost fading;
+        fading.fadeBusy = true;
+        runner.start(0);
+        for (int i = 0; i < 5; ++i) runner.update(fading);
+        CHECK(fading.mapChanges.empty());
+        fading.fadeBusy = false;
+        runner.update(fading);
+        CHECK(fading.mapChanges.size() == 1);
+    }
+    {  // the fades are handed to the game, and the event can wait for them
+        ff6::EventBits bits = freshBits();
+        test::FakeHost host;
+        play({0x59, 0x08, 0x5A, 0x04, 0x5B, 0x96, 0x97, 0xFE}, host, bits);
+        CHECK(host.fieldCommands.size() == 5);
+        CHECK(host.fieldCommands[0].op == 0x59 && host.fieldCommands[0].bytes == std::vector<uint8_t>({0x08}));
+        CHECK(host.fieldCommands[1].op == 0x5A && host.fieldCommands[1].bytes == std::vector<uint8_t>({0x04}));
+        CHECK(host.fieldCommands[2].op == 0x5B && host.fieldCommands[3].op == 0x96 && host.fieldCommands[4].op == 0x97);
+        const ff6::CommonData common = test::makeCommon({0x5C, 0x4B, 0x01, 0x00, 0xFE});
+        ff6::EventRunner runner(common, bits);
+        test::FakeHost waiting;
+        waiting.fadeBusy = true;
+        runner.start(0);
+        for (int i = 0; i < 5; ++i) runner.update(waiting);
+        CHECK(waiting.opened.empty());
+        waiting.fadeBusy = false;
+        runner.update(waiting);
+        CHECK(waiting.opened.size() == 1);
     }
     {  // truncated scripts and bad offsets end the event
         ff6::EventBits bits = freshBits();

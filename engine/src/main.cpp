@@ -1,15 +1,19 @@
 #include <SDL.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <exception>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "audio/audio_data.hpp"
 #include "audio/sound_program.hpp"
+#include "data/save.hpp"
 #include "game.hpp"
 #include "sdl/sdl_audio.hpp"
 #include "sdl/sdl_input.hpp"
@@ -60,20 +64,21 @@ void captureFrame(ff6::Game& game, ff6::SdlRenderer& renderer, const Capture& ca
         game.tick({FF6_NO_DIRECTION, true});
         for (int frame = 0; frame < capture.talkFrames; ++frame) game.tick({FF6_NO_DIRECTION, false});
     }
+    game.finishFade();
     game.draw();
     renderer.saveFrame(capture.path);
     std::printf("Saved %s (tile %d,%d)\n", capture.path.c_str(), game.player().tileX(), game.player().tileY());
 }
 
 // Fixed-step loop: the game advances FF6_FRAMES_PER_SECOND times per second whatever the display rate.
-void playGame(ff6::Game& game, ff6::SdlRenderer& renderer) {
+void playGame(ff6::Game& game, ff6::SdlRenderer& renderer, const std::string& savePath) {
     ff6::SdlInput input;
     const double ticksPerFrame = static_cast<double>(SDL_GetPerformanceFrequency()) / FF6_FRAMES_PER_SECOND;
     Uint64 previous = SDL_GetPerformanceCounter();
     double accumulator = 0;
     std::printf("Map %u. Arrows/WASD or controller to move, Enter/Space/A to talk,\n"
-                "F11 or Alt+Enter for fullscreen, F10 for integer scaling, Escape to quit.\n",
-                static_cast<unsigned>(game.map().id));
+                "F5 to save to %s, F11 or Alt+Enter for fullscreen, F10 for integer scaling, Escape to quit.\n",
+                static_cast<unsigned>(game.map().id), savePath.c_str());
     bool running = true;
     while (running) {
         SDL_Event event;
@@ -87,6 +92,14 @@ void playGame(ff6::Game& game, ff6::SdlRenderer& renderer) {
                     renderer.toggleFullscreen();
                 }
                 if (key == SDLK_F10) renderer.toggleIntegerScale();
+                if (key == SDLK_F5) {
+                    try {
+                        ff6::writeSave(savePath, game.saveState());
+                        std::printf("Saved the game to %s\n", savePath.c_str());
+                    } catch (const std::exception& error) {
+                        std::fprintf(stderr, "Could not save: %s\n", error.what());
+                    }
+                }
             }
         }
         const Uint64 now = SDL_GetPerformanceCounter();
@@ -101,31 +114,68 @@ void playGame(ff6::Game& game, ff6::SdlRenderer& renderer) {
     }
 }
 
-int run(const std::string& packDir, uint32_t startMap, const Capture* capture, long music) {
+// A list of characters, by name or number: "terra,locke,edgar" or "0,1,4".
+std::vector<int> parseParty(const std::string& text) {
+    static const char* const kNames[] = FF6_CHARACTER_NAMES;
+    std::vector<int> party;
+    size_t start = 0;
+    while (start <= text.size()) {
+        const size_t end = std::min(text.find(',', start), text.size());
+        std::string word = text.substr(start, end - start);
+        std::transform(word.begin(), word.end(), word.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        int id = -1;
+        for (int i = 0; i < static_cast<int>(sizeof(kNames) / sizeof(kNames[0])); ++i) {
+            if (word == kNames[i]) id = i;
+        }
+        if (id < 0 && !word.empty() && std::all_of(word.begin(), word.end(), [](unsigned char c) { return std::isdigit(c); })) {
+            id = std::stoi(word);
+        }
+        if (id < 0 || id >= FF6_CHAR_COUNT) throw std::runtime_error("invalid --party character: " + word);
+        party.push_back(id);
+        start = end + 1;
+    }
+    if (party.size() > FF6_PARTY_SIZE) throw std::runtime_error("--party takes at most 4 characters");
+    return party;
+}
+
+// Where the game begins: a map and a party, or a saved game.
+struct Start {
+    uint32_t map = FF6_DEFAULT_MAP;
+    std::vector<int> party;
+    std::unique_ptr<ff6::SaveState> save;
+};
+
+std::unique_ptr<ff6::Game> makeGame(ff6::CommonData common, const std::string& packDir, const Start& start,
+                                    ff6::SdlRenderer& renderer, ff6::Sound& sound) {
+    if (start.save) return std::make_unique<ff6::Game>(std::move(common), packDir, *start.save, renderer, sound);
+    return std::make_unique<ff6::Game>(std::move(common), packDir, start.map, renderer, sound, start.party);
+}
+
+int run(const std::string& packDir, const Start& start, const std::string& savePath, const Capture* capture, long music) {
     ff6::CommonData common = ff6::loadCommonData(packDir);
     SdlRuntime sdl;
     ff6::SdlRenderer renderer(capture != nullptr);
     if (capture) {  // no sound device for a capture
         ff6::NoSound sound;
-        ff6::Game game(std::move(common), packDir, startMap, renderer, sound);
-        if (capture->atX >= 0) game.placeParty(capture->atX, capture->atY);
-        captureFrame(game, renderer, *capture);
+        const std::unique_ptr<ff6::Game> game = makeGame(std::move(common), packDir, start, renderer, sound);
+        if (capture->atX >= 0) game->placeParty(capture->atX, capture->atY);
+        captureFrame(*game, renderer, *capture);
         return 0;
     }
     const ff6::AudioData audio = ff6::loadAudioData(packDir);
     if (music >= 0 && static_cast<size_t>(music) >= audio.songs.size()) throw std::runtime_error("invalid --music");
     ff6::SoundProgram program(audio);
     ff6::SdlAudio sound(program);
-    ff6::Game game(std::move(common), packDir, startMap, renderer, sound);
+    const std::unique_ptr<ff6::Game> game = makeGame(std::move(common), packDir, start, renderer, sound);
     if (music >= 0) sound.command(FF6_SOUND_PLAY_SONG, static_cast<uint8_t>(music), FF6_SOUND_FULL_VOLUME);  // over the song of the map
-    playGame(game, renderer);
+    playGame(*game, renderer, savePath);
     return 0;
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-    const char* usage = "Usage: %s <data-pack-dir> [--map n] [--music song] [--capture out.bmp [--at x,y] [--wait frames] [--moves URDL...] [--talk frames]]\n";
+    const char* usage = "Usage: %s <data-pack-dir> [--map n] [--party terra,locke,...] [--load save.json] [--save save.json] [--music song] [--capture out.bmp [--at x,y] [--wait frames] [--moves URDL...] [--talk frames]]\n";
     if (argc < 2) {
         std::fprintf(stderr, usage, argc > 0 ? argv[0] : "ff6");
         return 2;
@@ -134,6 +184,9 @@ int main(int argc, char** argv) {
         Capture capture;
         uint32_t startMap = FF6_DEFAULT_MAP;
         long music = -1;
+        std::vector<int> party;
+        std::string loadPath;
+        std::string savePath = FF6_SAVE_DEFAULT_FILE;
         for (int i = 2; i < argc; i += 2) {
             const std::string option = argv[i];
             if (i + 1 >= argc) throw std::runtime_error("missing value for " + option);
@@ -144,6 +197,12 @@ int main(int argc, char** argv) {
             } else if (option == "--music") {
                 music = std::stol(argv[i + 1]);
                 if (music < 0) throw std::runtime_error("invalid --music");
+            } else if (option == "--party") {
+                party = parseParty(argv[i + 1]);
+            } else if (option == "--load") {
+                loadPath = argv[i + 1];
+            } else if (option == "--save") {
+                savePath = argv[i + 1];
             } else if (option == "--capture") {
                 capture.path = argv[i + 1];
             } else if (option == "--moves") {
@@ -169,7 +228,11 @@ int main(int argc, char** argv) {
         if (capture.path.empty() && (!capture.moves.empty() || capture.talkFrames >= 0 || capture.waitFrames > 0 || capture.atX >= 0)) {
             throw std::runtime_error("--at, --wait, --moves and --talk require --capture");
         }
-        return run(argv[1], startMap, capture.path.empty() ? nullptr : &capture, music);
+        Start start;
+        start.map = startMap;
+        start.party = party;
+        if (!loadPath.empty()) start.save = std::make_unique<ff6::SaveState>(ff6::readSave(loadPath));
+        return run(argv[1], start, savePath, capture.path.empty() ? nullptr : &capture, music);
     } catch (const std::exception& error) {
         std::fprintf(stderr, "Error: %s\n", error.what());
         return 1;

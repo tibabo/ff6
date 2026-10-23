@@ -18,6 +18,10 @@ public:
     void set(int id, bool value);
     bool battle(int id) const;
     void setBattle(int id, bool value);
+    // The ids of the bits that are set, and the bits of a saved game: only those are set.
+    std::vector<int> setIds() const;
+    std::vector<int> battleSetIds() const;
+    void load(const std::vector<int>& bits, const std::vector<int>& battleFlags);
 
 private:
     std::array<uint8_t, (FF6_EVENT_BIT_COUNT + 7) / 8> bytes_{};
@@ -32,8 +36,8 @@ public:
     virtual bool dialogueBusy() const = 0;
     virtual int dialogueChoiceCount() const = 0;  // of the last dialogue
     virtual int dialogueChoice() const = 0;  // the choice the player made in it
-    // `startupEvent`: the map runs its startup event once it is loaded.
-    virtual void changeMap(uint32_t map, int x, int y, int facing, bool startupEvent) = 0;
+    // `startupEvent`: the map runs its startup event once it is loaded; `fadeIn`: the screen fades in after it.
+    virtual void changeMap(uint32_t map, int x, int y, int facing, bool startupEvent, bool fadeIn) = 0;
     // The object runs the script that starts at `offset` of the event script. False when it cannot.
     virtual bool startObjectScript(int object, uint32_t offset) = 0;
     virtual bool objectBusy(int object) const = 0;  // it runs a script or walks
@@ -43,6 +47,7 @@ public:
     // `bytes` are the command bytes after the opcode.
     virtual void fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) = 0;
     virtual Sound& sound() = 0;
+    virtual bool fading() const = 0;  // the screen fades in or out
 };
 
 struct EventTrigger {
@@ -90,6 +95,7 @@ private:
     int waitObject_ = -1;  // the object whose script the event waits for
     int waited_ = 0;  // frames spent waiting for it
     int soundWaited_ = 0;  // frames spent waiting for the sound program
+    bool mapFadeStarted_ = false;  // the screen fades out before a map is loaded
     uint32_t seed_ = 0x9E3779B9;
 };
 

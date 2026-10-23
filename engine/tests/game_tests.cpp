@@ -1,4 +1,5 @@
 #include <array>
+#include <algorithm>
 #include <cstdlib>
 #include <utility>
 #include <vector>
@@ -68,14 +69,23 @@ void testGame() {
     for (int i = 0; i < 10; ++i) game.tick(idle);
     CHECK(!game.dialogue().active());
 
-    // Leaving through the door loads another map and puts the party there.
+    // Leaving through the door fades the screen out, loads another map, and fades in again.
     ff6::Game outside(ff6::loadCommonData(pack), pack, 0x1C, renderer, sound);
     const size_t before = renderer.textures.size();
+    for (int i = 0; i < 40; ++i) outside.tick(idle);
+    CHECK(outside.brightness() == FF6_BRIGHTNESS_FULL && !outside.fading());  // the screen fades in at the start
+    int darkest = FF6_BRIGHTNESS_FULL;
     for (int tile = 0; tile < 2 && outside.map().id == 0x1C; ++tile) {
         outside.tick({ff6::Down, false});
         for (int frame = 1; frame < FF6_STEP_FRAMES; ++frame) outside.tick(idle);
+        darkest = std::min(darkest, outside.brightness());
+    }
+    for (int i = 0; i < 60; ++i) {
+        outside.tick(idle);
+        darkest = std::min(darkest, outside.brightness());
     }
     CHECK(outside.map().id != 0x1C && renderer.textures.size() >= before);
+    CHECK(darkest <= 2 * FF6_BRIGHTNESS_STEP && outside.brightness() == FF6_BRIGHTNESS_FULL);
 
     // The npcs of the Moogle cave wander about by themselves, whatever the party does.
     ff6::Game cave(ff6::loadCommonData(pack), pack, 52, renderer, sound);
@@ -125,11 +135,16 @@ void testGame() {
                   doorSound.commands[0].arg1 == FF6_SFX_DOOR_OPEN);
         }
     }
-    {  // sleeping at the inn plays another song, and the song of the town comes back once it is over
+    // Sleeping at the inn plays another song, and the song of the town comes back once it is over; with Terra alone and
+    // with a party of four.
+    for (const std::vector<int>& party : {std::vector<int>{}, std::vector<int>{0, 1, 4, 5}}) {
         const ff6::AudioData audio = ff6::loadAudioData(pack);
         ff6::SoundProgram program(audio);
         LoggedSound logged(program);
-        ff6::Game inn(ff6::loadCommonData(pack), pack, 0x1C, renderer, logged);
+        ff6::Game inn(ff6::loadCommonData(pack), pack, 0x1C, renderer, logged, party);
+        for (int object = 0x31; object < 0x35; ++object) {
+            CHECK((inn.objects().object(object) != nullptr) == (party.size() == 4 || object == 0x31));
+        }
         std::array<int16_t, 2 * 1024> samples{};
         bool doorOpened = false;
         const auto step = [&](const ff6::InputState& input) {
@@ -153,5 +168,39 @@ void testGame() {
         CHECK(commands == expected);  // the town song, a fade out, Nighty Night, then the town song fading in
         CHECK(doorOpened);  // the event opens the door of the room, with the tiles of the open door
         CHECK(program.currentSong() == 0x17);
+    }
+
+    {  // the command that moves the party loads the same map again: the party is elsewhere and the screen fades in
+        ff6::CommonData data = ff6::loadCommonData(pack);
+        const uint32_t startup = ff6::loadMap(pack, 0x1C).startupEvent;
+        const std::vector<uint8_t> script = {FF6_EVENT_MOVE_PARTY, 6, 44, 0xFE};
+        std::copy(script.begin(), script.end(), data.eventScript.begin() + startup);
+        ff6::Game moved(std::move(data), pack, 0x1C, renderer, sound);
+        for (int i = 0; i < 60; ++i) moved.tick(idle);
+        CHECK(moved.map().id == 0x1C && moved.player().tileX() == 6 && moved.player().tileY() == 44);
+        CHECK(moved.objects().npcs().size() == 1 && moved.brightness() == FF6_BRIGHTNESS_FULL);
+        moved.tick({ff6::Right, false});  // the party is in the hands of the player again
+        CHECK(moved.player().moving());
+    }
+
+    {  // a saved game goes on with the same map, party and story, also after it went through JSON
+        ff6::Game origin(ff6::loadCommonData(pack), pack, 0x1C, renderer, sound, {0, 1, 4, 5});
+        for (int i = 0; i < 40; ++i) origin.tick(idle);
+        origin.tick(up);
+        for (int frame = 1; frame < FF6_STEP_FRAMES; ++frame) origin.tick(idle);
+        const ff6::SaveState saved = ff6::saveFromJson(ff6::saveToJson(origin.saveState()));
+        CHECK(saved.map == 0x1C && saved.x == 8 && saved.y == 44 && saved.activeParty == 1);
+        ff6::Game restored(ff6::loadCommonData(pack), pack, saved, renderer, sound);
+        for (int i = 0; i < 40; ++i) restored.tick(idle);
+        CHECK(restored.map().id == 0x1C && restored.player().tileX() == 8 && restored.player().tileY() == 44);
+        CHECK(restored.objects().object(0x34) != nullptr);  // the whole party is there
+        const ff6::SaveState again = restored.saveState();
+        CHECK(again.eventBits == saved.eventBits && again.battleFlags == saved.battleFlags);
+        CHECK(again.activeParty == saved.activeParty && again.spritePalettes == saved.spritePalettes);
+        for (size_t i = 0; i < saved.characters.size(); ++i) {
+            CHECK(again.characters[i].enabled == saved.characters[i].enabled);
+            CHECK(again.characters[i].party == saved.characters[i].party && again.characters[i].slot == saved.characters[i].slot);
+            CHECK(again.characters[i].gfx == saved.characters[i].gfx && again.characters[i].palette == saved.characters[i].palette);
+        }
     }
 }

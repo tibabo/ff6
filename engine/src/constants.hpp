@@ -249,12 +249,22 @@
 #define FF6_FIRST_NPC_OBJECT 0x10  // objects 0x10 to 0x2F are the npcs of the map
 #define FF6_LAST_NPC_OBJECT 0x2F
 #define FF6_CHAR_COUNT 16  // objects 0x00 to 0x0F are the characters
+#define FF6_CHARACTER_NAMES \
+    {"terra", "locke", "cyan", "shadow", "edgar", "sabin", "celes", "strago", "relm", "setzer", "mog", "gau", "gogo", "umaro", "leo", "banon"}
+// The sprite palette slot that the events give to each character when it joins (the slot of the commands 0x43 that
+// come with a command 0x37 for the same character).
+#define FF6_CHARACTER_PALETTES {2, 1, 4, 4, 0, 0, 0, 3, 3, 4, 5, 3, 3, 5, 1, 3}
 #define FF6_OBJ_CAMERA 0x30
 #define FF6_OBJ_PARTY_FIRST 0x31  // objects 0x31 to 0x34 are the characters of the active party
 #define FF6_OBJ_PARTY_LAST 0x34
 #define FF6_PARTY_SIZE 4
 #define FF6_PARTY_COUNT 8  // party numbers 1 to 7, 0 for no party
 #define FF6_SPRITE_PALETTE_SLOTS 8
+#define FF6_SPRITE_GFX_TOTAL 165  // map sprites and palettes that the game has
+#define FF6_SPRITE_PALETTE_TOTAL 60
+#define FF6_SAVE_VERSION 1
+#define FF6_SAVE_DEFAULT_FILE "ff6-save.json"
+#define FF6_MAX_TILE 255
 #define FF6_OBJ_SUBPIXELS 256  // object positions are in 1/256 pixel
 #define FF6_OBJ_TILE_SUBPIXELS (FF6_TILE_SIZE * FF6_OBJ_SUBPIXELS)
 #define FF6_OBJ_ACTION_PERIOD 4  // every object acts once every 4 frames, 6 objects per frame
@@ -372,6 +382,19 @@
 #define FF6_EVENT_OBJECT_WAIT_LIMIT 1800  // frames: an event gives up waiting for an object after this long
 #define FF6_EVENT_SOUND_WAIT_LIMIT 3600  // and for the sound program
 #define FF6_EVENT_MAP_STARTUP_FLAG 0x80  // in the last byte of the load map commands
+#define FF6_EVENT_MAP_NO_FADE_IN_FLAG 0x40
+#define FF6_EVENT_FADE_IN_SPEED 0x59  // speed
+#define FF6_EVENT_FADE_OUT_SPEED 0x5A  // speed
+#define FF6_EVENT_FADE_STOP 0x5B
+#define FF6_EVENT_FADE_WAIT 0x5C
+#define FF6_EVENT_FADE_IN 0x96
+#define FF6_EVENT_FADE_OUT 0x97
+#define FF6_BRIGHTNESS_FULL 0xF0  // the screen brightness is a byte that the PPU gets as its high nibble
+#define FF6_BRIGHTNESS_STEP 0x10  // the speed of a fade in or out, and where a fade in starts
+#define FF6_FADE_OUT_FLAG 0x80
+#define FF6_FADE_SPEED_MASK 0x1F
+#define FF6_BRIGHTNESS_SHIFT 4
+#define FF6_BRIGHTNESS_LEVELS 16
 #define FF6_EVENT_PLAY_SONG_VOLUME 0xEF  // song, volume
 #define FF6_EVENT_PLAY_SONG 0xF0
 #define FF6_EVENT_PLAY_SFX 0xF4  // sound effect

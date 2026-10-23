@@ -102,4 +102,25 @@ void testObjParty() {
         scene.run(100);
         CHECK(scene.npc().tileX() == 4);
     }
+    {  // a game can start with a party of its own: the characters exist, the first one leads and shows
+        test::ObjScene scene({}, {});
+        ff6::Objects& objects = scene.objects;
+        objects.resetCharacters();
+        objects.startParty({4, 1, 5, 13, 2});  // a fifth character does not fit
+        objects.enterMap(objects.mapId(), 6, 7, ff6::Right);
+        CHECK(objects.lead() == &objects.characters()[4] && objects.lead()->visible && objects.lead()->posX == 6 * kTile);
+        CHECK((objects.partySlots() == std::array<int, FF6_PARTY_SIZE>({4, 1, 5, 13})));
+        CHECK(objects.characters()[0].party == 0 && !objects.characters()[0].enabled && objects.characters()[2].party == 0);
+        for (int object = FF6_OBJ_PARTY_FIRST; object < FF6_OBJ_PARTY_FIRST + FF6_PARTY_SIZE; ++object) {
+            CHECK(objects.object(object) != nullptr && objects.acts(*objects.object(object)));
+        }
+        CHECK(!objects.characters()[1].visible && objects.characters()[1].posX == 6 * kTile);  // they wait on its tile
+    }
+    {  // each character has the sprite palette that the events give it
+        test::ObjScene scene({}, {});
+        scene.objects.resetCharacters();
+        const auto& characters = scene.objects.characters();
+        CHECK(characters[0].prop.palette == 2 && characters[1].prop.palette == 1 && characters[4].prop.palette == 0);
+        CHECK(characters[3].prop.palette == 4 && characters[10].prop.palette == 5 && characters[7].prop.palette == 3);
+    }
 }

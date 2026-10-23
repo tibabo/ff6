@@ -144,7 +144,7 @@ node ff6.mjs build-pack --rom "Final Fantasy 6 [US].smc" --out output/pack
 cmake -S engine -B build/engine -DCMAKE_BUILD_TYPE=Release
 cmake --build build/engine --config Release
 FF6_PACK="$PWD/output/pack" ctest --test-dir build/engine -C Release
-./build/engine/ff6 output/pack [--map 20] [--music 22]
+./build/engine/ff6 output/pack [--map 20] [--party terra,locke] [--music 22] [--load ff6-save.json] [--save ff6-save.json]
 ```
 
 Sous Windows, l'executable est `build\engine\Release\ff6.exe`, et `SDL2.dll`
@@ -166,6 +166,7 @@ Controles :
 | Deplacement | Fleches / WASD | Croix ou stick gauche |
 | Parler / valider | Entree / Espace | A (bouton du bas) |
 | Echelle entiere | F10 | |
+| Sauvegarder | F5 | |
 | Plein ecran | F11 / Alt+Entree | |
 | Quitter | Echap | |
 
@@ -197,17 +198,33 @@ Limites actuelles :
   fin, les changements de carte (l'evenement continue une fois la carte
   chargee), le groupe (composition, activation, carte,
   position), le verrouillage de l'ecran, les palettes de sprites et les
-  modifications de tuiles du decor (portes ouvertes par un evenement). Un script
+  modifications de tuiles du decor (portes ouvertes par un evenement) et les
+  fondus (entrees et sorties de carte, commandes 0x59 a 0x5C, 0x96 et 0x97 ;
+  l'ecran est noir tant que la carte n'a pas fini de se charger). Un script
   d'objet absent (desactive, ou personnage sur une autre carte) est saute ;
   une attente d'objet est abandonnee apres 30 secondes. Les autres commandes
-  connues sont ignorees (argent, fondus) et une
+  connues sont ignorees (argent) et une
   commande inconnue termine l'evenement avec un message sur la sortie d'erreur.
 - Personnages : le chef du groupe est un objet comme les autres, pilote par
   le joueur hors evenement et par script pendant un evenement ; il retrouve
   ensuite le mouvement prevu (commandes 0x3A et 0x3B). Seule Terra existe au
-  depart ; les palettes par defaut des autres personnages sont approximatives,
-  l'etat de sauvegarde n'est pas charge et le deplacement de groupe (0x7E) ne
-  recharge pas la carte.
+  depart, sauf avec `--party terra,locke,edgar,sabin` (jusqu'a quatre
+  personnages, par nom ou par numero) : les objets des places du groupe existent
+  alors et seul le chef est visible. La palette par defaut de chaque personnage
+  est celle que les evenements du jeu lui donnent quand il rejoint le groupe.
+  L'etat de sauvegarde par defaut est reconstruit par le moteur ; le
+  deplacement de groupe (0x7E) place le groupe, noircit l'ecran et le
+  rallume sans recharger la carte : PNJ, portes et tuiles restent comme ils sont.
+- Sauvegarde : le moteur a son propre format, un fichier JSON (pas de SRAM
+  emulee). F5 ecrit `ff6-save.json` (ou le fichier de `--save`) et
+  `--load fichier` reprend la partie : carte, case et direction du groupe,
+  groupe actif, chaque personnage (present, visible, groupe, place, carte,
+  graphisme, palette, case, direction), bits d'evenements et de combat,
+  palettes de sprites et carte parente des maisons. Le fichier est versionne
+  (`version`) et verifie a la lecture : une valeur qui n'existe pas donne une
+  erreur claire. L'evenement de demarrage de la carte s'execute au
+  chargement, comme dans le jeu ; le morceau en cours, l'etat des PNJ et les
+  portes ouvertes ne sont pas sauves.
 - Audio : le pack contient les 63 echantillons et les 85 musiques. Le moteur
   decode les echantillons, interprete les scripts de musique (8 voix, tempo,
   volumes, panoramique, vibrato, tremolo, glissando, boucles, liaisons, echo,
@@ -284,9 +301,10 @@ genere par `build-pack`, pour leurs tests sur les vraies donnees.
 
 - Reconstruction binaire de la ROM via le desassemblage de reference.
 - Cartes du monde, animation de palette et autres textes.
-- Commandes d'evenements restantes (fondus, defilements, changements de
-  decor).
-- Portage natif des menus, combats et sauvegardes.
+- Commandes d'evenements restantes (defilements, changements de decor
+  anime, eclairs, tremblements, filtres de couleur, mosaique).
+- Portage natif des menus et combats ; sauvegarde du jeu complet (argent,
+  objets, statistiques).
 - Audio natif sans emulation du SPC700 : mode mono.
 - Interface adaptable aux ecrans larges et remappage des commandes.
 - Gestion des graphismes HD.

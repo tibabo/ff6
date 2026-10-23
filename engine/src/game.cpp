@@ -46,8 +46,18 @@ struct Drawable {
 
 }  // namespace
 
-Game::Game(CommonData common, std::string packDir, uint32_t startMap, Renderer& renderer, Sound& sound)
+Game::Game(CommonData common, std::string packDir, uint32_t startMap, Renderer& renderer, Sound& sound,
+           const std::vector<int>& party)
     : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_) {
+    initialize(startMap, party, nullptr);
+}
+
+Game::Game(CommonData common, std::string packDir, const SaveState& save, Renderer& renderer, Sound& sound)
+    : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_) {
+    initialize(static_cast<uint32_t>(save.map), {}, &save);
+}
+
+void Game::initialize(uint32_t startMap, const std::vector<int>& party, const SaveState* save) {
     bits_.init(common_);
     const size_t screenBytes = static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL;
     for (auto& layer : layerPixels_) {
@@ -59,7 +69,75 @@ Game::Game(CommonData common, std::string packDir, uint32_t startMap, Renderer& 
     screen_ = renderer_.createTexture(FF6_SCREEN_WIDTH, FF6_SCREEN_HEIGHT, nullptr, TextureUsage::Dynamic);
     overlay_ = renderer_.createTexture(FF6_SCREEN_WIDTH, FF6_SCREEN_HEIGHT, nullptr, TextureUsage::Dynamic);
     objects_.resetCharacters();
-    if (!loadMapNow(startMap, -1, -1, Down, true)) throw std::runtime_error("the start map is not in the data pack");
+    if (!party.empty()) objects_.startParty(party);
+    int x = -1, y = -1, facing = Down;
+    if (save) {  // a saved game goes on where it was, and its startup event runs again like in the game
+        restore(*save);
+        x = save->x;
+        y = save->y;
+        facing = save->facing;
+    }
+    if (!loadMapNow(startMap, x, y, facing, true, true)) throw std::runtime_error("the start map is not in the data pack");
+}
+
+// The state of the story and of the characters, before the map is loaded.
+void Game::restore(const SaveState& save) {
+    bits_.load(save.eventBits, save.battleFlags);
+    std::array<Npc, FF6_CHAR_COUNT>& characters = objects_.characters();
+    for (size_t i = 0; i < characters.size(); ++i) {
+        const SaveCharacter& saved = save.characters[i];
+        Npc& character = characters[i];
+        character.enabled = saved.enabled;
+        character.visible = saved.visible;
+        character.party = saved.party;
+        character.partySlot = saved.slot;
+        character.map = saved.map;
+        character.prop.gfx = saved.gfx;
+        character.prop.palette = saved.palette;
+        character.posX = saved.x * FF6_OBJ_TILE_SUBPIXELS;
+        character.posY = saved.y * FF6_OBJ_TILE_SUBPIXELS;
+        character.facing = saved.facing;
+        character.frame = stopFrame(saved.facing);
+    }
+    objects_.restoreParty(save.activeParty);
+    for (size_t i = 0; i < spritePalette_.size(); ++i) spritePalette_[i] = save.spritePalettes[i];
+    hasParent_ = save.hasParent;
+    parentMap_ = static_cast<uint32_t>(save.parentMap);
+    parentX_ = save.parentX;
+    parentY_ = save.parentY;
+    parentFacing_ = save.parentFacing;
+}
+
+SaveState Game::saveState() const {
+    SaveState save;
+    save.map = static_cast<int>(map_.id);
+    save.x = player_.tileX();
+    save.y = player_.tileY();
+    save.facing = player_.facing();
+    save.activeParty = objects_.activeParty();
+    for (size_t i = 0; i < save.characters.size(); ++i) {
+        const Npc& character = objects_.characters()[i];
+        SaveCharacter& saved = save.characters[i];
+        saved.enabled = character.enabled;
+        saved.visible = character.visible;
+        saved.party = character.party;
+        saved.slot = character.partySlot;
+        saved.map = character.map;
+        saved.gfx = character.prop.gfx;
+        saved.palette = character.prop.palette;
+        saved.x = std::max(0, std::min(character.tileX(), FF6_MAX_TILE));
+        saved.y = std::max(0, std::min(character.tileY(), FF6_MAX_TILE));
+        saved.facing = character.facing;
+    }
+    save.eventBits = bits_.setIds();
+    save.battleFlags = bits_.battleSetIds();
+    for (size_t i = 0; i < spritePalette_.size(); ++i) save.spritePalettes[i] = spritePalette_[i];
+    save.hasParent = hasParent_;
+    save.parentMap = static_cast<int>(parentMap_);
+    save.parentX = parentX_;
+    save.parentY = parentY_;
+    save.parentFacing = parentFacing_;
+    return save;
 }
 
 int Game::stripFor(int gfx, int palette) {
@@ -115,7 +193,7 @@ void Game::startEvent(uint32_t offset) {
     event_.start(offset);
 }
 
-bool Game::loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEvent) {
+bool Game::loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEvent, bool fadeIn) {
     if (mapId < FF6_FIRST_FIELD_MAP || !mapExists(packDir_, mapId)) {
         std::fprintf(stderr, "map %u is not available in the data pack\n", static_cast<unsigned>(mapId));
         return false;
@@ -156,11 +234,25 @@ bool Game::loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEven
     // The startup event, which sets the music among other things, runs with the party out of the user's hands; in an
     // event, it runs before the rest of that event.
     const std::vector<uint8_t>& script = common_.eventScript;
+    bool startupStarted = false;
     if (startupEvent && map_.startupEvent < script.size() && script[map_.startupEvent] != FF6_EVENT_RETURN) {
+        startupStarted = !inEvent;
         if (inEvent) {
             event_.call(map_.startupEvent);
         } else {
             startEvent(map_.startupEvent);
+        }
+    }
+    // The screen is dark until the map is loaded; it fades in after the startup event, which the event that loads
+    // the map does not wait for.
+    brightness_ = 0;
+    fade_ = 0;
+    fadeInPending_ = false;
+    if (fadeIn) {
+        if (startupStarted) {
+            fadeInPending_ = true;
+        } else {
+            startFade(true, FF6_BRIGHTNESS_STEP);
         }
     }
     return true;
@@ -170,8 +262,44 @@ void Game::openDialogue(uint32_t id, uint16_t flags) {
     dialogue_.open(common_.dialogue(id), common_.fontWidths, (flags & FF6_DLG_FLAG_BOTTOM) != 0);
 }
 
-void Game::changeMap(uint32_t map, int x, int y, int facing, bool startupEvent) {
-    loadMapNow(map, x, y, facing, startupEvent);
+void Game::changeMap(uint32_t map, int x, int y, int facing, bool startupEvent, bool fadeIn) {
+    loadMapNow(map, x, y, facing, startupEvent, fadeIn);
+}
+
+// FadeIn and FadeOut: a fade in starts from one step of brightness, a fade out from full brightness.
+void Game::startFade(bool in, int speed) {
+    fade_ = in ? speed : (speed | FF6_FADE_OUT_FLAG);
+    brightness_ = in ? FF6_BRIGHTNESS_STEP : FF6_BRIGHTNESS_FULL;
+}
+
+// UpdateBrightness, every frame: the fades move the brightness, and a fade ends when it gets to its end.
+void Game::updateBrightness() {
+    if (fade_ & FF6_FADE_OUT_FLAG) {
+        if (brightness_ == 0) {
+            fade_ = 0;
+        } else {
+            brightness_ = (brightness_ - (fade_ & FF6_FADE_SPEED_MASK)) & 0xFF;
+        }
+    } else if ((brightness_ & FF6_BRIGHTNESS_FULL) == FF6_BRIGHTNESS_FULL) {
+        fade_ = 0;
+    } else {
+        brightness_ = (brightness_ + (fade_ & FF6_FADE_SPEED_MASK)) & 0xFF;
+    }
+}
+
+void Game::finishFade() {
+    brightness_ = FF6_BRIGHTNESS_FULL;
+    fade_ = 0;
+    fadeInPending_ = false;
+}
+
+// The brightness of the PPU: the colors are scaled by the level plus one, out of 16.
+void Game::applyBrightness(std::vector<uint8_t>& image) const {
+    const int level = brightness_ >> FF6_BRIGHTNESS_SHIFT;
+    if (level >= FF6_BRIGHTNESS_LEVELS - 1) return;
+    for (size_t i = 0; i < image.size(); i += FF6_BYTES_PER_PIXEL) {
+        for (size_t c = 0; c < FF6_ALPHA_OFFSET; ++c) image[i + c] = static_cast<uint8_t>(image[i + c] * (level + 1) / FF6_BRIGHTNESS_LEVELS);
+    }
 }
 
 // Characters, npcs, the camera and the party's places all run scripts, if the object is there to run it.
@@ -241,11 +369,26 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
                                  (byteAt(1) | (byteAt(2) << 8)) & FF6_ENTRANCE_MAP_MASK);
             break;
         case FF6_EVENT_MOVE_PARTY:
-            placeParty(byteAt(0), byteAt(1));
+            moveParty(byteAt(0), byteAt(1));
             break;
         case FF6_EVENT_MAP_DATA_NOW:
         case FF6_EVENT_MAP_DATA:  // x, layer and y, width, height, then the tiles
             changeMapData(bytes, size);
+            break;
+        case FF6_EVENT_FADE_IN:
+            startFade(true, FF6_BRIGHTNESS_STEP);
+            break;
+        case FF6_EVENT_FADE_OUT:
+            startFade(false, FF6_BRIGHTNESS_STEP);
+            break;
+        case FF6_EVENT_FADE_IN_SPEED:
+            startFade(true, byteAt(0));
+            break;
+        case FF6_EVENT_FADE_OUT_SPEED:
+            startFade(false, byteAt(0));
+            break;
+        case FF6_EVENT_FADE_STOP:
+            fade_ = 0;
             break;
         default:
             break;
@@ -272,7 +415,7 @@ void Game::leaveThroughEntrance(const EntranceTarget& target) {
     if (target.toParent) {
         if (!hasParent_) return;
         const int facing = (parentFacing_ + 2) % FF6_DIRECTION_COUNT;  // step back out of the door
-        if (loadMapNow(parentMap_, parentX_ + kDeltaX[facing], parentY_ + kDeltaY[facing], facing, true)) hasParent_ = false;
+        if (loadMapNow(parentMap_, parentX_ + kDeltaX[facing], parentY_ + kDeltaY[facing], facing, true, true)) hasParent_ = false;
         return;
     }
     const bool hadParent = hasParent_;
@@ -285,7 +428,7 @@ void Game::leaveThroughEntrance(const EntranceTarget& target) {
         parentY_ = player_.tileY();
         parentFacing_ = player_.facing();
     }
-    if (!loadMapNow(target.map, target.x, target.y, target.facing, true) && target.setParent) {
+    if (!loadMapNow(target.map, target.x, target.y, target.facing, true, true) && target.setParent) {
         hasParent_ = hadParent;
         parentMap_ = previousMap;
         parentX_ = previousX;
@@ -311,7 +454,11 @@ void Game::checkArrival() {
         }
     }
     EntranceTarget target;
-    if (armed_ && checkEntrances(map_, x, y, &target)) leaveThroughEntrance(target);
+    if (armed_ && checkEntrances(map_, x, y, &target) && !leaving_) {  // the screen fades out, then the map is loaded
+        leaving_ = true;
+        leaveTarget_ = target;
+        startFade(false, FF6_BRIGHTNESS_STEP);
+    }
 }
 
 // Port of CheckNPCs: the confirm button talks to the npc that the party faces.
@@ -363,10 +510,19 @@ bool Game::openDoor(int direction) {
 void Game::tick(const InputState& input) {
     ++frame_;
     anim_.update(map_, frame_);
+    updateBrightness();
+    if (leaving_ && !fading()) {
+        leaving_ = false;
+        leaveThroughEntrance(leaveTarget_);
+    }
     // The press that closes a dialogue or ends an event must not also start a new conversation.
     const bool wasBusy = dialogue_.active() || event_.running();
     if (dialogue_.active()) dialogue_.update(input.confirm, input.direction);
     event_.update(*this);
+    if (fadeInPending_ && !event_.running()) {
+        fadeInPending_ = false;
+        startFade(true, FF6_BRIGHTNESS_STEP);
+    }
     Npc* lead = objects_.lead();
     const bool eventRunning = event_.running();
     if (eventWasRunning_ && !eventRunning) restorePending_ = true;
@@ -379,8 +535,8 @@ void Game::tick(const InputState& input) {
     }
     const bool userLead = !lead || lead->movement == FF6_OBJ_MOVE_USER;
     const bool playerActs = (!eventRunning && !dialogue_.active() && userLead) || player_.moving();
-    if (!eventRunning && !dialogue_.active() && userLead) {
-        if (input.confirm && !wasBusy && !player_.moving()) {
+    if (!eventRunning && !dialogue_.active() && userLead && !leaving_) {
+        if (input.confirm && !wasBusy && !player_.moving() && brightness_ == FF6_BRIGHTNESS_FULL) {
             talkToNpc();
         } else if (!openDoor(input.direction)) {
             player_.update(map_, input.direction, objects_);
@@ -415,6 +571,16 @@ void Game::placeParty(int tileX, int tileY) {
     lastTileY_ = tileY;
     armed_ = false;
     followScroll();
+}
+
+// Event command 0x7E: the same map is loaded again with the party elsewhere; the npcs, the doors and the music stay.
+void Game::moveParty(int tileX, int tileY) {
+    placeParty(tileX, tileY);
+    scroll_.init();
+    followScroll();
+    brightness_ = 0;
+    fadeInPending_ = false;
+    startFade(true, FF6_BRIGHTNESS_STEP);
 }
 
 void Game::composeDialogue() {
@@ -517,10 +683,12 @@ void Game::draw() {
     composeScreen(decodeColorMath(map_.colorMath), backdrop, layers, sizeof(layers) / sizeof(layers[0]),
                   screenPixels_.data());
     renderer_.beginFrame();
+    applyBrightness(screenPixels_);
     renderer_.updateTexture(screen_, screenPixels_.data());
     renderer_.draw(screen_, kScreen, kScreen);
     if (dialogue_.active()) {
         composeDialogue();
+        applyBrightness(overlayPixels_);
         renderer_.updateTexture(overlay_, overlayPixels_.data());
         renderer_.draw(overlay_, kScreen, kScreen);
     }

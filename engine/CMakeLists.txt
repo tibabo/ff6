@@ -7,7 +7,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Game data and field rules, one source per file of the disassembly (src/field, src/event, src/data): no graphics library.
 add_library(ff6_core STATIC
+  src/data/json.cpp
   src/data/pack.cpp
+  src/data/save.cpp
   src/field/anim.cpp
   src/field/bg.cpp
   src/field/color.cpp
@@ -54,6 +56,7 @@ if(BUILD_TESTING)
     tests/main.cpp
     tests/game_tests.cpp
     tests/data/pack_tests.cpp
+    tests/data/save_tests.cpp
     tests/audio/audio_data_tests.cpp
     tests/audio/akao_tests.cpp
     tests/audio/brr_tests.cpp

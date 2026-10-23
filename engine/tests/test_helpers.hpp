@@ -157,9 +157,10 @@ struct FakeHost : ff6::EventHost {
     struct MapChange {
         uint32_t map;
         int x, y, facing;
-        bool startupEvent;
+        bool startupEvent, fadeIn;
     };
     std::vector<MapChange> mapChanges;
+    bool fadeBusy = false;
     RecordingSound recording;
     // Object scripts and commands: what the interpreter asked for, and which objects count as busy.
     struct ScriptStart {
@@ -188,9 +189,10 @@ struct FakeHost : ff6::EventHost {
     bool dialogueBusy() const override { return busy; }
     int dialogueChoiceCount() const override { return count; }
     int dialogueChoice() const override { return choice; }
-    void changeMap(uint32_t map, int x, int y, int facing, bool startupEvent) override {
-        mapChanges.push_back({map, x, y, facing, startupEvent});
+    void changeMap(uint32_t map, int x, int y, int facing, bool startupEvent, bool fadeIn) override {
+        mapChanges.push_back({map, x, y, facing, startupEvent, fadeIn});
     }
+    bool fading() const override { return fadeBusy; }
     bool startObjectScript(int object, uint32_t offset) override {
         scripts.push_back({object, offset});
         return supportsScripts;

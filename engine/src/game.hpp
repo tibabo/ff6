@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "data/pack.hpp"
+#include "data/save.hpp"
 #include "field/anim.hpp"
 #include "field/entrance.hpp"
 #include "field/event.hpp"
@@ -26,8 +27,14 @@ namespace ff6 {
 // The field: game state and the drawing of it. It reaches the graphics library only through Renderer.
 class Game : private EventHost {
 public:
-    // The renderer owns the textures created here, so it must outlive the game; so must the sound.
-    Game(CommonData common, std::string packDir, uint32_t startMap, Renderer& renderer, Sound& sound);
+    // The renderer owns the textures created here, so it must outlive the game; so must the sound. `party` lists the
+    // characters that the game starts with, Terra alone when it is empty.
+    Game(CommonData common, std::string packDir, uint32_t startMap, Renderer& renderer, Sound& sound,
+         const std::vector<int>& party = {});
+    // A game that goes on where a save left it.
+    Game(CommonData common, std::string packDir, const SaveState& save, Renderer& renderer, Sound& sound);
+    // What is needed to go on from here: see SaveState.
+    SaveState saveState() const;
 
     // Advances the game by 1/FF6_FRAMES_PER_SECOND second.
     void tick(const InputState& input);
@@ -40,6 +47,11 @@ public:
     const Dialogue& dialogue() const { return dialogue_; }
     const Objects& objects() const { return objects_; }
     const EventBits& eventBits() const { return bits_; }
+    // The screen brightness, FF6_BRIGHTNESS_FULL when it is lit; the fades move it.
+    int brightness() const { return brightness_; }
+    bool fading() const override { return fade_ != 0; }
+    // Ends the fades at once, for captures.
+    void finishFade();
 
 private:
     // EventHost
@@ -47,14 +59,19 @@ private:
     bool dialogueBusy() const override { return dialogue_.active(); }
     int dialogueChoiceCount() const override { return dialogue_.choiceCount(); }
     int dialogueChoice() const override { return dialogue_.choice(); }
-    void changeMap(uint32_t map, int x, int y, int facing, bool startupEvent) override;
+    void changeMap(uint32_t map, int x, int y, int facing, bool startupEvent, bool fadeIn) override;
     bool startObjectScript(int object, uint32_t offset) override;
     bool objectBusy(int object) const override;
     void objectCommand(uint8_t op, int object, uint32_t arg) override;
     void fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) override;
     Sound& sound() override { return sound_; }
 
-    bool loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEvent);
+    bool loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEvent, bool fadeIn);
+    void initialize(uint32_t startMap, const std::vector<int>& party, const SaveState* save);
+    void restore(const SaveState& save);
+    void startFade(bool in, int speed);
+    void updateBrightness();
+    void applyBrightness(std::vector<uint8_t>& image) const;
     int stripFor(int gfx, int palette);
     int stripOf(Npc& object);
     void startEvent(uint32_t offset);
@@ -65,6 +82,7 @@ private:
     void talkToNpc();
     bool openDoor(int direction);
     void changeMapData(const uint8_t* bytes, size_t size);
+    void moveParty(int tileX, int tileY);
     void leaveThroughEntrance(const EntranceTarget& target);
     void composeDialogue();
     void drawSprites(bool above);
@@ -93,6 +111,11 @@ private:
     bool hasParent_ = false;
     uint32_t parentMap_ = 0;
     int parentX_ = 0, parentY_ = 0, parentFacing_ = 0;
+    int brightness_ = FF6_BRIGHTNESS_FULL;
+    int fade_ = 0;  // 0 when no fade runs, else the speed, with FF6_FADE_OUT_FLAG for a fade out
+    bool fadeInPending_ = false;  // the screen fades in once the startup event of the map is over
+    bool leaving_ = false;  // the screen fades out before the party goes through an entrance
+    EntranceTarget leaveTarget_;
 
     TextureId screen_ = 0, overlay_ = 0;  // the field with its color math, and the dialogue window over it
     std::array<std::array<std::vector<uint8_t>, 2>, FF6_LAYER_COUNT> layerPixels_;  // [layer][low, high priority]

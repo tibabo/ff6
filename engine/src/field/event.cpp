@@ -52,6 +52,29 @@ void EventBits::setBattle(int id, bool value) {
     byte = value ? static_cast<uint8_t>(byte | mask) : static_cast<uint8_t>(byte & ~mask);
 }
 
+std::vector<int> EventBits::setIds() const {
+    std::vector<int> ids;
+    for (int id = 0; id < FF6_EVENT_BIT_COUNT; ++id) {
+        if (get(id)) ids.push_back(id);
+    }
+    return ids;
+}
+
+std::vector<int> EventBits::battleSetIds() const {
+    std::vector<int> ids;
+    for (int id = 0; id < FF6_BATTLE_FLAG_BYTES * 8; ++id) {
+        if (battle(id)) ids.push_back(id);
+    }
+    return ids;
+}
+
+void EventBits::load(const std::vector<int>& bits, const std::vector<int>& battleFlags) {
+    bytes_.fill(0);
+    battle_.fill(0);
+    for (const int id : bits) set(id, true);
+    for (const int id : battleFlags) setBattle(id, true);
+}
+
 EventTrigger decodeEventTrigger(const uint8_t* bytes) {
     EventTrigger trigger;
     trigger.x = bytes[0];
@@ -67,6 +90,7 @@ void EventRunner::start(uint32_t offset) {
     waitObject_ = -1;
     waited_ = 0;
     soundWaited_ = 0;
+    mapFadeStarted_ = false;
     stack_.clear();
     stack_.push_back({kEndOfEvent, offset, 1});  // returning from the event itself ends it
 }
@@ -82,6 +106,7 @@ void EventRunner::stop() {
     waitObject_ = -1;
     waited_ = 0;
     soundWaited_ = 0;
+    mapFadeStarted_ = false;
 }
 
 bool EventRunner::pushFrame(uint32_t returnPc, uint32_t loopStart, int count) {
@@ -164,13 +189,23 @@ bool EventRunner::step(EventHost& host) {
         return true;
     }
     if (op >= FF6_EVENT_LOAD_MAP_FIRST && op <= FF6_EVENT_LOAD_MAP_LAST) {
+        if (op == FF6_EVENT_LOAD_MAP_FIRST) {  // the first of them waits for the screen to fade out
+            if (!mapFadeStarted_) {
+                host.fieldCommand(FF6_EVENT_FADE_OUT, nullptr, 0);
+                mapFadeStarted_ = true;
+                return false;
+            }
+            if (host.fading()) return false;
+            mapFadeStarted_ = false;
+        }
         const uint16_t word = static_cast<uint16_t>(byteAt(1) | (byteAt(2) << 8));
         const uint32_t map = word & FF6_ENTRANCE_MAP_MASK;
         const int x = byteAt(3), y = byteAt(4);
         const int facing = (word >> FF6_ENTRANCE_FACING_SHIFT) & FF6_NPC_DIR_MASK;
         const bool startup = (byteAt(5) & FF6_EVENT_MAP_STARTUP_FLAG) != 0;
+        const bool fadeIn = (byteAt(5) & FF6_EVENT_MAP_NO_FADE_IN_FLAG) == 0;
         next();  // the event goes on after the map is loaded, once its startup event is over
-        host.changeMap(map, x, y, facing, startup);
+        host.changeMap(map, x, y, facing, startup, fadeIn);
         return false;
     }
     if (op >= FF6_EVENT_PAUSE_15F && op <= FF6_EVENT_PAUSE_120F) {
@@ -241,6 +276,11 @@ bool EventRunner::step(EventHost& host) {
         case FF6_EVENT_PARTY_MAP:
         case FF6_EVENT_MAP_DATA_NOW:
         case FF6_EVENT_MAP_DATA:
+        case FF6_EVENT_FADE_IN:
+        case FF6_EVENT_FADE_OUT:
+        case FF6_EVENT_FADE_IN_SPEED:
+        case FF6_EVENT_FADE_OUT_SPEED:
+        case FF6_EVENT_FADE_STOP:
         case FF6_EVENT_MOVE_PARTY: {
             const size_t at = pc_ + 1;
             host.fieldCommand(op, at < script.size() ? &script[at] : nullptr,
@@ -301,6 +341,9 @@ bool EventRunner::step(EventHost& host) {
             return next();
         case FF6_EVENT_BATTLE_CLEAR:
             bits_.setBattle(byteAt(1), false);
+            return next();
+        case FF6_EVENT_FADE_WAIT:
+            if (host.fading()) return false;
             return next();
         case FF6_EVENT_PLAY_SONG:
             playSong(host.sound(), byteAt(1), FF6_SOUND_FULL_VOLUME);

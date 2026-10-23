@@ -5,6 +5,7 @@
 
 int main() {
     testPack();
+    testSave();
     testAudioData();
     testBrr();
     testDspVoice();

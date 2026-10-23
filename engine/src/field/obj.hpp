@@ -91,11 +91,18 @@ public:
     // obj_party.cpp: the party.
     // A new game: Terra is the only character, she is in party 1 and leads it.
     void resetCharacters();
+    // The party that a game starts with instead of Terra alone: the first of these characters leads it.
+    void startParty(const std::vector<int>& characters);
     int activeParty() const { return activeParty_; }
     const std::array<int, FF6_PARTY_SIZE>& partySlots() const { return partySlots_; }
     Npc* lead();  // the first character of the active party, null when it is empty
     const Npc* lead() const;
     void activateParty(int party);
+    // A saved game: the party that is active, with the characters as the save has set them.
+    void restoreParty(int party) {
+        activeParty_ = party;
+        refreshParty();
+    }
     void addToParty(int character, int party);
     void setPartySlots(const std::array<int, FF6_PARTY_SIZE>& slots);
     void setPartyMap(int party, int map);

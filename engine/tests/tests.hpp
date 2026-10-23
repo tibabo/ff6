@@ -2,6 +2,7 @@
 
 // Each test file of tests/ covers one source file of src/ and exposes one entry point.
 void testPack();
+void testSave();
 void testAudioData();
 void testBrr();
 void testDspVoice();

@@ -6,10 +6,11 @@
 namespace ff6 {
 
 void Objects::resetCharacters() {
+    static constexpr int kPalettes[FF6_CHAR_COUNT] = FF6_CHARACTER_PALETTES;
     for (size_t i = 0; i < chars_.size(); ++i) {
         Npc character;
         character.prop.gfx = static_cast<int>(i);  // each character has the map sprite of its number
-        character.prop.palette = static_cast<int>(i) & (FF6_SPRITE_PALETTE_SLOTS - 1);
+        character.prop.palette = kPalettes[i];
         character.frame = stopFrame(Down);
         chars_[i] = character;
     }
@@ -22,6 +23,29 @@ void Objects::resetCharacters() {
     terra.party = 1;
     activeParty_ = 1;
     refreshParty();
+}
+
+// The characters of the list are in party 1 and exist on any map; the others are out of the game.
+void Objects::startParty(const std::vector<int>& characters) {
+    for (Npc& character : chars_) {
+        character.enabled = character.visible = false;
+        character.party = 0;
+        character.movement = FF6_OBJ_MOVE_NONE;
+    }
+    int slot = 0;
+    for (const int id : characters) {
+        if (id < 0 || id >= FF6_CHAR_COUNT || slot >= FF6_PARTY_SIZE || chars_[static_cast<size_t>(id)].party == 1) continue;
+        Npc& character = chars_[static_cast<size_t>(id)];
+        character.enabled = true;
+        character.party = 1;
+        character.partySlot = slot++;
+    }
+    activeParty_ = 1;
+    refreshParty();
+    if (Npc* top = lead()) {
+        top->visible = true;
+        top->movement = FF6_OBJ_MOVE_USER;
+    }
 }
 
 // The characters of the active party, in the order of their places.
