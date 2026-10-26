@@ -27,6 +27,11 @@ struct SaveState {
     std::array<int, FF6_SPRITE_PALETTE_SLOTS> spritePalettes{0, 1, 2, 3, 4, 5, 6, 7};  // palette of each slot
     bool hasParent = false;  // the map that the party goes back to from a house
     int parentMap = 0, parentX = 0, parentY = 0, parentFacing = 0;
+    std::array<int, 3> config{FF6_CONFIG_BATTLE_DEFAULT, 0, 0};  // the bytes of GameConfig; a save without them has the defaults
+    // The colors that the player chose; without them the font is white and the windows have the colors of the ROM.
+    bool hasColors = false;
+    int fontColor = FF6_CONFIG_FONT_COLOR_DEFAULT;
+    std::array<int, FF6_MENU_WINDOW_COUNT * FF6_MENU_WINDOW_COLORS> windowColors{};  // pattern by pattern
 };
 
 std::string saveToJson(const SaveState& state);

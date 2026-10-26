@@ -265,6 +265,8 @@
 #define FF6_SAVE_VERSION 1
 #define FF6_SAVE_DEFAULT_FILE "ff6-save.json"
 #define FF6_MAX_TILE 255
+#define FF6_BYTE_VALUES 256
+#define FF6_MAX_COLOR 0x7FFF  // BGR555
 #define FF6_OBJ_SUBPIXELS 256  // object positions are in 1/256 pixel
 #define FF6_OBJ_TILE_SUBPIXELS (FF6_TILE_SIZE * FF6_OBJ_SUBPIXELS)
 #define FF6_OBJ_ACTION_PERIOD 4  // every object acts once every 4 frames, 6 objects per frame
@@ -495,4 +497,130 @@
 #define FF6_SOUND_FULL_VOLUME 0xFF
 #define FF6_SOUND_FADE_IN_VOLUME 0x20  // volume at which a song starts that fades in
 #define FF6_SOUND_SONG_MASK 0x7F  // in the events, bit 7 asks to keep the song that plays
+
+// Menus (src/menu). The text is drawn on a grid of 8x8 tiles, with the small font.
+#define FF6_MENU_FILE "menu.ff6data"
+#define FF6_MENU_MAGIC "FF6MENU1"
+#define FF6_MENU_FONT_TILES 256
+#define FF6_MENU_FONT_TILE_BYTES 16  // 2bpp
+#define FF6_MENU_FONT_COLORS 80
+#define FF6_MENU_TILE_SIZE 8
+#define FF6_MENU_COLUMNS (FF6_SCREEN_WIDTH / FF6_MENU_TILE_SIZE)
+#define FF6_MENU_CODE_UPPER_A 0x80  // the codes of the text are the tiles of the font
+#define FF6_MENU_CODE_LOWER_A 0x9A
+#define FF6_MENU_CODE_ZERO 0xB4
+#define FF6_MENU_CODE_SPACE 0xFF
+#define FF6_MENU_CODE_DIALOGUE_SHIFT 0x60  // a code of the font of the dialogues plus this is the code of the menus
+#define FF6_MENU_CODE_2DOT 0xD3  // symbols of the font
+#define FF6_MENU_CODE_UP_ARROW 0xD4
+#define FF6_MENU_CODE_WHITE 0xE8  // then black and effect: the signs of the kinds of magic
+#define FF6_MENU_CODE_GAUGE_EMPTY 0xF0  // then the partly filled cells at every two codes
+#define FF6_MENU_CODE_GAUGE_FULL 0xF8
+#define FF6_MENU_CODE_GAUGE_LEFT 0xF9
+#define FF6_MENU_CODE_GAUGE_RIGHT 0xFA
+#define FF6_MENU_BG1_COLOR_BAR 0x30
+#define FF6_CONFIG_BAR_CELLS 8
+#define FF6_MENU_CURSOR_TILE_BYTES 32  // 4bpp
+#define FF6_MENU_CURSOR_SIZE 16
+#define FF6_MENU_CURSOR_PALETTE_COLORS 4  // the hand uses the sprite colors 12 to 15
+#define FF6_MENU_CURSOR_FIRST_COLOR 12
+#define FF6_MENU_PORTRAIT_COLORS 16
+#define FF6_MENU_PORTRAIT_COUNT 19  // the 14 playable characters, a soldier, an imp, Leo, Banon and a ghost
+#define FF6_MENU_PORTRAIT_TILES 25  // 5x5 tiles of 4bpp
+#define FF6_MENU_PORTRAIT_COLUMNS 5
+#define FF6_MENU_PORTRAIT_SIZE (FF6_MENU_PORTRAIT_COLUMNS * FF6_MENU_TILE_SIZE)
+#define FF6_MENU_PORTRAIT_TILE_ORDER \
+    {0, 1, 2, 3, 8, 16, 17, 18, 19, 9, 4, 5, 6, 7, 10, 20, 21, 22, 23, 11, 13, 14, 15, 24, 12}  // tile of each cell
+#define FF6_MENU_PORTRAIT_X 14  // of a character in the front row, and the y of the first one
+#define FF6_MENU_PORTRAIT_Y 21
+#define FF6_MENU_PORTRAIT_STEP 48
+#define FF6_MENU_PORTRAITS_OF_CHARACTER {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 17}  // Leo and Banon come after two others
+#define FF6_MENU_REPEAT_DELAY 8  // frames before a held direction repeats, then it repeats every FF6_MENU_REPEAT_RATE
+#define FF6_MENU_REPEAT_RATE 3
+#define FF6_MENU_BG1_PALETTE_COLORS 16  // CGRAM colors of a palette of the bg1 text, 4 for the bg3 text
+#define FF6_MENU_BG3_PALETTE_COLORS 4
+#define FF6_MENU_TEXT_PALETTE_SHIFT 2  // the text color byte is a tile attribute: bits 2 to 4 are the palette
+#define FF6_MENU_TEXT_PALETTE_MASK 7
+#define FF6_MENU_BG1_DEFAULT 0x20
+#define FF6_MENU_BG1_TEAL 0x24
+#define FF6_MENU_BG1_GRAY 0x28
+#define FF6_MENU_BG3_DEFAULT 0x20
+#define FF6_MENU_BG3_GRAY 0x24
+#define FF6_MENU_BG3_TEAL 0x2C
+#define FF6_SFX_MENU_SELECT 0x20  // system sound effects
+#define FF6_SFX_MENU_MOVE 0x21
+#define FF6_SFX_MENU_INVALID 0x22
+#define FF6_MENU_ITEM_COUNT 7  // Item, Skills, Equip, Relic, Status, Config, Save
+#define FF6_MENU_ITEM_ITEM 0
+#define FF6_MENU_CONFIG_ITEM 5
+#define FF6_MENU_OPTIONS_TEXT_X 24
+#define FF6_MENU_OPTIONS_TEXT_Y 2  // the disassembly says 3, which draws Save over the frame; this fits the 13 rows of the window
+#define FF6_MENU_CURSOR_X 175
+#define FF6_MENU_CURSOR_Y 12  // the table of the game is 18 + 15 * n, which drifts from the lines of text, 16 pixels apart
+#define FF6_MENU_CURSOR_STEP 16
+#define FF6_MENU_BLOCK_STEP 6  // rows between the blocks of the characters
+#define FF6_MENU_FRAMES_PER_HOUR (FF6_FRAMES_PER_SECOND * 3600)
+#define FF6_ITEM_COUNT 256  // the items of the game, and the places of the inventory
+#define FF6_ITEM_NAME_BYTES 13
+#define FF6_ITEM_ROWS 10  // the rows of the list of the item menu
+#define FF6_ITEM_ROW_HEIGHT 12
+#define FF6_ITEM_LIST_TOP 88  // the first row of the list, in pixels
+#define FF6_ITEM_NAME_X 3  // in tiles
+#define FF6_ITEM_QUANTITY_X 17
+#define FF6_ITEM_CURSOR_X 8
+#define FF6_ITEM_CURSOR_DY (-4)  // the hand is higher than the text that it shows
+#define FF6_ITEM_OPTION_COUNT 3  // use, arrange, rare
+#define FF6_ITEM_OPTION_CURSOR_X {64, 104, 176}
+#define FF6_ITEM_OPTION_X {10, 15, 24}  // tiles
+#define FF6_ITEM_OPTION_ROW 2
+#define FF6_ITEM_OPTION_CURSOR_Y 12
+#define FF6_ITEM_PLACEHOLDER_FIRST 233  // the potion, and the next items, in the placeholder inventory
+#define FF6_ITEM_PLACEHOLDER_COUNT 14
+#define FF6_CONFIG_BATTLE_DEFAULT 0x2A  // wait mode, battle speed 3 and message speed 3
+#define FF6_CONFIG_BATTLE_SPEED_MASK 0x07
+#define FF6_CONFIG_WAIT 0x08
+#define FF6_CONFIG_MESSAGE_SPEED_MASK 0x70
+#define FF6_CONFIG_MESSAGE_SPEED_SHIFT 4
+#define FF6_CONFIG_COMMAND_SHORT 0x80
+#define FF6_CONFIG_REEQUIP_EMPTY 0x10
+#define FF6_CONFIG_MONO 0x20
+#define FF6_CONFIG_CURSOR_MEMORY 0x40
+#define FF6_CONFIG_GAUGE_OFF 0x80
+#define FF6_CONFIG_MULTIPLE_CONTROLLERS 0x80
+#define FF6_CONFIG_SPEED_MAX 5  // speeds go from 0 to 5, shown as 1 to 6
+#define FF6_CONFIG_FIRST_ROW 5  // the tile row of the first option, then one every two rows
+#define FF6_CONFIG_FIRST_COLUMN 14
+#define FF6_CONFIG_SECOND_COLUMN 22
+#define FF6_CONFIG_TEXT_OFFSET_Y 5
+#define FF6_CONFIG_CURSOR_X 96
+#define FF6_CONFIG_CURSOR_Y 41
+#define FF6_CONFIG_CURSOR_STEP 16
+#define FF6_CONFIG_ORDER_MASK 0x07  // of the third config byte: the order of the magic
+#define FF6_CONFIG_COLOR_MASK 0x38  // the color being edited: 0 for the font, 1 to 7 for the colors of the window
+#define FF6_CONFIG_COLOR_SHIFT 3
+#define FF6_CONFIG_WINDOW_MASK 0x0F  // of the second config byte: the pattern of the windows
+#define FF6_CONFIG_ORDER_MAX 5
+#define FF6_CONFIG_WINDOW_MAX 7
+#define FF6_CONFIG_COLOR_MAX 7
+#define FF6_CONFIG_COMPONENT_MAX 31  // a color is red, green and blue from 0 to 31
+#define FF6_CONFIG_FONT_COLOR_DEFAULT 0x7FFF
+#define FF6_CONFIG_FONT_COLOR_ENTRIES {3, 21, 23}  // the colors of the font palette that the color of the font replaces
+#define FF6_MENU_WINDOW_COUNT 8
+#define FF6_MENU_WINDOW_COLORS 7
+#define FF6_MENU_WINDOW_GFX_BYTES (FF6_WINDOW_TILE_COUNT * FF6_MENU_CURSOR_TILE_BYTES)
+#define FF6_CONFIG_PAGE_SCROLL_FRAMES 16  // a page scrolls by 16 pixels a frame
+#define FF6_CONFIG_PAGE_SCROLL_STEP 16
+#define FF6_CONFIG_PAGE_PIXELS 256  // the second page is the screen below the first
+#define FF6_CONFIG_SCROLL_FIRST (-5)  // the scroll of the first page
+#define FF6_CONFIG_CLIP_TOP 39  // the first page and the second are only seen between these lines
+#define FF6_CONFIG_CLIP_BOTTOM 199
+#define FF6_CONFIG_PAGE1_ROWS 9
+#define FF6_CONFIG_PAGE2_ROWS 6
+#define FF6_CONFIG_PAGE2_CURSOR_Y {41, 105, 121, 153, 169, 185}
+#define FF6_MENU_FRAMES_PER_MINUTE (FF6_FRAMES_PER_SECOND * 60)
+#define FF6_MENU_MINUTES_PER_HOUR 60
+#define FF6_MENU_MAX_HOURS 99
+#define FF6_MENU_PLACEHOLDER_LEVEL 1  // until the statistics of the characters are ported
+#define FF6_MENU_PLACEHOLDER_HP 100
+#define FF6_MENU_PLACEHOLDER_MP 20
 

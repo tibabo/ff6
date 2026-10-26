@@ -44,6 +44,10 @@ ff6::SaveState sampleState() {
     state.parentX = 3;
     state.parentY = 4;
     state.parentFacing = 1;
+    state.config = {0x5C, 0x41, 0x80};
+    state.hasColors = true;
+    state.fontColor = 0x1234;
+    state.windowColors[5] = 0x7FFF;
     return state;
 }
 
@@ -77,6 +81,13 @@ void testSave() {
     CHECK(character.enabled && character.visible && character.party == 2 && character.slot == 1 && character.map == 0x1C);
     CHECK(character.gfx == 164 && character.palette == 7 && character.x == 8 && character.y == 45 && character.facing == 3);
     CHECK(!back.characters[1].enabled);
+    CHECK(back.config == state.config);
+    CHECK(back.hasColors && back.fontColor == 0x1234 && back.windowColors == state.windowColors);
+    {  // a save without config has the defaults of a new game
+        std::string old = ff6::saveToJson(ff6::SaveState());
+        old.erase(old.find(",\n  \"config\""), old.find("]", old.find("\"config\"")) + 1 - old.find(",\n  \"config\""));
+        CHECK(ff6::saveFromJson(old).config[0] == FF6_CONFIG_BATTLE_DEFAULT);
+    }
 
     // Values that do not exist are refused.
     CHECK(throws([] { ff6::saveFromJson("{}"); }));
@@ -95,6 +106,12 @@ void testSave() {
     CHECK(throws([&] { ff6::saveFromJson(ff6::saveToJson(broken)); }));
     broken = state;
     broken.characters[3].palette = 8;
+    CHECK(throws([&] { ff6::saveFromJson(ff6::saveToJson(broken)); }));
+    broken = state;
+    broken.config[1] = 300;
+    CHECK(throws([&] { ff6::saveFromJson(ff6::saveToJson(broken)); }));
+    broken = state;
+    broken.windowColors[0] = 0x8000;
     CHECK(throws([&] { ff6::saveFromJson(ff6::saveToJson(broken)); }));
     broken = state;
     broken.eventBits.push_back(100000);

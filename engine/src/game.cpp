@@ -7,34 +7,13 @@
 #include "field/bg.hpp"
 #include "field/color.hpp"
 #include "field/sprite_data.hpp"
+#include "field/window.hpp"
+#include "menu/window_style.hpp"
 
 namespace ff6 {
 namespace {
 
 const Rect kScreen{0, 0, FF6_SCREEN_WIDTH, FF6_SCREEN_HEIGHT};
-
-void blendPixel(std::vector<uint8_t>& image, int x, int y, const uint8_t* rgba) {
-    if (x < 0 || y < 0 || x >= FF6_SCREEN_WIDTH || y >= FF6_SCREEN_HEIGHT || rgba[FF6_ALPHA_OFFSET] == 0) return;
-    std::copy(rgba, rgba + FF6_BYTES_PER_PIXEL,
-              image.begin() + (static_cast<size_t>(y) * FF6_SCREEN_WIDTH + x) * FF6_BYTES_PER_PIXEL);
-}
-
-int windowTile(int col, int row) {
-    const bool top = row == 0, bottom = row == FF6_WINDOW_ROWS - 1;
-    const bool left = col == 0, right = col == FF6_WINDOW_COLS - 1;
-    const bool oddColumn = (col & 1) != 0, oddRow = (row & 1) != 0;
-    if (top) {
-        return left ? FF6_WINDOW_TILE_TOP_LEFT : right ? FF6_WINDOW_TILE_TOP_RIGHT
-               : oddColumn ? FF6_WINDOW_TILE_TOP_ODD : FF6_WINDOW_TILE_TOP_EVEN;
-    }
-    if (bottom) {
-        return left ? FF6_WINDOW_TILE_BOTTOM_LEFT : right ? FF6_WINDOW_TILE_BOTTOM_RIGHT
-               : oddColumn ? FF6_WINDOW_TILE_BOTTOM_ODD : FF6_WINDOW_TILE_BOTTOM_EVEN;
-    }
-    if (left) return oddRow ? FF6_WINDOW_TILE_LEFT_ODD : FF6_WINDOW_TILE_LEFT_EVEN;
-    if (right) return oddRow ? FF6_WINDOW_TILE_RIGHT_ODD : FF6_WINDOW_TILE_RIGHT_EVEN;
-    return ((row - 1) % FF6_WINDOW_FILL_SIZE) * FF6_WINDOW_FILL_SIZE + (col - 1) % FF6_WINDOW_FILL_SIZE;
-}
 
 struct Drawable {
     int sortY;
@@ -48,17 +27,21 @@ struct Drawable {
 
 Game::Game(CommonData common, std::string packDir, uint32_t startMap, Renderer& renderer, Sound& sound,
            const std::vector<int>& party)
-    : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_) {
+    : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
+      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_) {
     initialize(startMap, party, nullptr);
 }
 
 Game::Game(CommonData common, std::string packDir, const SaveState& save, Renderer& renderer, Sound& sound)
-    : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_) {
+    : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
+      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_) {
     initialize(static_cast<uint32_t>(save.map), {}, &save);
 }
 
 void Game::initialize(uint32_t startMap, const std::vector<int>& party, const SaveState* save) {
     bits_.init(common_);
+    menuData_ = loadMenuData(packDir_);
+    config_.windowColors = menuData_.windowColors;
     const size_t screenBytes = static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL;
     for (auto& layer : layerPixels_) {
         for (auto& pixels : layer) pixels.assign(screenBytes, 0);
@@ -77,6 +60,7 @@ void Game::initialize(uint32_t startMap, const std::vector<int>& party, const Sa
         y = save->y;
         facing = save->facing;
     }
+    common_.windowTiles = buildWindowTiles(menuData_, config_);
     if (!loadMapNow(startMap, x, y, facing, true, true)) throw std::runtime_error("the start map is not in the data pack");
 }
 
@@ -106,6 +90,15 @@ void Game::restore(const SaveState& save) {
     parentX_ = save.parentX;
     parentY_ = save.parentY;
     parentFacing_ = save.parentFacing;
+    config_.battle = static_cast<uint8_t>(save.config[0]);
+    config_.display = static_cast<uint8_t>(save.config[1]);
+    config_.controller = static_cast<uint8_t>(save.config[2]);
+    if (save.hasColors) {
+        config_.fontColor = static_cast<uint16_t>(save.fontColor);
+        for (size_t i = 0; i < save.windowColors.size(); ++i) {
+            config_.windowColors[i / FF6_MENU_WINDOW_COLORS][i % FF6_MENU_WINDOW_COLORS] = static_cast<uint16_t>(save.windowColors[i]);
+        }
+    }
 }
 
 SaveState Game::saveState() const {
@@ -137,6 +130,12 @@ SaveState Game::saveState() const {
     save.parentX = parentX_;
     save.parentY = parentY_;
     save.parentFacing = parentFacing_;
+    save.config = {config_.battle, config_.display, config_.controller};
+    save.hasColors = true;
+    save.fontColor = config_.fontColor;
+    for (size_t i = 0; i < save.windowColors.size(); ++i) {
+        save.windowColors[i] = config_.windowColors[i / FF6_MENU_WINDOW_COLORS][i % FF6_MENU_WINDOW_COLORS];
+    }
     return save;
 }
 
@@ -509,6 +508,10 @@ bool Game::openDoor(int direction) {
 
 void Game::tick(const InputState& input) {
     ++frame_;
+    if (menuPhase_ != MenuPhase::Closed) {
+        tickMenu(input);
+        return;
+    }
     anim_.update(map_, frame_);
     updateBrightness();
     if (leaving_ && !fading()) {
@@ -538,6 +541,9 @@ void Game::tick(const InputState& input) {
     if (!eventRunning && !dialogue_.active() && userLead && !leaving_) {
         if (input.confirm && !wasBusy && !player_.moving() && brightness_ == FF6_BRIGHTNESS_FULL) {
             talkToNpc();
+        } else if (input.menu && !wasBusy && !player_.moving() && brightness_ == FF6_BRIGHTNESS_FULL) {
+            menuPhase_ = MenuPhase::FadingOut;
+            startFade(false, FF6_BRIGHTNESS_STEP);
         } else if (!openDoor(input.direction)) {
             player_.update(map_, input.direction, objects_);
         }
@@ -583,22 +589,50 @@ void Game::moveParty(int tileX, int tileY) {
     startFade(true, FF6_BRIGHTNESS_STEP);
 }
 
+// The menu is not ported to the data of the game yet: the characters have placeholder statistics, and the money and
+// the steps are zero.
+MenuStatus Game::menuStatus() const {
+    MenuStatus status;
+    for (const int id : objects_.partySlots()) {
+        if (id < 0) continue;
+        MenuCharacter character;
+        character.id = id;
+        character.level = FF6_MENU_PLACEHOLDER_LEVEL;
+        character.hp = character.maxHp = FF6_MENU_PLACEHOLDER_HP;
+        character.mp = character.maxMp = FF6_MENU_PLACEHOLDER_MP;
+        status.party.push_back(character);
+    }
+    for (int i = 0; i < FF6_ITEM_PLACEHOLDER_COUNT; ++i) status.items.push_back({FF6_ITEM_PLACEHOLDER_FIRST + i, 1 + i * 3 % 7});
+    status.hours = static_cast<int>(std::min<uint32_t>(frame_ / FF6_MENU_FRAMES_PER_HOUR, FF6_MENU_MAX_HOURS));
+    status.minutes = static_cast<int>(frame_ / FF6_MENU_FRAMES_PER_MINUTE % FF6_MENU_MINUTES_PER_HOUR);
+    return status;
+}
+
+void Game::tickMenu(const InputState& input) {
+    updateBrightness();
+    if (fading()) return;
+    if (menuPhase_ == MenuPhase::FadingOut) {
+        menu_.open(menuStatus(), config_);
+        menuPhase_ = MenuPhase::Open;
+        startFade(true, FF6_BRIGHTNESS_STEP);
+    } else if (menuPhase_ == MenuPhase::Open) {
+        menu_.update(input);
+        if (menu_.closed()) {
+            menuPhase_ = MenuPhase::Leaving;
+            startFade(false, FF6_BRIGHTNESS_STEP);
+        }
+    } else {
+        menuPhase_ = MenuPhase::Closed;
+        common_.windowTiles = buildWindowTiles(menuData_, config_);  // the dialogues have the windows of the config
+        startFade(true, FF6_BRIGHTNESS_STEP);
+    }
+}
+
 void Game::composeDialogue() {
     std::vector<uint8_t>& image = overlayPixels_;
     std::fill(image.begin(), image.end(), 0);
     const int windowY = dialogue_.atBottom() ? FF6_WINDOW_BOTTOM_Y : FF6_WINDOW_Y;
-    for (int row = 0; row < FF6_WINDOW_ROWS; ++row) {
-        for (int col = 0; col < FF6_WINDOW_COLS; ++col) {
-            const uint8_t* tile = &common_.windowTiles[static_cast<size_t>(windowTile(col, row)) * FF6_WINDOW_TILE_BYTES];
-            for (int y = 0; y < FF6_WINDOW_TILE_SIZE; ++y) {
-                for (int x = 0; x < FF6_WINDOW_TILE_SIZE; ++x) {
-                    blendPixel(image, FF6_WINDOW_X + col * FF6_WINDOW_TILE_SIZE + x,
-                               windowY + row * FF6_WINDOW_TILE_SIZE + y,
-                               tile + (y * FF6_WINDOW_TILE_SIZE + x) * FF6_BYTES_PER_PIXEL);
-                }
-            }
-        }
-    }
+    drawWindow(image, common_.windowTiles, FF6_WINDOW_X, windowY, FF6_WINDOW_COLS, FF6_WINDOW_ROWS);
     const int originX = FF6_TEXT_ORIGIN_X;
     const int originY = windowY + (FF6_TEXT_ORIGIN_Y - FF6_WINDOW_Y);
     const uint8_t shadow[FF6_BYTES_PER_PIXEL] = FF6_TEXT_SHADOW_RGBA;
@@ -662,6 +696,16 @@ void Game::drawSprites(bool above) {
 }
 
 void Game::draw() {
+    if (menuPhase_ == MenuPhase::Open || menuPhase_ == MenuPhase::Leaving) {
+        menu_.draw();
+        screenPixels_ = menuScreen_.pixels();
+        renderer_.beginFrame();
+        applyBrightness(screenPixels_);
+        renderer_.updateTexture(screen_, screenPixels_.data());
+        renderer_.draw(screen_, kScreen, kScreen);
+        renderer_.endFrame();
+        return;
+    }
     for (auto& layer : layerPixels_) {
         for (auto& pixels : layer) std::fill(pixels.begin(), pixels.end(), 0);
     }

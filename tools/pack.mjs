@@ -22,6 +22,7 @@ import { readEventScript, readEventTriggers } from './event/event_trigger.mjs';
 import { readMapInitEvent } from './event/map_init_event.mjs';
 import { readMapParallax } from './data/map_parallax.mjs';
 import { buildAudioData } from './sound/audio_data.mjs';
+import { buildMenuData } from './menu/menu_gfx.mjs';
 
 export const COMMON_MAGIC = 'FF6COMMN';
 export const MAP_MAGIC = 'FF6MAP01';
@@ -168,6 +169,7 @@ export function writePack(rom, outDir, options = {}) {
   try {
     writeFileSync(join(temp, 'common.ff6data'), buildCommonData(rom, options), { flag: 'wx' });
     writeFileSync(join(temp, 'audio.ff6data'), buildAudioData(rom, PACK_VERSION), { flag: 'wx' });
+    writeFileSync(join(temp, 'menu.ff6data'), buildMenuData(rom, PACK_VERSION), { flag: 'wx' });
     const written = [];
     const skipped = [];
     for (let mapId = FIRST_FIELD_MAP; mapId < MAP_COUNT; mapId += 1) {

@@ -30,7 +30,15 @@ void SdlInput::handle(const SDL_Event& event) {
 
 InputState SdlInput::sample() {
     InputState state;
-    state.confirm = confirmPressed();
+    const auto edge = [](bool held, bool& before) {
+        const bool pressed = held && !before;
+        before = held;
+        return pressed;
+    };
+    state.confirm = edge(buttonHeld({SDL_SCANCODE_RETURN, SDL_SCANCODE_SPACE, SDL_SCANCODE_KP_ENTER}, SDL_CONTROLLER_BUTTON_A),
+                         confirmHeld_);
+    state.cancel = edge(buttonHeld({SDL_SCANCODE_Z, SDL_SCANCODE_BACKSPACE}, SDL_CONTROLLER_BUTTON_B), cancelHeld_);
+    state.menu = edge(buttonHeld({SDL_SCANCODE_X}, SDL_CONTROLLER_BUTTON_X), menuHeld_);
     state.direction = direction();
     return state;
 }
@@ -57,15 +65,12 @@ int SdlInput::direction() const {
     return FF6_NO_DIRECTION;
 }
 
-bool SdlInput::confirmPressed() {
-    const Uint8* keys = SDL_GetKeyboardState(nullptr);
-    bool held = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_KP_ENTER];
-    for (const auto& entry : controllers_) {
-        held |= SDL_GameControllerGetButton(entry.second, SDL_CONTROLLER_BUTTON_A) != 0;
-    }
-    const bool pressed = held && !confirmHeld_;
-    confirmHeld_ = held;
-    return pressed;
+bool SdlInput::buttonHeld(const std::initializer_list<SDL_Scancode>& keys, SDL_GameControllerButton button) const {
+    const Uint8* state = SDL_GetKeyboardState(nullptr);
+    bool held = false;
+    for (const SDL_Scancode key : keys) held |= state[key] != 0;
+    for (const auto& entry : controllers_) held |= SDL_GameControllerGetButton(entry.second, button) != 0;
+    return held;
 }
 
 }  // namespace ff6

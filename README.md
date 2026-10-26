@@ -152,7 +152,8 @@ doit se trouver a cote de lui (vcpkg l'y copie normalement).
 
 `build-pack` ecrit `common.ff6data` (police, fenetre, sprites, dialogues, script
 d'evenements), `audio.ff6data` (echantillons BRR, enveloppes et scripts des
-musiques) et une carte par fichier dans `maps/` ; il n'ecrase jamais un
+musiques), `menu.ff6data` (police et palettes des menus, main du curseur,
+portraits) et une carte par fichier dans `maps/` ; il n'ecrase jamais un
 dossier existant. `--text` utilise un `dialogues.json` modifie. Un caractere
 absent de la police de la ROM, par exemple un accent, provoque une erreur
 explicite. Le pack contient des donnees du jeu : ne pas le distribuer. Le format
@@ -165,6 +166,8 @@ Controles :
 | --- | --- | --- |
 | Deplacement | Fleches / WASD | Croix ou stick gauche |
 | Parler / valider | Entree / Espace | A (bouton du bas) |
+| Menu | X | X |
+| Annuler | Z / Retour arriere | B |
 | Echelle entiere | F10 | |
 | Sauvegarder | F5 | |
 | Plein ecran | F11 / Alt+Entree | |
@@ -225,6 +228,31 @@ Limites actuelles :
   erreur claire. L'evenement de demarrage de la carte s'execute au
   chargement, comme dans le jeu ; le morceau en cours, l'etat des PNJ et les
   portes ouvertes ne sont pas sauves.
+- Menus : X ouvre le menu principal (l'ecran se fond en noir, puis le menu
+  apparait) ; Z ou X le referment. Il reproduit le menu du
+  terrain : fenetres, groupe avec portraits, liste Item a Save, temps, pas et
+  Gp, main du curseur (haut/bas, avec la repetition de la console). L'option
+  Config ouvre ses deux pages (qui defilent l'une sous l'autre quand la main
+  sort de la premiere ou de la seconde) : mode, vitesses, commandes, jauge,
+  son, curseur, reequipement, manettes ; ordre des magies, motif et couleurs
+  des fenetres (8 motifs de la ROM, 7 couleurs modifiables chacun), couleur
+  de la police (la validation les remet a zero). Gauche/droite changent un
+  reglage, haut et bas deplacent la main sans boucler, Z revient. Les
+  reglages sont ceux de la console (octets $1d4d, $1d4e, $1d54, couleurs),
+  sauvegardes dans le JSON ; les couleurs et le motif des fenetres agissent
+  sur les menus et sur les dialogues, et « Cursor : Memory » sur le menu
+  principal. Les vitesses de message et de combat ne servent qu'aux combats
+  (le dialogue du terrain n'y est pas sensible dans le jeu) et le mono
+  demande la commande 0xF3 du son, pas encore portee. L'option Item ouvre la
+  liste de l'inventaire (noms de la ROM, quantites, defilement) avec les
+  options Use, Arrange et Rare ; l'inventaire est un inventaire de
+  remplacement, les descriptions ne sont pas extraites et les objets ne
+  peuvent pas encore etre utilises. Les autres options ne sont pas encore
+  branchees (le son d'erreur est joue), et les statistiques des
+  personnages, l'argent et les pas sont des valeurs de remplacement.
+  `--capture ... --menu n [--select k] [--down k]` capture le menu avec le
+  curseur sur l'option n, en appuyant k fois sur la validation puis k fois
+  sur bas.
 - Audio : le pack contient les 63 echantillons et les 85 musiques. Le moteur
   decode les echantillons, interprete les scripts de musique (8 voix, tempo,
   volumes, panoramique, vibrato, tremolo, glissando, boucles, liaisons, echo,

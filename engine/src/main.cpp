@@ -22,6 +22,7 @@
 #define FF6_MAX_CATCHUP_FRAMES 5  // longest stall, in frames, that the loop tries to make up for
 #define FF6_CAPTURE_MAX_STEP_FRAMES 32  // bound on the ticks spent finishing one captured step
 #define FF6_CAPTURE_MAX_TALK_FRAMES 100000
+#define FF6_CAPTURE_MENU_SETTLE_FRAMES 20  // idle frames after a press in the menu, longer than a scroll of a page
 #define FF6_MOVE_LETTERS "URDL"  // --moves letters, in Facing order
 #define FF6_DEFAULT_MAP 0x1C  // the Narshe inn
 #define FF6_MAX_MAP_ARGUMENT 0x1FF
@@ -34,6 +35,9 @@ struct Capture {
     int waitFrames = 0;  // idle frames before the moves, for npcs to walk
     int atX = -1, atY = -1;  // party tile, when it is not the start of the map
     int talkFrames = -1;
+    int menuCursor = -1;  // open the menu with the cursor on this option
+    int menuSelect = 0;  // and press the confirm button there this many times
+    int menuDowns = 0;  // then press down this many times
 };
 
 // Keeps SDL initialised for as long as it lives.
@@ -65,6 +69,26 @@ void captureFrame(ff6::Game& game, ff6::SdlRenderer& renderer, const Capture& ca
         for (int frame = 0; frame < capture.talkFrames; ++frame) game.tick({FF6_NO_DIRECTION, false});
     }
     game.finishFade();
+    if (capture.menuCursor >= 0) {
+        game.tick({FF6_NO_DIRECTION, false, false, true});
+        for (int frame = 0; frame < FF6_CAPTURE_MAX_STEP_FRAMES * 2 && game.menuPhase() != ff6::MenuPhase::Open; ++frame) {
+            game.tick({});
+        }
+        game.finishFade();  // the menu fades in
+        for (int option = 0; option < capture.menuCursor; ++option) {
+            game.tick({ff6::Down, false});
+            game.tick({});
+        }
+        for (int press = 0; press < capture.menuSelect; ++press) {
+            game.tick({FF6_NO_DIRECTION, true});
+            game.tick({});
+        }
+        for (int press = 0; press < capture.menuDowns; ++press) {
+            game.tick({ff6::Down, false});
+            for (int frame = 0; frame < FF6_CAPTURE_MENU_SETTLE_FRAMES; ++frame) game.tick({});  // a page may scroll
+        }
+        game.finishFade();
+    }
     game.draw();
     renderer.saveFrame(capture.path);
     std::printf("Saved %s (tile %d,%d)\n", capture.path.c_str(), game.player().tileX(), game.player().tileY());
@@ -216,6 +240,13 @@ int main(int argc, char** argv) {
                 if (capture.waitFrames < 0 || capture.waitFrames > FF6_CAPTURE_MAX_TALK_FRAMES) {
                     throw std::runtime_error("invalid --wait");
                 }
+            } else if (option == "--menu") {
+                capture.menuCursor = std::stoi(argv[i + 1]);
+                if (capture.menuCursor < 0 || capture.menuCursor >= FF6_MENU_ITEM_COUNT) throw std::runtime_error("invalid --menu");
+            } else if (option == "--select") {
+                capture.menuSelect = std::stoi(argv[i + 1]);
+            } else if (option == "--down") {
+                capture.menuDowns = std::stoi(argv[i + 1]);
             } else if (option == "--talk") {
                 capture.talkFrames = std::stoi(argv[i + 1]);
                 if (capture.talkFrames < 0 || capture.talkFrames > FF6_CAPTURE_MAX_TALK_FRAMES) {
@@ -225,7 +256,7 @@ int main(int argc, char** argv) {
                 throw std::runtime_error("unknown option " + option);
             }
         }
-        if (capture.path.empty() && (!capture.moves.empty() || capture.talkFrames >= 0 || capture.waitFrames > 0 || capture.atX >= 0)) {
+        if (capture.path.empty() && (!capture.moves.empty() || capture.talkFrames >= 0 || capture.menuCursor >= 0 || capture.waitFrames > 0 || capture.atX >= 0)) {
             throw std::runtime_error("--at, --wait, --moves and --talk require --capture");
         }
         Start start;

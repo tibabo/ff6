@@ -22,4 +22,5 @@ void testText();
 void testEntrance();
 void testEvent();
 void testEventCmd();
+void testMenu();
 void testGame();

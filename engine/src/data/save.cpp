@@ -1,5 +1,6 @@
 #include "data/save.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -73,6 +74,12 @@ std::string saveToJson(const SaveState& state) {
     } else {
         out << "null";
     }
+    out << ",\n  \"config\": ";
+    appendList(out, std::vector<int>(state.config.begin(), state.config.end()));
+    if (state.hasColors) {
+        out << ",\n  \"fontColor\": " << state.fontColor << ",\n  \"windowColors\": ";
+        appendList(out, std::vector<int>(state.windowColors.begin(), state.windowColors.end()));
+    }
     out << "\n}\n";
     return out.str();
 }
@@ -115,6 +122,18 @@ SaveState saveFromJson(const std::string& text) {
         state.parentX = number(*parent, "x", 0, FF6_MAX_TILE);
         state.parentY = number(*parent, "y", 0, FF6_MAX_TILE);
         state.parentFacing = number(*parent, "facing", 0, FF6_DIRECTION_COUNT - 1);
+    }
+    if (root.find("config")) {
+        const std::vector<int> config = ids(root, "config", FF6_BYTE_VALUES);
+        if (config.size() != state.config.size()) throw std::runtime_error("save: there must be 3 config bytes");
+        std::copy(config.begin(), config.end(), state.config.begin());
+    }
+    if (root.find("windowColors")) {
+        state.fontColor = number(root, "fontColor", 0, FF6_MAX_COLOR);
+        const std::vector<int> colors = ids(root, "windowColors", FF6_MAX_COLOR + 1);
+        if (colors.size() != state.windowColors.size()) throw std::runtime_error("save: there must be 56 window colors");
+        std::copy(colors.begin(), colors.end(), state.windowColors.begin());
+        state.hasColors = true;
     }
     return state;
 }

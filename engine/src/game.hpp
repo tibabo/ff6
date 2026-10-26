@@ -19,10 +19,14 @@
 #include "field/scroll.hpp"
 #include "field/text.hpp"
 #include "input.hpp"
+#include "menu/field_menu.hpp"
 #include "renderer.hpp"
 #include "sound.hpp"
 
 namespace ff6 {
+
+// The menu takes the screen: the field fades out, the menu fades in, and the other way round when it is closed.
+enum class MenuPhase { Closed, FadingOut, Open, Leaving };
 
 // The field: game state and the drawing of it. It reaches the graphics library only through Renderer.
 class Game : private EventHost {
@@ -50,6 +54,9 @@ public:
     // The screen brightness, FF6_BRIGHTNESS_FULL when it is lit; the fades move it.
     int brightness() const { return brightness_; }
     bool fading() const override { return fade_ != 0; }
+    MenuPhase menuPhase() const { return menuPhase_; }
+    const FieldMenu& menu() const { return menu_; }
+    const GameConfig& config() const { return config_; }
     // Ends the fades at once, for captures.
     void finishFade();
 
@@ -83,6 +90,8 @@ private:
     bool openDoor(int direction);
     void changeMapData(const uint8_t* bytes, size_t size);
     void moveParty(int tileX, int tileY);
+    void tickMenu(const InputState& input);
+    MenuStatus menuStatus() const;
     void leaveThroughEntrance(const EntranceTarget& target);
     void composeDialogue();
     void drawSprites(bool above);
@@ -99,6 +108,11 @@ private:
     Dialogue dialogue_;
     EventBits bits_;
     EventRunner event_;
+    MenuData menuData_;
+    MenuScreen menuScreen_;
+    FieldMenu menu_;
+    MenuPhase menuPhase_ = MenuPhase::Closed;
+    GameConfig config_;
     uint32_t frame_ = 0;
     std::set<int> warnedObjects_;  // objects that are not there, reported once
     bool screenLocked_ = false;  // the screen follows the camera object instead of the party

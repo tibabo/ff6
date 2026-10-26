@@ -183,6 +183,33 @@ void testGame() {
         CHECK(moved.player().moving());
     }
 
+    {  // the menu button fades the field out and the menu in; the cancel button brings the field back
+        ff6::Game menuGame(ff6::loadCommonData(pack), pack, 0x1C, renderer, sound, {0, 1});
+        for (int i = 0; i < 80; ++i) menuGame.tick(idle);
+        CHECK(menuGame.menuPhase() == ff6::MenuPhase::Closed && menuGame.brightness() == FF6_BRIGHTNESS_FULL);
+        const int tileY = menuGame.player().tileY();
+        ff6::InputState press;
+        press.menu = true;
+        menuGame.tick(press);
+        CHECK(menuGame.menuPhase() == ff6::MenuPhase::FadingOut);
+        for (int i = 0; i < 100 && menuGame.menuPhase() != ff6::MenuPhase::Open; ++i) menuGame.tick(idle);
+        CHECK(menuGame.menuPhase() == ff6::MenuPhase::Open);
+        for (int i = 0; i < 30; ++i) menuGame.tick(idle);
+        CHECK(menuGame.brightness() == FF6_BRIGHTNESS_FULL && !menuGame.menu().closed());
+        const size_t frames = renderer.frames;
+        menuGame.draw();
+        CHECK(renderer.frames == frames + 1);
+        menuGame.tick({ff6::Down, false});  // the party does not walk while the menu is open
+        ff6::InputState cancel;
+        cancel.cancel = true;
+        menuGame.tick(cancel);
+        CHECK(menuGame.menu().closed() && menuGame.menuPhase() == ff6::MenuPhase::Leaving);
+        for (int i = 0; i < 100 && menuGame.menuPhase() != ff6::MenuPhase::Closed; ++i) menuGame.tick(idle);
+        for (int i = 0; i < 30; ++i) menuGame.tick(idle);
+        CHECK(menuGame.menuPhase() == ff6::MenuPhase::Closed && menuGame.brightness() == FF6_BRIGHTNESS_FULL);
+        CHECK(menuGame.player().tileY() == tileY && !menuGame.player().moving());
+    }
+
     {  // a saved game goes on with the same map, party and story, also after it went through JSON
         ff6::Game origin(ff6::loadCommonData(pack), pack, 0x1C, renderer, sound, {0, 1, 4, 5});
         for (int i = 0; i < 40; ++i) origin.tick(idle);

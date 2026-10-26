@@ -23,7 +23,14 @@ add_library(ff6_core STATIC
   src/field/player.cpp
   src/field/scroll.cpp
   src/field/sprite_data.cpp
-  src/field/text.cpp)
+  src/field/text.cpp
+  src/field/window.cpp
+  src/menu/config_menu.cpp
+  src/menu/field_menu.cpp
+  src/menu/item_menu.cpp
+  src/menu/menu_data.cpp
+  src/menu/menu_screen.cpp
+  src/menu/window_style.cpp)
 target_include_directories(ff6_core PUBLIC src)
 
 # Game state and drawing through the abstract ff6::Renderer: still no graphics library.
@@ -75,7 +82,8 @@ if(BUILD_TESTING)
     tests/field/player_tests.cpp
     tests/field/scroll_tests.cpp
     tests/field/sprite_data_tests.cpp
-    tests/field/text_tests.cpp)
+    tests/field/text_tests.cpp
+    tests/menu/menu_tests.cpp)
   target_link_libraries(ff6_tests PRIVATE ff6_game ff6_audio)
   add_test(NAME ff6_tests COMMAND ff6_tests)
 endif()
