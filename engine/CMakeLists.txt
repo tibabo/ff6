@@ -25,6 +25,7 @@ add_library(ff6_core STATIC
   src/field/sprite_data.cpp
   src/field/text.cpp
   src/field/window.cpp
+  src/menu/character_menu.cpp
   src/menu/config_menu.cpp
   src/menu/field_menu.cpp
   src/menu/item_menu.cpp

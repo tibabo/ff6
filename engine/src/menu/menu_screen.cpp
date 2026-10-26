@@ -22,6 +22,11 @@ uint8_t menuCode(char character) {
     return FF6_MENU_CODE_SPACE;
 }
 
+int menuPortrait(int character) {
+    static constexpr int kPortraits[FF6_CHAR_COUNT] = FF6_MENU_PORTRAITS_OF_CHARACTER;
+    return character >= 0 && character < FF6_CHAR_COUNT ? kPortraits[character] : -1;
+}
+
 MenuScreen::MenuScreen(const CommonData& common, const MenuData& menu) : common_(common), menu_(menu) {
     pixels_.assign(static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL, 0);
 }

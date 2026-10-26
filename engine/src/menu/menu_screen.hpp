@@ -57,5 +57,7 @@ private:
 
 // The code of a character of the text of the menus, FF6_MENU_CODE_SPACE for one that the font does not have.
 uint8_t menuCode(char character);
+// The portrait of a character of the game, from 0 for Terra.
+int menuPortrait(int character);
 
 }  // namespace ff6

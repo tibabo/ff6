@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "input.hpp"
+#include "menu/character_menu.hpp"
 #include "menu/config_menu.hpp"
 #include "menu/item_menu.hpp"
 #include "menu/menu_input.hpp"
@@ -10,12 +11,6 @@
 #include "sound.hpp"
 
 namespace ff6 {
-
-// A character as the menu shows it.
-struct MenuCharacter {
-    int id = 0;  // the character, 0 for Terra
-    int level = 0, hp = 0, maxHp = 0, mp = 0, maxMp = 0;
-};
 
 // What the main menu shows of the game.
 struct MenuStatus {
@@ -30,7 +25,8 @@ struct MenuStatus {
 class FieldMenu {
 public:
     FieldMenu(MenuScreen& screen, Sound& sound)
-        : screen_(screen), sound_(sound), configMenu_(screen, sound), itemMenu_(screen, sound) {}
+        : screen_(screen), sound_(sound), configMenu_(screen, sound), itemMenu_(screen, sound),
+          characterMenu_(screen, sound) {}
 
     // Opens the menu; the cursor is where the player left it if the cursor memory of the config is on. The settings
     // must stay valid while the menu is open.
@@ -44,9 +40,22 @@ public:
     const ConfigMenu& configMenu() const { return configMenu_; }
     bool inItems() const { return inItems_; }
     const ItemMenu& itemMenu() const { return itemMenu_; }
+    // The hand is on the characters, to choose the one of Skills, Equip, Relic or Status; or the screen of one is open.
+    bool choosingCharacter() const { return choosing_; }
+    bool inCharacter() const { return inCharacter_; }
+    int selectedCharacter() const { return selected_; }
+    const CharacterMenu& characterMenu() const { return characterMenu_; }
+    // The save option was confirmed; true once, until the next time.
+    bool takeSaveRequest() {
+        const bool requested = saveRequested_;
+        saveRequested_ = false;
+        return requested;
+    }
+    bool confirmingSave() const { return confirmingSave_; }
 
 private:
     void moveCursor(int step);
+    void drawMain(bool handOnOptions, bool showOptions);
     void drawCharacter(const MenuCharacter& character, int slot);
 
     MenuScreen& screen_;
@@ -54,9 +63,16 @@ private:
     MenuStatus status_;
     ConfigMenu configMenu_;
     ItemMenu itemMenu_;
+    CharacterMenu characterMenu_;
     GameConfig* config_ = nullptr;
     bool inConfig_ = false;  // the config menu is on the screen
     bool inItems_ = false;  // the item menu is
+    bool choosing_ = false;  // the hand is on the characters
+    bool inCharacter_ = false;  // the screen of the character that was chosen is open
+    int selected_ = 0;  // the slot of the character
+    bool confirmingSave_ = false;  // the question of the save is asked
+    bool saveYes_ = true;  // the answer where the hand is
+    bool saveRequested_ = false;
     int cursor_ = 0;
     bool closed_ = false;
     DirectionRepeat repeat_;

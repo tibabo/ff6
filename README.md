@@ -247,9 +247,15 @@ Limites actuelles :
   liste de l'inventaire (noms de la ROM, quantites, defilement) avec les
   options Use, Arrange et Rare ; l'inventaire est un inventaire de
   remplacement, les descriptions ne sont pas extraites et les objets ne
-  peuvent pas encore etre utilises. Les autres options ne sont pas encore
-  branchees (le son d'erreur est joue), et les statistiques des
-  personnages, l'argent et les pas sont des valeurs de remplacement.
+  peuvent pas encore etre utilises. Skills, Equip, Relic et Status demandent
+  un personnage (la main se pose sur les portraits) puis ouvrent son ecran :
+  etat, equipement, listes de competences ; ils ne font que montrer des
+  valeurs de remplacement (niveau 1, 100 PV, statistiques 25, un poignard en
+  main droite, categories de competences supposees) et l'equipement ne peut
+  pas etre change. Save demande « Erasing data. Okay? » puis ecrit le JSON
+  de sauvegarde (le meme fichier que F5). Order (gauche) n'est pas porte.
+  Les positions des ecrans de personnage sont une mise en page a moi,
+  inspiree des textes du jeu, pas celle de la console.
   `--capture ... --menu n [--select k] [--down k]` capture le menu avec le
   curseur sur l'option n, en appuyant k fois sur la validation puis k fois
   sur bas.

@@ -192,6 +192,14 @@ int run(const std::string& packDir, const Start& start, const std::string& saveP
     ff6::SdlAudio sound(program);
     const std::unique_ptr<ff6::Game> game = makeGame(std::move(common), packDir, start, renderer, sound);
     if (music >= 0) sound.command(FF6_SOUND_PLAY_SONG, static_cast<uint8_t>(music), FF6_SOUND_FULL_VOLUME);  // over the song of the map
+    game->setSaveHandler([&savePath](const ff6::SaveState& state) {
+        try {
+            ff6::writeSave(savePath, state);
+            std::printf("Saved the game to %s\n", savePath.c_str());
+        } catch (const std::exception& error) {
+            std::fprintf(stderr, "Could not save: %s\n", error.what());
+        }
+    });
     playGame(*game, renderer, savePath);
     return 0;
 }

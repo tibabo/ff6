@@ -600,6 +600,11 @@ MenuStatus Game::menuStatus() const {
         character.level = FF6_MENU_PLACEHOLDER_LEVEL;
         character.hp = character.maxHp = FF6_MENU_PLACEHOLDER_HP;
         character.mp = character.maxMp = FF6_MENU_PLACEHOLDER_MP;
+        character.vigor = character.speed = character.stamina = character.magicPower = FF6_MENU_PLACEHOLDER_STAT;
+        character.attackPower = character.defense = character.magicDefense = FF6_MENU_PLACEHOLDER_STAT;
+        character.evade = character.magicEvade = FF6_MENU_PLACEHOLDER_EVADE;
+        character.nextLevel = FF6_MENU_PLACEHOLDER_NEXT_LEVEL;
+        character.equipment[0] = 0;  // a dirk in the right hand
         status.party.push_back(character);
     }
     for (int i = 0; i < FF6_ITEM_PLACEHOLDER_COUNT; ++i) status.items.push_back({FF6_ITEM_PLACEHOLDER_FIRST + i, 1 + i * 3 % 7});
@@ -617,6 +622,7 @@ void Game::tickMenu(const InputState& input) {
         startFade(true, FF6_BRIGHTNESS_STEP);
     } else if (menuPhase_ == MenuPhase::Open) {
         menu_.update(input);
+        if (menu_.takeSaveRequest() && saveHandler_) saveHandler_(saveState());
         if (menu_.closed()) {
             menuPhase_ = MenuPhase::Leaving;
             startFade(false, FF6_BRIGHTNESS_STEP);

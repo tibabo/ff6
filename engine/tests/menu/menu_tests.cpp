@@ -104,11 +104,13 @@ void testMenu() {
         CHECK(field.cursor() == 1);
         field.update({});
         field.draw();  // the party, the options and the hand are drawn without trouble
-        field.update({FF6_NO_DIRECTION, true});
-        CHECK(sound.commands.back().command == FF6_SFX_MENU_INVALID);  // the other options are not ported yet
-        CHECK(!field.closed());
+        field.update({FF6_NO_DIRECTION, true});  // the second option, Skills, asks for a character
+        CHECK(field.choosingCharacter() && sound.commands.back().command == FF6_SFX_MENU_SELECT);
+        field.draw();
         ff6::InputState cancel;
         cancel.cancel = true;
+        field.update(cancel);  // back to the options
+        CHECK(!field.choosingCharacter() && !field.closed());
         field.update(cancel);
         CHECK(field.closed());
         field.open(status, config);  // the cursor goes back to the first option, unless the config asks to remember it
@@ -204,6 +206,87 @@ void testMenu() {
         cancel.cancel = true;
         field.update(cancel);
         CHECK(!field.inConfig() && !field.closed());  // back to the menu
+    }
+
+    {  // the screens of a character, and the save question
+        ff6::MenuScreen screen(common, menu);
+        test::RecordingSound sound;
+        ff6::FieldMenu field(screen, sound);
+        ff6::GameConfig config;
+        ff6::MenuStatus status;
+        for (const int id : {0, 5, 11}) {
+            ff6::MenuCharacter character;
+            character.id = id;
+            character.level = 3;
+            character.equipment[0] = 5;
+            status.party.push_back(character);
+        }
+        const auto press = [&](int direction) {
+            field.update({direction, false});
+            field.update({});
+        };
+        const auto select = [&] { field.update({FF6_NO_DIRECTION, true}); };
+        ff6::InputState cancel;
+        cancel.cancel = true;
+
+        field.open(status, config);
+        for (int option = 0; option < 4; ++option) press(ff6::Down);  // Status is the fifth option
+        select();
+        CHECK(field.choosingCharacter() && field.selectedCharacter() == 0);
+        press(ff6::Up);  // the characters wrap
+        CHECK(field.selectedCharacter() == 2);
+        press(ff6::Down);
+        press(ff6::Down);
+        CHECK(field.selectedCharacter() == 1);
+        field.draw();
+        select();
+        CHECK(field.inCharacter() && field.characterMenu().which() == ff6::CharacterScreen::Status);
+        field.draw();
+        select();  // nothing to do on the status
+        field.update(cancel);
+        CHECK(!field.inCharacter() && field.choosingCharacter());
+        field.update(cancel);
+        CHECK(!field.choosingCharacter() && !field.closed());
+
+        press(ff6::Up);  // Relic: two rows, and the list does not wrap
+        select();
+        select();
+        CHECK(field.characterMenu().which() == ff6::CharacterScreen::Relic && field.characterMenu().cursor() == 0);
+        press(ff6::Down);
+        press(ff6::Down);
+        CHECK(field.characterMenu().cursor() == 1);
+        field.draw();
+        select();
+        CHECK(sound.commands.back().command == FF6_SFX_MENU_INVALID);  // the equipment cannot be changed yet
+        field.update(cancel);
+        field.update(cancel);
+        press(ff6::Up);  // Equip, then Skills
+        press(ff6::Up);
+        select();
+        select();
+        CHECK(field.characterMenu().which() == ff6::CharacterScreen::Skills);
+        press(ff6::Down);
+        CHECK(field.characterMenu().cursor() == 1);
+        field.draw();
+        field.update(cancel);
+        field.update(cancel);
+
+        // Save asks first, and a no or the cancel button does not save.
+        for (int option = 0; option < 5; ++option) press(ff6::Down);
+        CHECK(field.cursor() == FF6_MENU_SAVE_ITEM);
+        select();
+        CHECK(field.confirmingSave());
+        field.draw();
+        press(ff6::Down);  // no
+        select();
+        CHECK(!field.confirmingSave() && !field.takeSaveRequest());
+        select();
+        field.update(cancel);
+        CHECK(!field.confirmingSave() && !field.takeSaveRequest());
+        select();
+        select();  // yes
+        CHECK(!field.confirmingSave() && sound.commands.back().command == FF6_SFX_MENU_SUCCESS);
+        CHECK(field.takeSaveRequest() && !field.takeSaveRequest());  // the request is taken once
     }
 
     {  // the item menu: the options at the top, then the list, which scrolls and does not wrap

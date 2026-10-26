@@ -552,6 +552,14 @@
 #define FF6_SFX_MENU_INVALID 0x22
 #define FF6_MENU_ITEM_COUNT 7  // Item, Skills, Equip, Relic, Status, Config, Save
 #define FF6_MENU_ITEM_ITEM 0
+#define FF6_MENU_FIRST_CHARACTER_ITEM 1  // Skills, Equip, Relic and Status ask for a character
+#define FF6_MENU_LAST_CHARACTER_ITEM 4
+#define FF6_MENU_SAVE_ITEM 6
+#define FF6_MENU_CHARACTER_CURSOR_X 8
+#define FF6_MENU_CHARACTER_CURSOR_Y 40
+#define FF6_MENU_SAVE_CURSOR_X 192
+#define FF6_MENU_SAVE_CURSOR_Y 68
+#define FF6_SFX_MENU_SUCCESS 0x23
 #define FF6_MENU_CONFIG_ITEM 5
 #define FF6_MENU_OPTIONS_TEXT_X 24
 #define FF6_MENU_OPTIONS_TEXT_Y 2  // the disassembly says 3, which draws Save over the frame; this fits the 13 rows of the window
@@ -561,6 +569,14 @@
 #define FF6_MENU_BLOCK_STEP 6  // rows between the blocks of the characters
 #define FF6_MENU_FRAMES_PER_HOUR (FF6_FRAMES_PER_SECOND * 3600)
 #define FF6_ITEM_COUNT 256  // the items of the game, and the places of the inventory
+#define FF6_ITEM_EMPTY 0xFF
+#define FF6_MENU_EQUIP_SLOTS 6  // right hand, left hand, head, body and two relics
+#define FF6_MENU_SKILL_LISTS 7  // espers, magic, sword techniques, blitzes, lores, rages and dances
+#define FF6_MENU_EQUIP_CURSOR_X 8
+#define FF6_MENU_SKILL_CURSOR_X 0
+#define FF6_MENU_PLACEHOLDER_STAT 25
+#define FF6_MENU_PLACEHOLDER_EVADE 5
+#define FF6_MENU_PLACEHOLDER_NEXT_LEVEL 32
 #define FF6_ITEM_NAME_BYTES 13
 #define FF6_ITEM_ROWS 10  // the rows of the list of the item menu
 #define FF6_ITEM_ROW_HEIGHT 12

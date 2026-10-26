@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -57,6 +58,8 @@ public:
     MenuPhase menuPhase() const { return menuPhase_; }
     const FieldMenu& menu() const { return menu_; }
     const GameConfig& config() const { return config_; }
+    // What the Save option of the menu does with the state of the game; without one, it saves nothing.
+    void setSaveHandler(std::function<void(const SaveState&)> handler) { saveHandler_ = std::move(handler); }
     // Ends the fades at once, for captures.
     void finishFade();
 
@@ -113,6 +116,7 @@ private:
     FieldMenu menu_;
     MenuPhase menuPhase_ = MenuPhase::Closed;
     GameConfig config_;
+    std::function<void(const SaveState&)> saveHandler_;
     uint32_t frame_ = 0;
     std::set<int> warnedObjects_;  // objects that are not there, reported once
     bool screenLocked_ = false;  // the screen follows the camera object instead of the party
