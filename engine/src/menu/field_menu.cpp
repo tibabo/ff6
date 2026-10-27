@@ -51,6 +51,7 @@ void FieldMenu::update(const InputState& input) {
     if (inCharacter_) {
         characterMenu_.update(input);
         if (characterMenu_.closed()) {
+            status_.party[static_cast<size_t>(selected_)] = characterMenu_.character();  // the equipment may have changed
             inCharacter_ = false;
             repeat_.reset();
         }
@@ -59,6 +60,7 @@ void FieldMenu::update(const InputState& input) {
     if (inItems_) {
         itemMenu_.update(input);
         if (itemMenu_.closed()) {
+            if (!itemMenu_.party().empty()) status_.party = itemMenu_.party();  // the items may have healed them
             inItems_ = false;
             repeat_.reset();
         }
@@ -86,7 +88,8 @@ void FieldMenu::update(const InputState& input) {
             static constexpr CharacterScreen kScreens[] = {CharacterScreen::Skills, CharacterScreen::Equip,
                                                            CharacterScreen::Relic, CharacterScreen::Status};
             sound_.command(FF6_SFX_MENU_SELECT, 0, 0);
-            characterMenu_.open(kScreens[cursor_ - FF6_MENU_FIRST_CHARACTER_ITEM], status_.party[static_cast<size_t>(selected_)]);
+            characterMenu_.open(kScreens[cursor_ - FF6_MENU_FIRST_CHARACTER_ITEM], status_.party[static_cast<size_t>(selected_)],
+                                &status_.equip);
             inCharacter_ = true;
         }
         return;
@@ -113,7 +116,7 @@ void FieldMenu::update(const InputState& input) {
         closed_ = true;
     } else if (input.confirm && cursor_ == FF6_MENU_ITEM_ITEM) {
         sound_.command(FF6_SFX_MENU_SELECT, 0, 0);
-        itemMenu_.open(status_.items);
+        itemMenu_.open(status_.item.items ? status_.item.items() : status_.items, status_.party, &status_.item);
         inItems_ = true;
     } else if (input.confirm && cursor_ == FF6_MENU_CONFIG_ITEM) {
         sound_.command(FF6_SFX_MENU_SELECT, 0, 0);

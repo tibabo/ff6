@@ -1,5 +1,6 @@
 #include "menu/character_menu.hpp"
 
+#include <algorithm>
 #include <cstdio>
 
 #include "field/map.hpp"
@@ -26,27 +27,63 @@ const char* const kSlotNames[FF6_MENU_EQUIP_SLOTS] = {"R-hand", "L-hand", "Head"
 const char* const kSkillNames[FF6_MENU_SKILL_LISTS] = {"Espers", "Magic", "SwdTech", "Blitz", "Lore", "Rage", "Dance"};
 const int kSkillRows[FF6_MENU_SKILL_LISTS] = {3, 5, 9, 11, 13, 15, 17};
 
-// Who has which list of skills: the espers are not in the placeholder inventory, so nobody has them.
-bool hasSkills(int list, int character) {
-    switch (list) {
-        case 1: return character == 0 || character == 6 || character == 7 || character == 8;  // magic
-        case 2: return character == 2;  // sword techniques
-        case 3: return character == 5;  // blitzes
-        case 4: return character == 7;  // lores
-        case 5: return character == 11;  // rages
-        case 6: return character == 10;  // dances
-        default: return false;
-    }
-}
-
 }  // namespace
 
-void CharacterMenu::open(CharacterScreen which, const MenuCharacter& character) {
+void CharacterMenu::open(CharacterScreen which, const MenuCharacter& character, const EquipHooks* hooks) {
     which_ = which;
     character_ = character;
+    hooks_ = hooks;
+    picking_ = false;
+    listing_ = false;
     closed_ = false;
     cursor_ = 0;
     repeat_.reset();
+}
+
+int CharacterMenu::slot() const { return which_ == CharacterScreen::Relic ? FF6_EQUIP_FIRST_RELIC + cursor_ : cursor_; }
+
+// The list of what fits the slot, with the choice of taking the item off first.
+void CharacterMenu::startPick() {
+    if (!hooks_ || !hooks_->choices) {
+        sound_.command(FF6_SFX_MENU_INVALID, 0, 0);
+        return;
+    }
+    choices_ = {FF6_ITEM_EMPTY};
+    for (const int item : hooks_->choices(character_.id, slot())) choices_.push_back(item);
+    pickCursor_ = pickScroll_ = 0;
+    picking_ = true;
+    sound_.command(FF6_SFX_MENU_SELECT, 0, 0);
+    updatePreview();
+}
+
+void CharacterMenu::updatePreview() {
+    preview_ = hooks_ && hooks_->preview ? hooks_->preview(character_.id, slot(), choices_[static_cast<size_t>(pickCursor_)])
+                                         : character_;
+}
+
+void CharacterMenu::updatePick(int direction, const InputState& input) {
+    const int count = static_cast<int>(choices_.size());
+    const int before = pickCursor_;
+    if (direction == Up && pickCursor_ > 0) --pickCursor_;
+    if (direction == Down && pickCursor_ < count - 1) ++pickCursor_;
+    if (pickCursor_ != before) {
+        sound_.command(FF6_SFX_MENU_MOVE, 0, 0);
+        if (pickCursor_ < pickScroll_) pickScroll_ = pickCursor_;
+        if (pickCursor_ >= pickScroll_ + FF6_EQUIP_LIST_ROWS) pickScroll_ = pickCursor_ - FF6_EQUIP_LIST_ROWS + 1;
+        updatePreview();
+    }
+    if (input.cancel) {
+        sound_.command(FF6_SFX_MENU_MOVE, 0, 0);
+        picking_ = false;
+    } else if (input.confirm) {
+        if (hooks_ && hooks_->equip) {
+            character_ = hooks_->equip(character_.id, slot(), choices_[static_cast<size_t>(pickCursor_)]);
+            sound_.command(FF6_SFX_MENU_SELECT, 0, 0);
+        } else {
+            sound_.command(FF6_SFX_MENU_INVALID, 0, 0);
+        }
+        picking_ = false;
+    }
 }
 
 int CharacterMenu::rows() const {
@@ -60,6 +97,28 @@ int CharacterMenu::rows() const {
 
 void CharacterMenu::update(const InputState& input) {
     const int direction = repeat_.update(input.direction);
+    if (picking_) {
+        updatePick(direction, input);
+        return;
+    }
+    if (listing_) {  // the names of one category: they can be browsed, nothing is cast from here
+        const int size = static_cast<int>(character_.skills[static_cast<size_t>(cursor_)].size());
+        const int before = listCursor_;
+        if (direction == Up) listCursor_ = std::max(listCursor_ - 1, 0);
+        if (direction == Down) listCursor_ = std::min(listCursor_ + 1, size - 1);
+        if (listCursor_ != before) {
+            sound_.command(FF6_SFX_MENU_MOVE, 0, 0);
+            if (listCursor_ < listScroll_) listScroll_ = listCursor_;
+            if (listCursor_ >= listScroll_ + FF6_SKILL_LIST_ROWS) listScroll_ = listCursor_ - FF6_SKILL_LIST_ROWS + 1;
+        }
+        if (input.cancel) {
+            sound_.command(FF6_SFX_MENU_MOVE, 0, 0);
+            listing_ = false;
+        } else if (input.confirm) {
+            sound_.command(FF6_SFX_MENU_INVALID, 0, 0);
+        }
+        return;
+    }
     const int count = rows();
     if (count > 1) {  // the lists do not wrap
         if (direction == Up && cursor_ > 0) {
@@ -73,8 +132,14 @@ void CharacterMenu::update(const InputState& input) {
     if (input.cancel) {
         sound_.command(FF6_SFX_MENU_MOVE, 0, 0);
         closed_ = true;
+    } else if (input.confirm && (which_ == CharacterScreen::Equip || which_ == CharacterScreen::Relic)) {
+        startPick();
+    } else if (input.confirm && which_ == CharacterScreen::Skills && !character_.skills[static_cast<size_t>(cursor_)].empty()) {
+        sound_.command(FF6_SFX_MENU_SELECT, 0, 0);
+        listing_ = true;
+        listCursor_ = listScroll_ = 0;
     } else if (input.confirm && which_ != CharacterScreen::Status) {
-        sound_.command(FF6_SFX_MENU_INVALID, 0, 0);  // the equipment and the skills cannot be changed or listed yet
+        sound_.command(FF6_SFX_MENU_INVALID, 0, 0);  // nothing to list or to equip here
     }
 }
 
@@ -117,29 +182,59 @@ void CharacterMenu::drawStatus() {
 
 void CharacterMenu::drawEquip() {
     const bool relic = which_ == CharacterScreen::Relic;
+    const MenuCharacter& shown = picking_ ? preview_ : character_;  // with the item that the hand is on
+    const MenuData& data = screen_.data();
+    const auto itemName = [&](int item) {
+        const uint8_t* name = data.itemNames.data() + static_cast<size_t>(item) * FF6_ITEM_NAME_BYTES;
+        return std::vector<uint8_t>(name, name + FF6_ITEM_NAME_BYTES);
+    };
+    if (picking_) screen_.window(1, FF6_EQUIP_STAT_ROW - 1, FF6_EQUIP_LIST_WIDTH, FF6_EQUIP_LIST_ROWS);
     screen_.text(2, 2, relic ? "RELIC" : "EQUIP", Layer::Bg3, FF6_MENU_BG3_TEAL);
     drawName(10, 4);
-    const MenuData& data = screen_.data();
     for (int slot = 0; slot < FF6_MENU_EQUIP_SLOTS; ++slot) {
-        const int row = 7 + 2 * slot;
-        screen_.text(3, row, kSlotNames[slot], Layer::Bg3, relic && slot < 4 ? FF6_MENU_BG3_GRAY : FF6_MENU_BG3_TEAL);
-        const int item = character_.equipment[slot];
+        const int row = FF6_EQUIP_SLOT_ROW + slot;
+        screen_.text(3, row, kSlotNames[slot], Layer::Bg3, relic && slot < FF6_EQUIP_FIRST_RELIC ? FF6_MENU_BG3_GRAY : FF6_MENU_BG3_TEAL);
+        const int item = shown.equipment[slot];
         if (item == FF6_ITEM_EMPTY) {
             screen_.text(10, row, "Empty", Layer::Bg1, FF6_MENU_BG1_GRAY);
-            continue;
+        } else {
+            screen_.codes(10, row, itemName(item), Layer::Bg1, FF6_MENU_BG1_DEFAULT);
         }
-        const uint8_t* name = &data.itemNames[static_cast<size_t>(item) * FF6_ITEM_NAME_BYTES];
-        screen_.codes(10, row, std::vector<uint8_t>(name, name + FF6_ITEM_NAME_BYTES), Layer::Bg1, FF6_MENU_BG1_DEFAULT);
     }
-    const int slot = relic ? FF6_MENU_EQUIP_SLOTS - 2 + cursor_ : cursor_;
-    screen_.hand(FF6_MENU_EQUIP_CURSOR_X, 7 * FF6_MENU_TILE_SIZE + 2 * slot * FF6_MENU_TILE_SIZE + FF6_ITEM_CURSOR_DY);
+    // The statistics; while an item is picked, the ones that it changes are yellow when higher and gray when lower.
+    struct Stat { const char* label; int MenuCharacter::*value; };
+    static const Stat kStats[] = {{"Vigor", &MenuCharacter::vigor}, {"Speed", &MenuCharacter::speed},
+                                  {"Stamina", &MenuCharacter::stamina}, {"Mag.Pwr", &MenuCharacter::magicPower},
+                                  {"Bat.Pwr", &MenuCharacter::attackPower}, {"Defense", &MenuCharacter::defense},
+                                  {"Evade %", &MenuCharacter::evade}, {"Mag.Def", &MenuCharacter::magicDefense},
+                                  {"MBlock%", &MenuCharacter::magicEvade}};
+    int row = FF6_EQUIP_STAT_ROW;
+    for (const Stat& stat : kStats) {
+        const int now = character_.*stat.value, then = shown.*stat.value;
+        screen_.text(FF6_EQUIP_STAT_LABEL_X, row, stat.label, Layer::Bg3, FF6_MENU_BG3_TEAL);
+        screen_.text(FF6_EQUIP_STAT_VALUE_X, row++, number(then, 3), Layer::Bg3,
+                     then > now ? FF6_MENU_BG3_YELLOW : then < now ? FF6_MENU_BG3_GRAY : FF6_MENU_BG3_DEFAULT);
+    }
+    if (!picking_) {
+        screen_.hand(FF6_MENU_EQUIP_CURSOR_X, (FF6_EQUIP_SLOT_ROW + slot()) * FF6_MENU_TILE_SIZE + FF6_ITEM_CURSOR_DY);
+        return;
+    }
+    for (int i = 0; i < FF6_EQUIP_LIST_ROWS && pickScroll_ + i < static_cast<int>(choices_.size()); ++i) {
+        const int item = choices_[static_cast<size_t>(pickScroll_ + i)];
+        if (item == FF6_ITEM_EMPTY) {
+            screen_.text(FF6_EQUIP_LIST_X, FF6_EQUIP_STAT_ROW + i, "Remove", Layer::Bg1, FF6_MENU_BG1_DEFAULT);
+        } else {
+            screen_.codes(FF6_EQUIP_LIST_X, FF6_EQUIP_STAT_ROW + i, itemName(item), Layer::Bg1, FF6_MENU_BG1_DEFAULT);
+        }
+    }
+    screen_.hand(FF6_MENU_EQUIP_CURSOR_X, (FF6_EQUIP_STAT_ROW + pickCursor_ - pickScroll_) * FF6_MENU_TILE_SIZE + FF6_ITEM_CURSOR_DY);
 }
 
 void CharacterMenu::drawSkills() {
     const MenuCharacter& c = character_;
     for (int list = 0; list < FF6_MENU_SKILL_LISTS; ++list) {
         screen_.text(3, kSkillRows[list], kSkillNames[list], Layer::Bg3,
-                     hasSkills(list, c.id) ? FF6_MENU_BG3_DEFAULT : FF6_MENU_BG3_GRAY);
+                     !c.skills[static_cast<size_t>(list)].empty() ? FF6_MENU_BG3_DEFAULT : FF6_MENU_BG3_GRAY);
     }
     drawName(18, 5);
     screen_.text(18, 7, "LV", Layer::Bg1, FF6_MENU_BG1_TEAL);
@@ -152,6 +247,16 @@ void CharacterMenu::drawSkills() {
     screen_.text(21, 11, number(c.mp, 4), Layer::Bg1, FF6_MENU_BG1_DEFAULT);
     screen_.text(25, 11, "/", Layer::Bg1, FF6_MENU_BG1_DEFAULT);
     screen_.text(26, 11, number(c.maxMp, 4), Layer::Bg1, FF6_MENU_BG1_DEFAULT);
+    if (listing_) {  // the names of the category over the right of the screen
+        const SkillList& names = c.skills[static_cast<size_t>(cursor_)];
+        screen_.window(FF6_SKILL_LIST_WINDOW_X, 3, FF6_SKILL_LIST_WINDOW_WIDTH, FF6_SKILL_LIST_ROWS + 2);
+        for (int i = 0; i < FF6_SKILL_LIST_ROWS && listScroll_ + i < static_cast<int>(names.size()); ++i) {
+            screen_.codes(FF6_SKILL_LIST_X, 4 + i, names[static_cast<size_t>(listScroll_ + i)], Layer::Bg1, FF6_MENU_BG1_DEFAULT);
+        }
+        screen_.hand(FF6_SKILL_LIST_X * FF6_MENU_TILE_SIZE - FF6_MENU_CURSOR_SIZE,
+                     (4 + listCursor_ - listScroll_) * FF6_MENU_TILE_SIZE + FF6_ITEM_CURSOR_DY);
+        return;
+    }
     screen_.hand(FF6_MENU_SKILL_CURSOR_X, kSkillRows[cursor_] * FF6_MENU_TILE_SIZE + FF6_ITEM_CURSOR_DY);
 }
 

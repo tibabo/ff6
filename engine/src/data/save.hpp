@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "constants.hpp"
+#include "state/party_state.hpp"
 
 namespace ff6 {
 
@@ -32,6 +33,9 @@ struct SaveState {
     bool hasColors = false;
     int fontColor = FF6_CONFIG_FONT_COLOR_DEFAULT;
     std::array<int, FF6_MENU_WINDOW_COUNT * FF6_MENU_WINDOW_COLORS> windowColors{};  // pattern by pattern
+    // The statistics, the inventory and the gil; a save without them starts the characters from their properties.
+    bool hasParty = false;
+    PartyState party;
 };
 
 std::string saveToJson(const SaveState& state);

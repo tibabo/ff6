@@ -9,6 +9,7 @@
 #include "field/sprite_data.hpp"
 #include "field/window.hpp"
 #include "menu/window_style.hpp"
+#include "state/char_stats.hpp"
 
 namespace ff6 {
 namespace {
@@ -28,19 +29,21 @@ struct Drawable {
 Game::Game(CommonData common, std::string packDir, uint32_t startMap, Renderer& renderer, Sound& sound,
            const std::vector<int>& party)
     : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
-      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_) {
+      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_) {
     initialize(startMap, party, nullptr);
 }
 
 Game::Game(CommonData common, std::string packDir, const SaveState& save, Renderer& renderer, Sound& sound)
     : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
-      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_) {
+      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_) {
     initialize(static_cast<uint32_t>(save.map), {}, &save);
 }
 
 void Game::initialize(uint32_t startMap, const std::vector<int>& party, const SaveState* save) {
     bits_.init(common_);
     menuData_ = loadMenuData(packDir_);
+    rules_ = loadGameRules(packDir_);
+    for (int i = 0; i < FF6_CHAR_COUNT; ++i) setCharacterProperties(state_, rules_, i, i, 0);
     config_.windowColors = menuData_.windowColors;
     const size_t screenBytes = static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL;
     for (auto& layer : layerPixels_) {
@@ -67,6 +70,7 @@ void Game::initialize(uint32_t startMap, const std::vector<int>& party, const Sa
 // The state of the story and of the characters, before the map is loaded.
 void Game::restore(const SaveState& save) {
     bits_.load(save.eventBits, save.battleFlags);
+    if (save.hasParty) state_ = save.party;
     std::array<Npc, FF6_CHAR_COUNT>& characters = objects_.characters();
     for (size_t i = 0; i < characters.size(); ++i) {
         const SaveCharacter& saved = save.characters[i];
@@ -132,6 +136,8 @@ SaveState Game::saveState() const {
     save.parentFacing = parentFacing_;
     save.config = {config_.battle, config_.display, config_.controller};
     save.hasColors = true;
+    save.hasParty = true;
+    save.party = state_;
     save.fontColor = config_.fontColor;
     for (size_t i = 0; i < save.windowColors.size(); ++i) {
         save.windowColors[i] = config_.windowColors[i / FF6_MENU_WINDOW_COLORS][i % FF6_MENU_WINDOW_COLORS];
@@ -200,6 +206,7 @@ bool Game::loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEven
     MapData next = loadMap(packDir_, mapId);
     const bool inEvent = event_.running();  // an event that loads a map goes on once it is loaded
     map_ = std::move(next);
+    showOpenedTreasures();
     anim_.init();
     scroll_.init();
     objects_.init(map_, bits_);
@@ -257,8 +264,40 @@ bool Game::loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEven
     return true;
 }
 
+// The codes of a dialogue, with the amount of gil and the name of the item that the chest event talks about.
 void Game::openDialogue(uint32_t id, uint16_t flags) {
-    dialogue_.open(common_.dialogue(id), common_.fontWidths, (flags & FF6_DLG_FLAG_BOTTOM) != 0);
+    const DialogueText text = common_.dialogue(id);
+    dialogueText_.clear();
+    for (size_t i = 0; text.codes && i < text.length; ++i) {
+        const uint8_t code = text.codes[i];
+        if (code == FF6_DLG_GP) {
+            if (foundGil_ < 0) continue;
+            for (const char digit : std::to_string(foundGil_)) dialogueText_.push_back(static_cast<uint8_t>(FF6_DLG_GLYPH_ZERO + digit - '0'));
+        } else if (code == FF6_DLG_ITEM) {
+            appendItemName(receivedItem_);
+        } else {
+            dialogueText_.push_back(code);
+            const bool hasArgument = code == FF6_DLG_WAIT || code == FF6_DLG_TAB || code == FF6_DLG_KEY_TIMED;
+            if (hasArgument && i + 1 < text.length) dialogueText_.push_back(text.codes[++i]);
+        }
+    }
+    const DialogueText filled{text.codes ? dialogueText_.data() : nullptr, dialogueText_.size()};
+    dialogue_.open(filled, common_.fontWidths, (flags & FF6_DLG_FLAG_BOTTOM) != 0);
+}
+
+// The name of an item in the glyphs of the dialogues, without the symbol that comes first and the spaces at the end.
+void Game::appendItemName(int item) {
+    if (item < 0 || item >= FF6_ITEM_COUNT) return;
+    const uint8_t* name = &menuData_.itemNames[static_cast<size_t>(item) * FF6_ITEM_NAME_BYTES];
+    size_t end = FF6_ITEM_NAME_BYTES;
+    while (end > 1 && name[end - 1] == FF6_MENU_CODE_SPACE) --end;
+    for (size_t i = 1; i < end; ++i) {
+        if (name[i] == FF6_MENU_CODE_SPACE) {
+            dialogueText_.push_back(FF6_DLG_GLYPH_SPACE);
+        } else if (name[i] >= FF6_MENU_CODE_UPPER_A && name[i] <= FF6_MENU_CODE_LAST_GLYPH) {
+            dialogueText_.push_back(static_cast<uint8_t>(name[i] - FF6_DLG_FROM_MENU_CODE));
+        }
+    }
 }
 
 void Game::changeMap(uint32_t map, int x, int y, int facing, bool startupEvent, bool fadeIn) {
@@ -370,6 +409,48 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
         case FF6_EVENT_MOVE_PARTY:
             moveParty(byteAt(0), byteAt(1));
             break;
+        case FF6_EVENT_SET_CHAR_PROP:
+            setCharacterProperties(state_, rules_, byteAt(0), byteAt(1), availableCharacters());
+            break;
+        case FF6_EVENT_NORMALIZE_LEVEL:
+            normalizeLevel(state_, rules_, byteAt(0), availableCharacters());
+            break;
+        case FF6_EVENT_GIVE_ITEM:
+            giveItem(state_, byteAt(0));
+            break;
+        case FF6_EVENT_TAKE_ITEM:
+            takeItem(state_, byteAt(0));
+            break;
+        case FF6_EVENT_GIVE_GIL:
+            giveGil(state_, byteAt(0) | (byteAt(1) << 8));
+            break;
+        case FF6_EVENT_TAKE_GIL:
+            bits_.set(FF6_EVENT_BIT_NOT_ENOUGH_GIL, !takeGil(state_, byteAt(0) | (byteAt(1) << 8)));
+            break;
+        case FF6_EVENT_CHANGE_HP:
+            changeHp(state_, rules_, byteAt(0), byteAt(1));
+            break;
+        case FF6_EVENT_CHANGE_MP:
+            changeMp(state_, rules_, byteAt(0), byteAt(1));
+            break;
+        case FF6_EVENT_REMOVE_EQUIPMENT:
+            removeEquipment(state_, byteAt(0));
+            break;
+        case FF6_EVENT_SHOP:
+            openShop(byteAt(0));
+            break;
+        case FF6_EVENT_GIVE_ESPER:
+            giveEsper(state_, byteAt(0));
+            break;
+        case FF6_EVENT_TAKE_ESPER:
+            takeEsper(state_, byteAt(0));
+            break;
+        case FF6_EVENT_GIVE_SWDTECHS:
+            state_.swordtechs = (1u << FF6_TECH_COUNT) - 1;
+            break;
+        case FF6_EVENT_GIVE_BUM_RUSH:
+            state_.blitzes |= FF6_BUM_RUSH_BIT;
+            break;
         case FF6_EVENT_MAP_DATA_NOW:
         case FF6_EVENT_MAP_DATA:  // x, layer and y, width, height, then the tiles
             changeMapData(bytes, size);
@@ -444,6 +525,7 @@ void Game::checkArrival() {
         lastTileX_ = x;
         lastTileY_ = y;
         armed_ = true;
+        countStep(state_);
         for (size_t i = 0; i + FF6_EVENT_TRIGGER_SIZE <= map_.eventTriggers.size(); i += FF6_EVENT_TRIGGER_SIZE) {
             const EventTrigger trigger = decodeEventTrigger(&map_.eventTriggers[i]);
             if (trigger.x == x && trigger.y == y) {
@@ -461,11 +543,64 @@ void Game::checkArrival() {
 }
 
 // Port of CheckNPCs: the confirm button talks to the npc that the party faces.
-void Game::talkToNpc() {
+bool Game::talkToNpc() {
     Npc* npc = objects_.npcFacing(map_, player_.tileX(), player_.tileY(), player_.facing());
-    if (!npc) return;
+    if (!npc) return false;
     objects_.activate(*npc, player_.facing());
     startEvent(npc->eventOffset);
+    return true;
+}
+
+// Port of CheckTreasure: the confirm button opens the chest or the pot that the party faces, once. Monster-in-a-box
+// chests stay shut, since there are no battles.
+bool Game::openTreasure() {
+    static constexpr int kStepX[FF6_DIRECTION_COUNT] = {0, 1, 0, -1}, kStepY[FF6_DIRECTION_COUNT] = {-1, 0, 1, 0};
+    const int x = player_.tileX() + kStepX[player_.facing()], y = player_.tileY() + kStepY[player_.facing()];
+    MapLayout& layout = map_.layers[FF6_BG1];
+    if (x < 0 || y < 0 || x >= layout.width || y >= layout.height) return false;
+    uint8_t& tile = layout.cells[static_cast<size_t>(y) * layout.width + x];
+    if (!(map_.tileProps[tile] & FF6_TILE_TREASURE)) return false;
+    for (size_t i = 0; i + FF6_TREASURE_PROP_SIZE <= map_.treasures.size(); i += FF6_TREASURE_PROP_SIZE) {
+        const uint8_t* chest = &map_.treasures[i];
+        if (chest[0] != x || chest[1] != y) continue;
+        const int kind = chest[2] | (chest[3] << 8), contents = chest[4];
+        const size_t bit = static_cast<size_t>(kind & FF6_TREASURE_BIT_MASK);
+        if ((kind & FF6_TREASURE_KIND_MONSTER) || state_.treasures[bit]) return false;
+        state_.treasures[bit] = true;
+        uint32_t script = FF6_EVENT_SCRIPT_TREASURE_EMPTY;
+        if (kind & FF6_TREASURE_KIND_GIL) {
+            foundGil_ = static_cast<long>(contents) * FF6_TREASURE_GIL_UNIT;
+            giveGil(state_, foundGil_);
+            script = FF6_EVENT_SCRIPT_TREASURE_GIL;
+        } else if (kind & FF6_TREASURE_KIND_ITEM) {
+            receivedItem_ = contents;
+            giveItem(state_, contents);
+            script = FF6_EVENT_SCRIPT_TREASURE_ITEM;
+        }
+        startEvent(script);
+        if (tile == FF6_TILE_CHEST_CLOSED) {
+            tile = FF6_TILE_CHEST_OPEN;
+            sound_.command(FF6_SOUND_GAME_SFX, FF6_SFX_TREASURE_CHEST, FF6_SFX_PAN_CENTER);
+        } else {
+            sound_.command(FF6_SOUND_GAME_SFX, FF6_SFX_TREASURE_POT, FF6_SFX_PAN_CENTER);
+        }
+        return true;
+    }
+    return false;
+}
+
+// InitTreasures: the chests that were opened before are open when the map is loaded.
+void Game::showOpenedTreasures() {
+    MapLayout& layout = map_.layers[FF6_BG1];
+    for (size_t i = 0; i + FF6_TREASURE_PROP_SIZE <= map_.treasures.size(); i += FF6_TREASURE_PROP_SIZE) {
+        const uint8_t* chest = &map_.treasures[i];
+        const int x = chest[0], y = chest[1];
+        if (x >= layout.width || y >= layout.height) continue;
+        uint8_t& tile = layout.cells[static_cast<size_t>(y) * layout.width + x];
+        if (state_.treasures[static_cast<size_t>((chest[2] | (chest[3] << 8)) & FF6_TREASURE_BIT_MASK)] && tile == FF6_TILE_CHEST_CLOSED) {
+            tile = FF6_TILE_CHEST_OPEN;
+        }
+    }
 }
 
 // Port of CheckDoor: pressing up or down in front of a closed door opens it (the party does not move that frame) and
@@ -528,7 +663,11 @@ void Game::tick(const InputState& input) {
     }
     Npc* lead = objects_.lead();
     const bool eventRunning = event_.running();
-    if (eventWasRunning_ && !eventRunning) restorePending_ = true;
+    if (eventWasRunning_ && !eventRunning) {
+        restorePending_ = true;
+        foundGil_ = -1;
+        receivedItem_ = -1;
+    }
     eventWasRunning_ = eventRunning;
     // Once the event is over and the lead has finished its own script, it gets its movement back.
     if (restorePending_ && lead && lead->movement != FF6_OBJ_MOVE_SCRIPT && lead->aligned() && !player_.moving()) {
@@ -540,7 +679,7 @@ void Game::tick(const InputState& input) {
     const bool playerActs = (!eventRunning && !dialogue_.active() && userLead) || player_.moving();
     if (!eventRunning && !dialogue_.active() && userLead && !leaving_) {
         if (input.confirm && !wasBusy && !player_.moving() && brightness_ == FF6_BRIGHTNESS_FULL) {
-            talkToNpc();
+            if (!talkToNpc()) openTreasure();
         } else if (input.menu && !wasBusy && !player_.moving() && brightness_ == FF6_BRIGHTNESS_FULL) {
             menuPhase_ = MenuPhase::FadingOut;
             startFade(false, FF6_BRIGHTNESS_STEP);
@@ -589,37 +728,134 @@ void Game::moveParty(int tileX, int tileY) {
     startFade(true, FF6_BRIGHTNESS_STEP);
 }
 
-// The menu is not ported to the data of the game yet: the characters have placeholder statistics, and the money and
-// the steps are zero.
-MenuStatus Game::menuStatus() const {
-    MenuStatus status;
-    for (const int id : objects_.partySlots()) {
-        if (id < 0) continue;
-        MenuCharacter character;
-        character.id = id;
-        character.level = FF6_MENU_PLACEHOLDER_LEVEL;
-        character.hp = character.maxHp = FF6_MENU_PLACEHOLDER_HP;
-        character.mp = character.maxMp = FF6_MENU_PLACEHOLDER_MP;
-        character.vigor = character.speed = character.stamina = character.magicPower = FF6_MENU_PLACEHOLDER_STAT;
-        character.attackPower = character.defense = character.magicDefense = FF6_MENU_PLACEHOLDER_STAT;
-        character.evade = character.magicEvade = FF6_MENU_PLACEHOLDER_EVADE;
-        character.nextLevel = FF6_MENU_PLACEHOLDER_NEXT_LEVEL;
-        character.equipment[0] = 0;  // a dirk in the right hand
-        status.party.push_back(character);
+// The characters that have joined, for the average level.
+CharacterMask Game::availableCharacters() const {
+    CharacterMask mask = 0;
+    for (int i = 0; i < FF6_PLAYABLE_COUNT; ++i) {
+        if (bits_.get(FF6_EVENT_BIT_CHAR_AVAILABLE + i)) mask |= 1u << i;
     }
-    for (int i = 0; i < FF6_ITEM_PLACEHOLDER_COUNT; ++i) status.items.push_back({FF6_ITEM_PLACEHOLDER_FIRST + i, 1 + i * 3 % 7});
+    return mask;
+}
+
+// The character as the menus show it, with the equipment that it has in `state`.
+MenuCharacter Game::menuCharacter(int id, const CharacterState& state) const {
+    const CharacterStats stats = calcStats(rules_, state);
+    MenuCharacter character;
+    character.id = id;
+    character.level = state.level;
+    character.hp = std::min(state.hp, stats.maxHp);
+    character.maxHp = stats.maxHp;
+    character.mp = std::min(state.mp, stats.maxMp);
+    character.maxMp = stats.maxMp;
+    character.vigor = stats.vigor;
+    character.speed = stats.speed;
+    character.stamina = stats.stamina;
+    character.magicPower = stats.magicPower;
+    character.attackPower = stats.attackPower;
+    character.defense = stats.defense;
+    character.magicDefense = stats.magicDefense;
+    character.evade = stats.evade;
+    character.magicEvade = stats.magicBlock;
+    character.experience = state.experience;
+    character.nextLevel = experienceToNextLevel(rules_, state);
+    for (size_t i = 0; i < state.equipment.size(); ++i) character.equipment[i] = state.equipment[i];
+    for (int esper = 0; esper < FF6_ESPER_COUNT; ++esper) {
+        if (state_.espers[static_cast<size_t>(esper)]) character.skills[0].push_back(menuData_.esperName(esper));
+    }
+    for (int spell = 0; spell < FF6_SPELL_COUNT; ++spell) {
+        if (state_.spells[static_cast<size_t>(id)][static_cast<size_t>(spell)]) {
+            // The name, then the cost in mp: two digits, the first of them blank when it is 0.
+            std::vector<uint8_t> entry = menuData_.spellName(spell);
+            const int cost = rules_.attack(spell)[FF6_MAGIC_PROP_MP];
+            entry.push_back(FF6_MENU_CODE_SPACE);
+            entry.push_back(cost >= 10 ? static_cast<uint8_t>(FF6_MENU_CODE_ZERO + cost / 10 % 10) : FF6_MENU_CODE_SPACE);
+            entry.push_back(static_cast<uint8_t>(FF6_MENU_CODE_ZERO + cost % 10));
+            character.skills[1].push_back(entry);
+        }
+    }
+    for (int tech = 0; tech < FF6_TECH_COUNT; ++tech) {
+        if (state.actor == FF6_ACTOR_CYAN && (state_.swordtechs >> tech & 1)) character.skills[2].push_back(menuData_.bushidoName(tech));
+        if (state.actor == FF6_ACTOR_SABIN && (state_.blitzes >> tech & 1)) character.skills[3].push_back(menuData_.blitzName(tech));
+    }
+    return character;
+}
+
+std::vector<MenuItem> Game::inventoryItems() const {
+    std::vector<MenuItem> items;
+    for (const InventorySlot& slot : state_.inventory) {
+        if (slot.item != FF6_ITEM_EMPTY) items.push_back({slot.item, slot.quantity});
+    }
+    return items;
+}
+
+std::vector<MenuCharacter> Game::partyCharacters() const {
+    std::vector<MenuCharacter> party;
+    for (const int id : objects_.partySlots()) {
+        if (id >= 0) party.push_back(menuCharacter(id, state_.characters[static_cast<size_t>(id)]));
+    }
+    return party;
+}
+
+// The menu keeps hooks into the game: the equipment screens list, preview and change what a character wears.
+MenuStatus Game::menuStatus() {
+    MenuStatus status;
+    status.party = partyCharacters();
+    status.items = inventoryItems();
+    status.item.items = [this] { return inventoryItems(); };
+    status.item.party = [this] { return partyCharacters(); };
+    status.item.usable = [this](int item) { return itemUsableInMenu(rules_, item); };
+    status.item.canUse = [this](int item, int id) { return canUseItemOn(state_, rules_, id, item); };
+    status.item.use = [this](int item, int id) { return useItemOn(state_, rules_, id, item); };
+    status.equip.choices = [this](int id, int slot) { return equippableItems(state_, rules_, id, slot); };
+    status.equip.preview = [this](int id, int slot, int item) {
+        CharacterState state = state_.characters[static_cast<size_t>(id)];
+        state.equipment[static_cast<size_t>(slot)] = item;
+        return menuCharacter(id, state);
+    };
+    status.equip.equip = [this](int id, int slot, int item) {
+        equipItem(state_, rules_, id, slot, item);
+        return menuCharacter(id, state_.characters[static_cast<size_t>(id)]);
+    };
+    status.gil = state_.gil;
+    status.steps = state_.steps;
     status.hours = static_cast<int>(std::min<uint32_t>(frame_ / FF6_MENU_FRAMES_PER_HOUR, FF6_MENU_MAX_HOURS));
     status.minutes = static_cast<int>(frame_ / FF6_MENU_FRAMES_PER_MINUTE % FF6_MENU_MINUTES_PER_HOUR);
     return status;
+}
+
+// Event command 0x9B: the shop takes the screen like the menu does, and the event goes on once it is closed.
+void Game::openShop(int shop) {
+    if (shop < 0 || shop >= FF6_SHOP_COUNT) return;
+    const Npc* lead = objects_.lead();
+    const int sprite = lead ? lead->prop.gfx : 0;  // some shops change their prices with who is in front
+    ShopHooks hooks;
+    hooks.buyPrice = [this, shop, sprite](int item) { return shopPrice(rules_, shop, item, sprite); };
+    hooks.sellPrice = [this](int item) { return sellPrice(rules_, item); };
+    hooks.buy = [this, shop, sprite](int item, int quantity) {
+        return buyItem(state_, item, quantity, shopPrice(rules_, shop, item, sprite));
+    };
+    hooks.sell = [this](int item, int quantity) { return sellItem(state_, item, quantity, sellPrice(rules_, item)); };
+    hooks.items = [this] { return inventoryItems(); };
+    hooks.gil = [this] { return state_.gil; };
+    shop_.open(rules_.shop(shop)[0] & FF6_SHOP_KIND_MASK, shopStock(rules_, shop), hooks);
+    shopOpen_ = true;
+    menuPhase_ = MenuPhase::FadingOut;
+    startFade(false, FF6_BRIGHTNESS_STEP);
 }
 
 void Game::tickMenu(const InputState& input) {
     updateBrightness();
     if (fading()) return;
     if (menuPhase_ == MenuPhase::FadingOut) {
-        menu_.open(menuStatus(), config_);
+        if (!shopOpen_) menu_.open(menuStatus(), config_);
         menuPhase_ = MenuPhase::Open;
         startFade(true, FF6_BRIGHTNESS_STEP);
+    } else if (menuPhase_ == MenuPhase::Open && shopOpen_) {
+        shop_.update(input);
+        if (shop_.closed()) {
+            menuPhase_ = MenuPhase::Leaving;
+            startFade(false, FF6_BRIGHTNESS_STEP);
+        }
     } else if (menuPhase_ == MenuPhase::Open) {
         menu_.update(input);
         if (menu_.takeSaveRequest() && saveHandler_) saveHandler_(saveState());
@@ -629,6 +865,7 @@ void Game::tickMenu(const InputState& input) {
         }
     } else {
         menuPhase_ = MenuPhase::Closed;
+        shopOpen_ = false;
         common_.windowTiles = buildWindowTiles(menuData_, config_);  // the dialogues have the windows of the config
         startFade(true, FF6_BRIGHTNESS_STEP);
     }
@@ -703,7 +940,11 @@ void Game::drawSprites(bool above) {
 
 void Game::draw() {
     if (menuPhase_ == MenuPhase::Open || menuPhase_ == MenuPhase::Leaving) {
-        menu_.draw();
+        if (shopOpen_) {
+            shop_.draw();
+        } else {
+            menu_.draw();
+        }
         screenPixels_ = menuScreen_.pixels();
         renderer_.beginFrame();
         applyBrightness(screenPixels_);

@@ -48,6 +48,31 @@ ff6::SaveState sampleState() {
     state.hasColors = true;
     state.fontColor = 0x1234;
     state.windowColors[5] = 0x7FFF;
+    state.hasParty = true;
+    ff6::CharacterState& terra = state.party.characters[0];
+    terra.actor = 0;
+    terra.level = 12;
+    terra.hp = 150;
+    terra.maxHp = 210;
+    terra.mp = 30;
+    terra.maxMp = 44;
+    terra.experience = 1234;
+    terra.vigor = 31;
+    terra.speed = 33;
+    terra.stamina = 28;
+    terra.magicPower = 39;
+    terra.equipment = {1, 90, 105, 132, FF6_ITEM_EMPTY, 7};
+    state.party.inventory[0] = {233, 5};
+    state.party.inventory[1] = {0, 99};
+    state.party.gil = 1234567;
+    state.party.steps = 4321;
+    state.party.treasures[11] = true;
+    state.party.treasures[511] = true;
+    state.party.spells[0][45] = true;
+    state.party.spells[6][1] = true;
+    state.party.espers[3] = true;
+    state.party.swordtechs = 0x0F;
+    state.party.blitzes = 0x81;
     return state;
 }
 
@@ -83,6 +108,18 @@ void testSave() {
     CHECK(!back.characters[1].enabled);
     CHECK(back.config == state.config);
     CHECK(back.hasColors && back.fontColor == 0x1234 && back.windowColors == state.windowColors);
+    CHECK(back.hasParty && back.party.gil == 1234567 && back.party.steps == 4321);
+    const ff6::CharacterState& terra = back.party.characters[0];
+    CHECK(terra.level == 12 && terra.hp == 150 && terra.maxHp == 210 && terra.mp == 30 && terra.maxMp == 44);
+    CHECK(terra.experience == 1234 && terra.vigor == 31 && terra.speed == 33 && terra.stamina == 28 && terra.magicPower == 39);
+    CHECK(terra.equipment == state.party.characters[0].equipment);
+    CHECK(back.party.inventory[0].item == 233 && back.party.inventory[0].quantity == 5);
+    CHECK(back.party.inventory[1].item == 0 && back.party.inventory[1].quantity == 99);
+    CHECK(back.party.inventory[2].item == FF6_ITEM_EMPTY);
+    CHECK(back.party.treasures[11] && back.party.treasures[511] && !back.party.treasures[12]);
+    CHECK(back.party.spells[0][45] && back.party.spells[6][1] && !back.party.spells[0][1] && !back.party.spells[1][45]);
+    CHECK(back.party.espers[3] && !back.party.espers[4] && back.party.swordtechs == 0x0F && back.party.blitzes == 0x81);
+    CHECK(!ff6::saveFromJson(ff6::saveToJson(ff6::SaveState())).hasParty);  // an older save has none
     {  // a save without config has the defaults of a new game
         std::string old = ff6::saveToJson(ff6::SaveState());
         old.erase(old.find(",\n  \"config\""), old.find("]", old.find("\"config\"")) + 1 - old.find(",\n  \"config\""));
@@ -115,6 +152,15 @@ void testSave() {
     CHECK(throws([&] { ff6::saveFromJson(ff6::saveToJson(broken)); }));
     broken = state;
     broken.eventBits.push_back(100000);
+    CHECK(throws([&] { ff6::saveFromJson(ff6::saveToJson(broken)); }));
+    broken = state;
+    broken.party.gil = FF6_MAX_GIL + 1;
+    CHECK(throws([&] { ff6::saveFromJson(ff6::saveToJson(broken)); }));
+    broken = state;
+    broken.party.inventory[0].quantity = 100;
+    CHECK(throws([&] { ff6::saveFromJson(ff6::saveToJson(broken)); }));
+    broken = state;
+    broken.party.characters[2].level = 0;
     CHECK(throws([&] { ff6::saveFromJson(ff6::saveToJson(broken)); }));
 
     // A file is written and read again.

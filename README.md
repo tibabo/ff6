@@ -153,7 +153,8 @@ doit se trouver a cote de lui (vcpkg l'y copie normalement).
 `build-pack` ecrit `common.ff6data` (police, fenetre, sprites, dialogues, script
 d'evenements), `audio.ff6data` (echantillons BRR, enveloppes et scripts des
 musiques), `menu.ff6data` (police et palettes des menus, main du curseur,
-portraits) et une carte par fichier dans `maps/` ; il n'ecrase jamais un
+portraits, descriptions des objets, noms des magies, esprits et techniques), `game.ff6data` (proprietes des personnages, des objets et des
+boutiques, tables de niveaux et d'apprentissage) et une carte par fichier dans `maps/` ; il n'ecrase jamais un
 dossier existant. `--text` utilise un `dialogues.json` modifie. Un caractere
 absent de la police de la ROM, par exemple un accent, provoque une erreur
 explicite. Le pack contient des donnees du jeu : ne pas le distribuer. Le format
@@ -205,8 +206,13 @@ Limites actuelles :
   fondus (entrees et sorties de carte, commandes 0x59 a 0x5C, 0x96 et 0x97 ;
   l'ecran est noir tant que la carte n'a pas fini de se charger). Un script
   d'objet absent (desactive, ou personnage sur une autre carte) est saute ;
-  une attente d'objet est abandonnee apres 30 secondes. Les autres commandes
-  connues sont ignorees (argent) et une
+  une attente d'objet est abandonnee apres 30 secondes. Les commandes de
+  personnage et d'inventaire sont executees (0x40 et 0x77 : niveau, PV, PM,
+  experience et equipement d'un acteur ; 0x80 et 0x81 : objets ; 0x84 et 0x85 :
+  argent, avec l'interrupteur « pas assez » ; 0x8B et 0x8C : PV et PM ; 0x8D :
+  retrait de l'equipement ; 0x86 et 0x87 : esprits ; 0x8F et 0x90 : techniques
+  de sabre et Bum Rush ; 0x9B : boutique, qui prend l'ecran comme le menu et
+  rend la main a l'evenement quand elle est fermee). Les autres commandes connues sont ignorees et une
   commande inconnue termine l'evenement avec un message sur la sortie d'erreur.
 - Personnages : le chef du groupe est un objet comme les autres, pilote par
   le joueur hors evenement et par script pendant un evenement ; il retrouve
@@ -218,12 +224,29 @@ Limites actuelles :
   L'etat de sauvegarde par defaut est reconstruit par le moteur ; le
   deplacement de groupe (0x7E) place le groupe, noircit l'ecran et le
   rallume sans recharger la carte : PNJ, portes et tuiles restent comme ils sont.
+- Coffres et pots : la validation devant une tuile de coffre (ou de pot) de la
+  carte donne son contenu une seule fois (objet, ou argent a raison de cent fois
+  la valeur), joue l'evenement « Received ... ! » / « Found ... GP! » / « Empty! »
+  avec le nom de l'objet ou la somme dans le texte, et ouvre le coffre ; un coffre
+  ouvert le reste au rechargement de la carte et dans la sauvegarde. Les coffres
+  a monstre restent fermes (pas de combats).
+- Boutiques : BUY, SELL et EXIT ; la liste de ce que vend la boutique avec ses
+  prix (modifies, dans certaines boutiques, selon le personnage de tete), la
+  description et ce que le groupe possede deja ; la quantite se choisit avec
+  gauche/droite (un) et haut/bas (dix), limitee par l'argent et par 99. SELL
+  rachete a la moitie du prix, sauf les objets sans prix. Les positions des
+  textes sont proches de celles du jeu, pas exactes, et les personnages
+  animes de la boutique ne sont pas dessines.
+- Niveaux : un personnage gagne de l'experience avec `addExperience` (PV, PM,
+  magies et techniques de chaque niveau), mais aucun combat ne l'appelle encore.
 - Sauvegarde : le moteur a son propre format, un fichier JSON (pas de SRAM
   emulee). F5 ecrit `ff6-save.json` (ou le fichier de `--save`) et
   `--load fichier` reprend la partie : carte, case et direction du groupe,
   groupe actif, chaque personnage (present, visible, groupe, place, carte,
   graphisme, palette, case, direction), bits d'evenements et de combat,
-  palettes de sprites et carte parente des maisons. Le fichier est versionne
+  palettes de sprites et carte parente des maisons, ainsi que les
+  statistiques, l'equipement, l'inventaire, l'argent et les pas (champs
+  facultatifs : une ancienne sauvegarde repart des proprietes des acteurs). Le fichier est versionne
   (`version`) et verifie a la lecture : une valeur qui n'existe pas donne une
   erreur claire. L'evenement de demarrage de la carte s'execute au
   chargement, comme dans le jeu ; le morceau en cours, l'etat des PNJ et les
@@ -244,15 +267,32 @@ Limites actuelles :
   principal. Les vitesses de message et de combat ne servent qu'aux combats
   (le dialogue du terrain n'y est pas sensible dans le jeu) et le mono
   demande la commande 0xF3 du son, pas encore portee. L'option Item ouvre la
-  liste de l'inventaire (noms de la ROM, quantites, defilement) avec les
-  options Use, Arrange et Rare ; l'inventaire est un inventaire de
-  remplacement, les descriptions ne sont pas extraites et les objets ne
-  peuvent pas encore etre utilises. Skills, Equip, Relic et Status demandent
-  un personnage (la main se pose sur les portraits) puis ouvrent son ecran :
-  etat, equipement, listes de competences ; ils ne font que montrer des
-  valeurs de remplacement (niveau 1, 100 PV, statistiques 25, un poignard en
-  main droite, categories de competences supposees) et l'equipement ne peut
-  pas etre change. Save demande « Erasing data. Okay? » puis ecrit le JSON
+  liste de l'inventaire (noms de la ROM, quantites, defilement) avec la
+  description de l'objet sous la main et les options Use, Arrange et Rare ;
+  l'inventaire se remplit par les evenements, les coffres et les boutiques.
+  Use demande un personnage et fait ce que font les objets qui rendent des PV ou
+  des PM (Potion, Ether, Elixir...) et le Fenix Down (un personnage a 0 PV est
+  mort) ; les autres objets (soins d'etat, tente, sac de couchage, pierre de
+  warp) ont besoin des etats des personnages, d'un point de sauvegarde ou de
+  la carte du monde et ne sont pas utilisables. Skills, Equip, Relic et
+  Status demandent un personnage (la main se pose sur les portraits) puis
+  ouvrent son ecran : etat, equipement, listes de competences ; les valeurs
+  sont les vraies (niveau, PV, PM, experience, statistiques calculees comme
+  le jeu avec l'equipement et les reliques ; au depart, niveau 3 et
+  equipement de la ROM). Skills liste les noms des esprits (donnes par les
+  evenements), des magies de Terra et de Celes (apprises par niveau, avec leur
+  cout en PM), des
+  techniques de sabre de Cyan et des furies de Sabin (apprises par niveau, ou
+  par evenement) : la validation parcourt la liste sans rien lancer ; Lore,
+  Rage et Dance restent vides, ils s'apprennent en combat, et les esprits ne
+  s'equipent pas encore. Sur
+  Equip et Relic, la validation sur un emplacement ouvre la liste des objets
+  de l'inventaire que le personnage peut y mettre (types, personnages
+  autorises, deux armes seulement avec le Genji Glove, jamais deux boucliers)
+  precedee de « Remove » ; les statistiques montrent l'effet de l'objet sous la
+  main (jaune plus haut, gris plus bas) et la validation echange l'objet avec
+  l'inventaire. Les options Rmove, Empty et Optimum ne sont pas portees et la
+  disposition de ces ecrans est la mienne. Save demande « Erasing data. Okay? » puis ecrit le JSON
   de sauvegarde (le meme fichier que F5). Order (gauche) n'est pas porte.
   Les positions des ecrans de personnage sont une mise en page a moi,
   inspiree des textes du jeu, pas celle de la console.
@@ -291,7 +331,8 @@ desassemblage de reference (`src/field`, `src/event`, `src/data`) :
 
 | Dossier | Fichiers | Role |
 | --- | --- | --- |
-| `data/` | `pack` | lecture du pack (donnees communes), conversion des couleurs |
+| `data/` | `pack`, `save`, `game_rules` | lecture du pack (donnees communes et tables des personnages, objets et niveaux), sauvegarde JSON |
+| `state/` | `party_state`, `party_ops`, `char_stats` | personnages, inventaire et argent, commandes d'evenement qui les changent, statistiques calculees avec l'equipement |
 | `field/` | `map`, `bg`, `anim`, `scroll`, `color` | carte, rendu de bg1/bg2/bg3, animations, defilement et parallaxe, composition avec transparence |
 | `field/` | `player`, `obj`, `obj_party`, `obj_script`, `sprite_data` | deplacements du groupe, objets (PNJ, personnages, camera, groupe) et leurs scripts, images des sprites |
 | `field/` | `text`, `entrance`, `event`, `event_cmd` | dialogues, entrees et sorties, interprete d'evenements et taille des commandes |
@@ -337,8 +378,9 @@ genere par `build-pack`, pour leurs tests sur les vraies donnees.
 - Cartes du monde, animation de palette et autres textes.
 - Commandes d'evenements restantes (defilements, changements de decor
   anime, eclairs, tremblements, filtres de couleur, mosaique).
-- Portage natif des menus et combats ; sauvegarde du jeu complet (argent,
-  objets, statistiques).
+- Portage natif des menus et combats ; coffres a monstre, soins d'etat,
+  tente et sac de couchage, esprits equipes, Lore/Rage/Dance, Rmove/Empty/
+  Optimum, et les combats (donc le gain d'experience).
 - Audio natif sans emulation du SPC700 : mode mono.
 - Interface adaptable aux ecrans larges et remappage des commandes.
 - Gestion des graphismes HD.

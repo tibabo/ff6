@@ -1,4 +1,4 @@
-// Game data pack: common.ff6data (font, sprites, dialogue, event script) and maps/NNN.ff6map.
+// Game data pack: common.ff6data (font, sprites, dialogue, event script), game.ff6data (characters, items, levels) and maps/NNN.ff6map.
 // Everything is raw game data in the layouts documented in the disassembly; the engine decodes it.
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -20,13 +20,15 @@ import {
 import { readNpcProps, readNpcSwitchDefaults } from './event/npc_prop.mjs';
 import { readEventScript, readEventTriggers } from './event/event_trigger.mjs';
 import { readMapInitEvent } from './event/map_init_event.mjs';
+import { readTreasureProps } from './event/treasure_prop.mjs';
 import { readMapParallax } from './data/map_parallax.mjs';
+import { buildRulesData } from './data/game_rules.mjs';
 import { buildAudioData } from './sound/audio_data.mjs';
 import { buildMenuData } from './menu/menu_gfx.mjs';
 
 export const COMMON_MAGIC = 'FF6COMMN';
 export const MAP_MAGIC = 'FF6MAP01';
-export const PACK_VERSION = 4;
+export const PACK_VERSION = 5;
 export const FIRST_FIELD_MAP = 3;  // maps 0-2 are the world maps
 
 class Writer {
@@ -158,6 +160,7 @@ export function buildMapData(rom, mapId) {
   writeCounted(out, readShortEntrances(rom, mapId), 6);
   writeCounted(out, readLongEntrances(rom, mapId), 7);
   out.u32(readMapInitEvent(rom, mapId));
+  writeCounted(out, readTreasureProps(rom, mapId), 5);
   return out.build();
 }
 
@@ -170,6 +173,7 @@ export function writePack(rom, outDir, options = {}) {
     writeFileSync(join(temp, 'common.ff6data'), buildCommonData(rom, options), { flag: 'wx' });
     writeFileSync(join(temp, 'audio.ff6data'), buildAudioData(rom, PACK_VERSION), { flag: 'wx' });
     writeFileSync(join(temp, 'menu.ff6data'), buildMenuData(rom, PACK_VERSION), { flag: 'wx' });
+    writeFileSync(join(temp, 'game.ff6data'), buildRulesData(rom, PACK_VERSION), { flag: 'wx' });
     const written = [];
     const skipped = [];
     for (let mapId = FIRST_FIELD_MAP; mapId < MAP_COUNT; mapId += 1) {

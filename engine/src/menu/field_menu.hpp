@@ -18,6 +18,8 @@ struct MenuStatus {
     std::vector<MenuItem> items;  // the inventory, without its empty places
     long gil = 0, steps = 0;
     int hours = 0, minutes = 0;  // the time that the game has run
+    EquipHooks equip;  // what changing the equipment does in the game; without it the screens only show it
+    ItemHooks item;  // what using an item does in the game; `items` stays the inventory when it has no `items`
 };
 
 // The menu of the field (src/menu/field_menu.asm): the party, and the list of Item, Skills, Equip, Relic, Status,

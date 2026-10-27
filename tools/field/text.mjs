@@ -80,8 +80,8 @@ export function encodeDialogueForEngine(rom, tokens, { lenient = false } = {}) {
     } else if (token.type === 'icon') {
       codes.push(token.code);
     } else if (token.type === 'control' && CONTROLS.has(token.code)) {
-      // Item, spell and GP values need game state that the engine does not have.
-      if (token.code >= 0x19) continue;
+      // Spell names need game state that the engine does not have; the item name and the gil amount are filled in by the game.
+      if (token.code >= 0x1b) continue;
       codes.push(token.code, ...token.args);
     } else {
       throw new Error(`Unsupported dialogue token: ${JSON.stringify(token)}`);

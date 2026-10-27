@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdlib>
 
 #include "../check.hpp"
@@ -6,6 +7,7 @@
 #include "field/map.hpp"
 #include "menu/field_menu.hpp"
 #include "menu/menu_screen.hpp"
+#include "menu/shop_menu.hpp"
 #include "menu/window_style.hpp"
 
 namespace {
@@ -257,7 +259,7 @@ void testMenu() {
         CHECK(field.characterMenu().cursor() == 1);
         field.draw();
         select();
-        CHECK(sound.commands.back().command == FF6_SFX_MENU_INVALID);  // the equipment cannot be changed yet
+        CHECK(sound.commands.back().command == FF6_SFX_MENU_INVALID);  // without the game behind it, nothing can be changed
         field.update(cancel);
         field.update(cancel);
         press(ff6::Up);  // Equip, then Skills
@@ -287,6 +289,238 @@ void testMenu() {
         select();  // yes
         CHECK(!field.confirmingSave() && sound.commands.back().command == FF6_SFX_MENU_SUCCESS);
         CHECK(field.takeSaveRequest() && !field.takeSaveRequest());  // the request is taken once
+    }
+
+    {  // the equipment: a list of what fits the slot, a preview of each item, then the change
+        ff6::MenuScreen screen(common, menu);
+        test::RecordingSound sound;
+        ff6::FieldMenu field(screen, sound);
+        ff6::GameConfig config;
+        ff6::MenuStatus status;
+        ff6::MenuCharacter terra;
+        terra.id = 0;
+        terra.vigor = 30;
+        terra.equipment[0] = 1;
+        status.party.push_back(terra);
+        int equipped = -1;
+        status.equip.choices = [](int, int slot) { return slot == 0 ? std::vector<int>{4, 7} : std::vector<int>{}; };
+        status.equip.preview = [terra](int, int slot, int item) {
+            ff6::MenuCharacter shown = terra;
+            shown.equipment[slot] = item;
+            shown.vigor = item == 7 ? 35 : 30;
+            return shown;
+        };
+        status.equip.equip = [terra, &equipped](int, int slot, int item) {
+            equipped = item;
+            ff6::MenuCharacter changed = terra;
+            changed.equipment[slot] = item;
+            return changed;
+        };
+        const auto press = [&](int direction) {
+            field.update({direction, false});
+            field.update({});
+        };
+        const auto select = [&] { field.update({FF6_NO_DIRECTION, true}); };
+        ff6::InputState cancel;
+        cancel.cancel = true;
+        field.open(status, config);
+        press(ff6::Down);
+        press(ff6::Down);  // Equip
+        select();
+        select();
+        CHECK(field.inCharacter() && field.characterMenu().which() == ff6::CharacterScreen::Equip);
+        select();  // the right hand: the choice of taking the item off comes first
+        const ff6::CharacterMenu& character = field.characterMenu();
+        CHECK(character.picking() && character.choices() == std::vector<int>({FF6_ITEM_EMPTY, 4, 7}) && character.pick() == 0);
+        field.draw();
+        press(ff6::Down);
+        press(ff6::Down);
+        press(ff6::Down);  // the list does not wrap
+        CHECK(character.pick() == 2);
+        field.draw();
+        field.update(cancel);  // back to the slots, nothing changed
+        CHECK(!character.picking() && equipped == -1 && field.inCharacter());
+        select();
+        press(ff6::Down);
+        select();  // the first item of the inventory that fits
+        CHECK(!character.picking() && equipped == 4 && character.character().equipment[0] == 4);
+        press(ff6::Down);  // the left hand has nothing that fits but the empty choice
+        select();
+        CHECK(character.picking() && character.choices().size() == 1);
+        field.update(cancel);
+        field.update(cancel);
+        CHECK(!field.inCharacter());
+    }
+
+    {  // using an item: the list, then the character, which stays chosen while the item lasts
+        ff6::MenuScreen screen(common, menu);
+        test::RecordingSound sound;
+        ff6::FieldMenu field(screen, sound);
+        ff6::GameConfig config;
+        ff6::MenuStatus status;
+        ff6::MenuCharacter hurt;
+        hurt.id = 0;
+        hurt.hp = 10;
+        hurt.maxHp = 60;
+        status.party.push_back(hurt);
+        status.items.push_back({233, 2});
+        status.items.push_back({7, 1});
+        int quantity = 2, hp = 10;
+        status.item.usable = [](int item) { return item == 233; };
+        status.item.canUse = [&](int, int) { return hp < 60 && quantity > 0; };
+        status.item.use = [&](int, int) {
+            hp = std::min(60, hp + 25);
+            --quantity;
+            return true;
+        };
+        status.item.items = [&] {
+            std::vector<ff6::MenuItem> items;
+            if (quantity > 0) items.push_back({233, quantity});
+            items.push_back({7, 1});
+            return items;
+        };
+        status.item.party = [&] {
+            ff6::MenuCharacter now = hurt;
+            now.hp = hp;
+            return std::vector<ff6::MenuCharacter>{now};
+        };
+        const auto select = [&] { field.update({FF6_NO_DIRECTION, true}); };
+        ff6::InputState cancel;
+        cancel.cancel = true;
+        field.open(status, config);
+        select();  // Item
+        select();  // Use
+        const ff6::ItemMenu& items = field.itemMenu();
+        select();  // the first item
+        CHECK(items.targeting() && items.target() == 0);
+        field.draw();
+        select();
+        CHECK(hp == 35 && quantity == 1 && items.targeting() && items.party()[0].hp == 35);
+        select();
+        CHECK(hp == 60 && quantity == 0 && !items.targeting());  // the last potion is gone: back to the list
+        CHECK(items.items().size() == 1 && items.items()[0].id == 7);
+        select();  // an item that the menu cannot use
+        CHECK(!items.targeting() && sound.commands.back().command == FF6_SFX_MENU_INVALID);
+        field.update(cancel);
+        field.update(cancel);
+        CHECK(!field.inItems());
+    }
+
+    {  // the shop: buy and sell, with the quantity limited by the gil and by 99
+        ff6::MenuScreen screen(common, menu);
+        test::RecordingSound sound;
+        ff6::ShopMenu shop(screen, sound);
+        long gil = 120;
+        int potions = 0;
+        ff6::ShopHooks hooks;
+        hooks.buyPrice = [](int item) { return item == 233 ? 50 : 1000; };
+        hooks.sellPrice = [](int item) { return item == 233 ? 25 : 0; };
+        hooks.buy = [&](int item, int quantity) {
+            if (item != 233 || quantity * 50 > gil) return false;
+            gil -= quantity * 50;
+            potions += quantity;
+            return true;
+        };
+        hooks.sell = [&](int item, int quantity) {
+            if (item != 233 || quantity > potions) return false;
+            gil += quantity * 25;
+            potions -= quantity;
+            return true;
+        };
+        hooks.items = [&] {
+            std::vector<ff6::MenuItem> items;
+            if (potions > 0) items.push_back({233, potions});
+            return items;
+        };
+        hooks.gil = [&] { return gil; };
+        shop.open(3, {233, 234}, hooks);
+        const auto press = [&](int direction) {
+            shop.update({direction, false});
+            shop.update({});
+        };
+        const auto select = [&] { shop.update({FF6_NO_DIRECTION, true}); };
+        ff6::InputState cancel;
+        cancel.cancel = true;
+        CHECK(shop.mode() == ff6::ShopMode::Options && shop.message() == "Hi! Can I help you?");
+        shop.draw();
+        press(ff6::Left);  // the options do not wrap
+        CHECK(shop.option() == 0);
+        select();
+        CHECK(shop.mode() == ff6::ShopMode::BuyList && shop.message() == "Help yourself!");
+        shop.draw();
+        select();  // the potion: 120 gil buy two
+        CHECK(shop.mode() == ff6::ShopMode::BuyQuantity && shop.quantity() == 1);
+        press(ff6::Up);  // ten more is more than the gil allows
+        CHECK(shop.quantity() == 2);
+        press(ff6::Down);
+        CHECK(shop.quantity() == 1);
+        press(ff6::Right);
+        press(ff6::Right);
+        CHECK(shop.quantity() == 2);
+        shop.draw();
+        select();
+        CHECK(potions == 2 && gil == 20 && shop.mode() == ff6::ShopMode::BuyList && shop.message() == "Bye!");
+        select();  // 20 gil do not pay for another one
+        CHECK(shop.mode() == ff6::ShopMode::BuyList && shop.message() == "You need more GP!");
+        CHECK(sound.commands.back().command == FF6_SFX_MENU_INVALID);
+        press(ff6::Down);
+        select();  // and the other item is out of reach too
+        CHECK(shop.mode() == ff6::ShopMode::BuyList);
+        shop.update(cancel);
+        CHECK(shop.mode() == ff6::ShopMode::Options);
+        press(ff6::Right);
+        select();  // sell
+        CHECK(shop.mode() == ff6::ShopMode::SellList && shop.message() == "Whatcha got?");
+        shop.draw();
+        select();
+        CHECK(shop.mode() == ff6::ShopMode::SellQuantity);
+        press(ff6::Up);
+        CHECK(shop.quantity() == 2);  // no more than the party has
+        shop.draw();
+        select();
+        CHECK(potions == 0 && gil == 70 && shop.mode() == ff6::ShopMode::Options);  // nothing left to sell
+        press(ff6::Right);
+        select();  // exit
+        CHECK(shop.closed());
+    }
+
+    {  // the lists of the Skills screen: the categories that have names open, the others do not
+        ff6::MenuScreen screen(common, menu);
+        test::RecordingSound sound;
+        ff6::FieldMenu field(screen, sound);
+        ff6::GameConfig config;
+        ff6::MenuStatus status;
+        ff6::MenuCharacter terra;
+        terra.id = 0;
+        terra.skills[1] = {{0xE9, 0x85, 0xA2, 0xB1, 0xA4, 0xFF, 0xFF}, {0xE9, 0x82, 0xB4, 0xAB, 0xB3, 0xFF, 0xFF}};  // two spells
+        status.party.push_back(terra);
+        const auto press = [&](int direction) {
+            field.update({direction, false});
+            field.update({});
+        };
+        const auto select = [&] { field.update({FF6_NO_DIRECTION, true}); };
+        ff6::InputState cancel;
+        cancel.cancel = true;
+        field.open(status, config);
+        press(ff6::Down);  // Skills
+        select();
+        select();
+        const ff6::CharacterMenu& character = field.characterMenu();
+        CHECK(character.which() == ff6::CharacterScreen::Skills && !character.listing());
+        select();  // the espers: there are none
+        CHECK(!character.listing() && sound.commands.back().command == FF6_SFX_MENU_INVALID);
+        press(ff6::Down);  // the magic
+        select();
+        CHECK(character.listing() && character.listCursor() == 0);
+        field.draw();
+        press(ff6::Down);
+        press(ff6::Down);  // the list does not wrap
+        CHECK(character.listCursor() == 1);
+        field.draw();
+        field.update(cancel);  // back to the categories, then out
+        CHECK(!character.listing() && field.inCharacter());
+        field.update(cancel);
+        CHECK(!field.inCharacter());
     }
 
     {  // the item menu: the options at the top, then the list, which scrolls and does not wrap
@@ -346,5 +580,12 @@ void testMenu() {
         CHECK(ff6::buildWindowTiles(real, config) != ff6::loadCommonData(pack).windowTiles);
         config.windowColors[3][0] = 0x7FFF;  // and so does another color
         CHECK(ff6::buildWindowTiles(real, config).size() == ff6::loadCommonData(pack).windowTiles.size());
+
+        // The descriptions: the potion has one line, the dirk none, the first sword-like items two lines.
+        const std::vector<uint8_t> potion = real.itemDescription(233);
+        CHECK(potion.size() == 15 && potion[0] == FF6_MENU_CODE_UPPER_A + 'R' - 'A');
+        CHECK(real.itemDescription(0).empty() && real.itemDescription(-1).empty() && real.itemDescription(256).empty());
+        const std::vector<uint8_t> evades = real.itemDescription(2);
+        CHECK(std::count(evades.begin(), evades.end(), FF6_ITEM_DESC_NEWLINE) == 1);
     }
 }

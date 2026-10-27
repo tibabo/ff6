@@ -23,4 +23,5 @@ void testEntrance();
 void testEvent();
 void testEventCmd();
 void testMenu();
+void testParty();
 void testGame();

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { MENU_MAGIC, buildMenuData, readCursorPalette, readCursorTiles, readMenuFont, readMenuPalette } from './menu/menu_gfx.mjs';
+import { MENU_MAGIC, buildMenuData, readCursorPalette, readCursorTiles, readItemDescriptions, readMenuFont, readMenuPalette, readSkillNames } from './menu/menu_gfx.mjs';
 import { requireSupportedRom } from './rom.mjs';
 
 const romPath = process.env.FF6_ROM;
@@ -21,5 +21,14 @@ test('menu data holds the font, the palettes and the hand cursor', { skip }, () 
   const data = buildMenuData(rom, 4);
   assert.equal(data.subarray(0, 8).toString('ascii'), MENU_MAGIC);
   assert.equal(data.readUInt32LE(8), 4);
-  assert.equal(data.length, 12 + 4096 + 160 + 128 + 8 + 19 * 0x320 + 19 * 32 + 8 * 0x380 + 8 * 14 + 256 * 13);
+  assert.equal(data.length, 12 + 4096 + 160 + 128 + 8 + 19 * 0x320 + 19 * 32 + 8 * 0x380 + 8 * 14 + 256 * 13 + 256 * 2 + 0x13a0 + 54 * 7 + 27 * 8 + 16 * 10);
+  const names = readSkillNames(rom);  // Fire, Ramuh, Dispatch and Pummel come first in their lists
+  assert.equal(names[1], 0x85);  // F, after the symbol
+  assert.equal(names[54 * 7], 0x91);  // R
+  assert.equal(names[54 * 7 + 27 * 8], 0x83);  // D
+  assert.equal(names[54 * 7 + 27 * 8 + 80], 0x8f);  // P
+  const descriptions = readItemDescriptions(rom);  // the potion recovers 250 HP
+  const start = descriptions.readUInt16LE(233 * 2);
+  assert.equal(descriptions[256 * 2 + start], 0x91);  // R
+  assert.equal(descriptions[256 * 2 + start + 15], 0);
 });

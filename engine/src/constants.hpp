@@ -124,7 +124,7 @@
 #define FF6_PACK_MAGIC_SIZE 8
 #define FF6_COMMON_MAGIC "FF6COMMN"
 #define FF6_MAP_MAGIC "FF6MAP01"
-#define FF6_PACK_VERSION 4
+#define FF6_PACK_VERSION 5
 #define FF6_COMMON_FILE "common.ff6data"
 #define FF6_MAP_DIR "maps"
 #define FF6_MAP_FILE_EXTENSION ".ff6map"
@@ -249,6 +249,7 @@
 #define FF6_FIRST_NPC_OBJECT 0x10  // objects 0x10 to 0x2F are the npcs of the map
 #define FF6_LAST_NPC_OBJECT 0x2F
 #define FF6_CHAR_COUNT 16  // objects 0x00 to 0x0F are the characters
+#define FF6_PLAYABLE_COUNT 14  // the characters that join the party; the other two are guests
 #define FF6_CHARACTER_NAMES \
     {"terra", "locke", "cyan", "shadow", "edgar", "sabin", "celes", "strago", "relm", "setzer", "mog", "gau", "gogo", "umaro", "leo", "banon"}
 // The sprite palette slot that the events give to each character when it joins (the slot of the commands 0x43 that
@@ -546,6 +547,7 @@
 #define FF6_MENU_BG1_GRAY 0x28
 #define FF6_MENU_BG3_DEFAULT 0x20
 #define FF6_MENU_BG3_GRAY 0x24
+#define FF6_MENU_BG3_YELLOW 0x28
 #define FF6_MENU_BG3_TEAL 0x2C
 #define FF6_SFX_MENU_SELECT 0x20  // system sound effects
 #define FF6_SFX_MENU_MOVE 0x21
@@ -573,11 +575,25 @@
 #define FF6_MENU_EQUIP_SLOTS 6  // right hand, left hand, head, body and two relics
 #define FF6_MENU_SKILL_LISTS 7  // espers, magic, sword techniques, blitzes, lores, rages and dances
 #define FF6_MENU_EQUIP_CURSOR_X 8
+#define FF6_EQUIP_SLOT_ROW 6  // the first slot, then one every row
+#define FF6_EQUIP_STAT_ROW 14  // the first statistic, then one every row
+#define FF6_EQUIP_STAT_LABEL_X 19
+#define FF6_EQUIP_STAT_VALUE_X 26
+#define FF6_EQUIP_LIST_ROWS 9  // items that the list shows, from FF6_EQUIP_STAT_ROW
+#define FF6_EQUIP_LIST_X 3
+#define FF6_EQUIP_LIST_WIDTH 15  // inside the frame, which takes a tile on each side: the list ends before the statistics
 #define FF6_MENU_SKILL_CURSOR_X 0
-#define FF6_MENU_PLACEHOLDER_STAT 25
-#define FF6_MENU_PLACEHOLDER_EVADE 5
-#define FF6_MENU_PLACEHOLDER_NEXT_LEVEL 32
+#define FF6_SKILL_LIST_ROWS 18  // names that the list of an ability category shows
+#define FF6_SKILL_LIST_WINDOW_X 9
+#define FF6_SKILL_LIST_WINDOW_WIDTH 18
+#define FF6_SKILL_LIST_X 11
 #define FF6_ITEM_NAME_BYTES 13
+#define FF6_ITEM_DESC_BYTES 0x13A0
+#define FF6_ITEM_DESC_NEWLINE 0x01  // in a description
+#define FF6_ITEM_DESC_X 2  // in tiles; the two lines of the window are 12 pixels apart
+#define FF6_ITEM_DESC_TOP 48
+#define FF6_ITEM_TARGET_PORTRAIT_X 88  // the characters that can get the item are in a window on the right
+#define FF6_ITEM_TARGET_CURSOR_X 72
 #define FF6_ITEM_ROWS 10  // the rows of the list of the item menu
 #define FF6_ITEM_ROW_HEIGHT 12
 #define FF6_ITEM_LIST_TOP 88  // the first row of the list, in pixels
@@ -590,8 +606,6 @@
 #define FF6_ITEM_OPTION_X {10, 15, 24}  // tiles
 #define FF6_ITEM_OPTION_ROW 2
 #define FF6_ITEM_OPTION_CURSOR_Y 12
-#define FF6_ITEM_PLACEHOLDER_FIRST 233  // the potion, and the next items, in the placeholder inventory
-#define FF6_ITEM_PLACEHOLDER_COUNT 14
 #define FF6_CONFIG_BATTLE_DEFAULT 0x2A  // wait mode, battle speed 3 and message speed 3
 #define FF6_CONFIG_BATTLE_SPEED_MASK 0x07
 #define FF6_CONFIG_WAIT 0x08
@@ -636,7 +650,177 @@
 #define FF6_MENU_FRAMES_PER_MINUTE (FF6_FRAMES_PER_SECOND * 60)
 #define FF6_MENU_MINUTES_PER_HOUR 60
 #define FF6_MENU_MAX_HOURS 99
-#define FF6_MENU_PLACEHOLDER_LEVEL 1  // until the statistics of the characters are ported
-#define FF6_MENU_PLACEHOLDER_HP 100
-#define FF6_MENU_PLACEHOLDER_MP 20
+
+// ---- Characters, items and levels (game.ff6data) ------------------------------------------
+#define FF6_RULES_FILE "game.ff6data"
+#define FF6_RULES_MAGIC "FF6GAME1"
+#define FF6_CHAR_PROP_COUNT 24  // actors
+#define FF6_CHAR_PROP_BYTES 22
+#define FF6_CHAR_PROP_HP 0  // offsets in a character's properties
+#define FF6_CHAR_PROP_MP 1
+#define FF6_CHAR_PROP_VIGOR 6  // then speed, stamina and magic power
+#define FF6_CHAR_PROP_ATTACK 10
+#define FF6_CHAR_PROP_DEFENSE 11
+#define FF6_CHAR_PROP_MAGIC_DEFENSE 12
+#define FF6_CHAR_PROP_EVADE 13
+#define FF6_CHAR_PROP_MAGIC_BLOCK 14
+#define FF6_CHAR_PROP_EQUIPMENT 15  // weapon, shield, helmet, armor and two relics
+#define FF6_CHAR_PROP_FLAGS 21
+#define FF6_CHAR_LEVEL_MOD_MASK 0x0C
+#define FF6_CHAR_LEVEL_MOD_SHIFT 2
+#define FF6_CHAR_LEVEL_MODS {0, 2, 5, -3}
+#define FF6_ITEM_PROP_BYTES 30
+#define FF6_ITEM_PROP_TYPE 0  // offsets in the properties of an item
+#define FF6_ITEM_PROP_TYPE_MASK 7
+#define FF6_ITEM_PROP_EQUIP_FLAGS 2
+#define FF6_ITEM_PROP_RELIC1 9  // hp and mp boosts
+#define FF6_ITEM_PROP_RELIC3 11
+#define FF6_ITEM_PROP_RELIC4 12
+#define FF6_ITEM_PROP_STATS 16  // vigor and speed, then stamina and magic power: a nibble each
+#define FF6_ITEM_PROP_WEAPON_FLAGS 19
+#define FF6_ITEM_PROP_POWER 20  // battle power of a weapon, defense of an armor
+#define FF6_ITEM_PROP_HIT_OR_MAGIC_DEFENSE 21
+#define FF6_ITEM_PROP_EVADE 26  // evade in the low nibble, magic block in the high one
+#define FF6_ITEM_TYPE_WEAPON 1
+#define FF6_ITEM_TYPE_ARMOR 2
+#define FF6_ITEM_TYPE_SHIELD 3
+#define FF6_ITEM_TYPE_HELMET 4
+#define FF6_ITEM_TYPE_RELIC 5
+#define FF6_ITEM_TYPE_CONSUMABLE 6
+#define FF6_ITEM_PROP_EQUIP_CHARS 1  // a word: a bit for each character that can equip the item
+#define FF6_EQUIP_RIGHT_HAND 0
+#define FF6_EQUIP_LEFT_HAND 1
+#define FF6_EQUIP_HEAD 2
+#define FF6_EQUIP_BODY 3
+#define FF6_EQUIP_FIRST_RELIC 4
+#define FF6_EQUIP_ANYONE_BIT 0x8000  // the equip mask of a character that wears the relic that lets it equip anything
+#define FF6_RELIC4_EQUIP_ANY 0x20
+
+// ---- Using items from the menu (CheckCanUseItem, lpitem_exec) -------------------------------
+#define FF6_ITEM_USAGE_MENU 0x40  // in the first byte of the properties of an item
+#define FF6_ITEM_PROP_FLAGS 19  // of a consumable: what it does
+#define FF6_ITEM_PROP_STATUS 21  // and the status that it removes, a word
+#define FF6_ITEM_FLAG_HP 0x08
+#define FF6_ITEM_FLAG_MP 0x10
+#define FF6_ITEM_FLAG_REMOVE_STATUS 0x20
+#define FF6_ITEM_FLAG_DAMAGE 0x40
+#define FF6_ITEM_FLAG_FRACTION 0x80  // the power is in sixteenths of the maximum
+#define FF6_STATUS_DEAD 0x80
+#define FF6_ITEM_FRACTION_SHIFT 4
+#define FF6_ITEM_MEGALIXIR 239
+#define FF6_ITEM_FENIX_DOWN 240
+#define FF6_ITEM_SLEEPING_BAG 246  // these need a save point, a place to warp from, and the status effects of the game
+#define FF6_ITEM_TENT 247
+#define FF6_ITEM_WARP_STONE 253
+#define FF6_ITEM_IMP_BIT 0x40  // of the equip flags: an item that only an imp can use well
+#define FF6_ITEM_TWO_HANDED 0x40  // of the flags of a weapon
+#define FF6_RELIC1_HP_25 0x04
+#define FF6_RELIC1_HP_50 0x08
+#define FF6_RELIC1_HP_12 0x10
+#define FF6_RELIC1_MP_25 0x20
+#define FF6_RELIC1_MP_50 0x40
+#define FF6_RELIC1_MP_12 0x80
+#define FF6_RELIC3_STRENGTH_50 0x80  // the hyper wrist
+#define FF6_RELIC4_GAUNTLET 0x08
+#define FF6_RELIC4_GENJI_GLOVE 0x10
+#define FF6_EQUIP_EVADE_TABLE {0, 10, 20, 30, 40, 50, -10, -20, -30, -40, -50}  // by the nibble of the item
+#define FF6_LEVEL_STEPS 98  // from level 1 to 99
+#define FF6_SHOP_COUNT 128
+#define FF6_SHOP_PROP_BYTES 9  // the kind and the price modifier, then eight items
+#define FF6_SHOP_ITEMS 8
+#define FF6_SHOP_KIND_MASK 7  // weapons, armor, items, relics or a vendor
+#define FF6_SHOP_PRICE_SHIFT 3
+#define FF6_SHOP_PRICE_MASK 7
+#define FF6_ITEM_PROP_PRICE 28  // a word
+#define FF6_PRICE_PLUS_50 1
+#define FF6_PRICE_PLUS_100 2
+#define FF6_PRICE_HALF 3
+#define FF6_PRICE_HALF_FOR_FEMALE 4
+#define FF6_PRICE_HALF_FOR_MALE 5
+#define FF6_PRICE_HALF_FOR_EDGAR 6
+#define FF6_SHOPPERS_FEMALE {0, 6, 8}  // the map sprites of Terra, Celes and Relm
+#define FF6_SHOPPER_EDGAR 4
+
+// ---- Abilities: spells, espers, swordtechs and blitzes ------------------------------------------
+#define FF6_SPELL_COUNT 54
+#define FF6_SPELL_NAME_BYTES 7  // a symbol, then six letters
+#define FF6_ESPER_COUNT 27
+#define FF6_ESPER_NAME_BYTES 8
+#define FF6_TECH_COUNT 8  // swordtechs, and blitzes
+#define FF6_TECH_NAME_BYTES 10
+#define FF6_NATURAL_MAGIC_PAIRS 16  // for Terra, then as many for Celes: a spell and the level that teaches it
+#define FF6_NATURAL_MAGIC_BYTES (2 * FF6_NATURAL_MAGIC_PAIRS * 2)
+#define FF6_NATURAL_MAGIC_TERRA 0  // the actors that learn them, and the swordtech and blitz users
+#define FF6_NATURAL_MAGIC_CELES 6
+#define FF6_ACTOR_CYAN 2
+#define FF6_MAGIC_PROP_COUNT 256  // the attacks, of which the first FF6_SPELL_COUNT are spells
+#define FF6_MAGIC_PROP_BYTES 14
+#define FF6_MAGIC_PROP_MP 5  // the cost of a spell, in the properties of the attack
+#define FF6_ACTOR_SABIN 5
+#define FF6_BUM_RUSH_BIT 0x80
+#define FF6_ESPER_FIRST_ID 0x36  // the events give espers 0x36 to 0x50
+#define FF6_EVENT_GIVE_ESPER 0x86
+#define FF6_EVENT_TAKE_ESPER 0x87
+#define FF6_EVENT_GIVE_SWDTECHS 0x8F
+#define FF6_EVENT_GIVE_BUM_RUSH 0x90
+
+// The shop menu: the positions are close to the game's
+#define FF6_SHOP_OPTION_COLUMNS {3, 8, 14}
+#define FF6_SHOP_OPTION_ROW 6
+#define FF6_SHOP_BUY_TOP 56  // pixels, then the rows are FF6_ITEM_ROW_HEIGHT apart
+#define FF6_SHOP_SELL_TOP 80
+#define FF6_SHOP_SELL_ROWS 10
+#define FF6_SHOP_DESC_TOP 160
+#define FF6_SHOP_NAME_X 3
+#define FF6_SHOP_PRICE_X 20
+#define FF6_SHOP_CURSOR_X 8
+#define FF6_MAX_LEVEL 99
+#define FF6_DEFAULT_LEVEL 3  // the average level when no character is available
+#define FF6_MAX_HP 9999
+#define FF6_MAX_MP 999
+#define FF6_MAX_ITEM_QUANTITY 99
+#define FF6_MAX_GIL 9999999
+#define FF6_MAX_STEPS 9999999
+#define FF6_MAX_EXPERIENCE 0xFFFFFF
+#define FF6_EXP_SHIFT 3  // experience is the sum of the steps of the levels, times 8
+#define FF6_STAT_MAX 255
+#define FF6_EVENT_BIT_CHAR_AVAILABLE 0x2F0  // one bit for each character that has joined
+#define FF6_EVENT_BIT_NOT_ENOUGH_GIL 0x1BE  // set by the command that takes gil when there is not enough
+#define FF6_HP_BOOST_MASK 0xC0
+#define FF6_HP_CHANGES {1, 2, 4, 8, 16, 32, 64, 128}  // what the commands that add or take hp use
+#define FF6_EVENT_SET_CHAR_PROP 0x40
+#define FF6_EVENT_NORMALIZE_LEVEL 0x77
+#define FF6_EVENT_GIVE_ITEM 0x80
+#define FF6_EVENT_TAKE_ITEM 0x81
+#define FF6_EVENT_GIVE_GIL 0x84
+#define FF6_EVENT_TAKE_GIL 0x85
+#define FF6_EVENT_CHANGE_HP 0x8B
+#define FF6_EVENT_CHANGE_MP 0x8C
+#define FF6_EVENT_REMOVE_EQUIPMENT 0x8D
+#define FF6_EVENT_SHOP 0x9B
+#define FF6_HP_CHANGE_SET_MAX 0x7F  // of the second byte of the commands that change hp: set to the maximum
+#define FF6_HP_CHANGE_SUBTRACT 0x80
+
+// ---- Treasure chests (CheckTreasure) ------------------------------------------------------
+#define FF6_TREASURE_PROP_SIZE 5
+#define FF6_TREASURE_BIT_MASK 0x1FF  // of the word of a chest: its bit among the 512 treasure bits
+#define FF6_TREASURE_BIT_COUNT 512
+#define FF6_TREASURE_KIND_GIL 0x8000
+#define FF6_TREASURE_KIND_ITEM 0x4000
+#define FF6_TREASURE_KIND_MONSTER 0x2000
+#define FF6_TREASURE_GIL_UNIT 100  // a chest of gil holds its contents times this
+#define FF6_TILE_TREASURE 0x80  // low byte of a tile property: a chest or a pot that can be opened
+#define FF6_TILE_CHEST_CLOSED 0x13
+#define FF6_TILE_CHEST_OPEN 0x12
+#define FF6_SFX_TREASURE_CHEST 0xA6
+#define FF6_SFX_TREASURE_POT 0x1B
+#define FF6_EVENT_SCRIPT_TREASURE_ITEM 0x08  // offsets of the events that tell what a chest held
+#define FF6_EVENT_SCRIPT_TREASURE_GIL 0x10
+#define FF6_EVENT_SCRIPT_TREASURE_EMPTY 0x14
+#define FF6_DLG_GP 0x19  // in a dialogue: the amount of gil that was found
+#define FF6_DLG_ITEM 0x1A  // and the name of the item that was received
+#define FF6_DLG_GLYPH_ZERO 0x54
+#define FF6_DLG_GLYPH_SPACE 0x7F
+#define FF6_DLG_FROM_MENU_CODE 0x60  // a code of the small font of the menus minus this is a glyph of the dialogues
+#define FF6_MENU_CODE_LAST_GLYPH 0xDF
 

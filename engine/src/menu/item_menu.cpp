@@ -10,12 +10,29 @@ namespace {
 
 const char* const kOptions[FF6_ITEM_OPTION_COUNT] = {"USE", "ARRANGE", "RARE"};
 
+std::string characterName(int id) {
+    static const char* const kNames[] = FF6_CHARACTER_NAMES;
+    std::string name = id >= 0 && id < FF6_CHAR_COUNT ? kNames[id] : "";
+    if (!name.empty()) name[0] = static_cast<char>(name[0] - 'a' + 'A');
+    return name;
+}
+
+std::string number(int value, int width) {
+    char buffer[16];
+    std::snprintf(buffer, sizeof(buffer), "%*d", width, value);
+    return buffer;
+}
+
 }  // namespace
 
-void ItemMenu::open(const std::vector<MenuItem>& items) {
+void ItemMenu::open(const std::vector<MenuItem>& items, const std::vector<MenuCharacter>& party, const ItemHooks* hooks) {
     items_ = items;
+    party_ = party;
+    hooks_ = hooks;
     closed_ = false;
     inList_ = false;
+    targeting_ = false;
+    target_ = 0;
     option_ = 0;
     selected_ = 0;
     first_ = 0;
@@ -35,6 +52,10 @@ void ItemMenu::move(int step) {
 
 void ItemMenu::update(const InputState& input) {
     const int direction = repeat_.update(input.direction);
+    if (targeting_) {
+        updateTarget(direction, input);
+        return;
+    }
     if (inList_) {
         if (direction == Up) move(-1);
         if (direction == Down) move(1);
@@ -42,7 +63,14 @@ void ItemMenu::update(const InputState& input) {
             sound_.command(FF6_SFX_MENU_MOVE, 0, 0);
             inList_ = false;
         } else if (input.confirm) {
-            sound_.command(FF6_SFX_MENU_INVALID, 0, 0);  // the items cannot be used yet
+            const int item = items_[static_cast<size_t>(selected_)].id;
+            if (hooks_ && hooks_->usable && hooks_->usable(item) && !party_.empty()) {
+                sound_.command(FF6_SFX_MENU_SELECT, 0, 0);
+                targeting_ = true;
+                target_ = 0;
+            } else {
+                sound_.command(FF6_SFX_MENU_INVALID, 0, 0);  // the other items have nothing to do here
+            }
         }
         return;
     }
@@ -63,6 +91,10 @@ void ItemMenu::update(const InputState& input) {
 
 void ItemMenu::draw() {
     using Layer = MenuScreen::Layer;
+    if (targeting_) {
+        drawTarget();
+        return;
+    }
     screen_.clear();
     screen_.setTextOffset(0);
     screen_.setClip(0, FF6_SCREEN_HEIGHT);
@@ -93,12 +125,99 @@ void ItemMenu::draw() {
         screen_.text(FF6_ITEM_QUANTITY_X, tileRow, quantity, Layer::Bg1, FF6_MENU_BG1_DEFAULT);
     }
     screen_.setTextOffset(0);
+    drawDescription();
     if (inList_) {
         screen_.hand(FF6_ITEM_CURSOR_X, FF6_ITEM_LIST_TOP + (selected_ - first_) * FF6_ITEM_ROW_HEIGHT + FF6_ITEM_CURSOR_DY);
     } else {
         static constexpr int kCursorX[FF6_ITEM_OPTION_COUNT] = FF6_ITEM_OPTION_CURSOR_X;
         screen_.hand(kCursorX[option_], FF6_ITEM_OPTION_CURSOR_Y);
     }
+}
+
+// The description of the item that the hand is on, in the window under the options: two lines, 12 pixels apart.
+void ItemMenu::drawDescription() {
+    if (items_.empty()) return;
+    const std::vector<uint8_t> text = screen_.data().itemDescription(items_[static_cast<size_t>(selected_)].id);
+    std::vector<uint8_t> line;
+    int row = 0;
+    for (size_t i = 0; i <= text.size(); ++i) {
+        if (i < text.size() && text[i] != FF6_ITEM_DESC_NEWLINE) {
+            line.push_back(text[i]);
+            continue;
+        }
+        const int y = FF6_ITEM_DESC_TOP + row++ * FF6_ITEM_ROW_HEIGHT;
+        screen_.setTextOffset(y % FF6_MENU_TILE_SIZE);
+        screen_.codes(FF6_ITEM_DESC_X, y / FF6_MENU_TILE_SIZE, line, MenuScreen::Layer::Bg3, FF6_MENU_BG3_DEFAULT);
+        line.clear();
+    }
+    screen_.setTextOffset(0);
+}
+
+// The hand is on the characters: the one that gets the item. Using it again keeps the hand here while some are left.
+void ItemMenu::updateTarget(int direction, const InputState& input) {
+    const int count = static_cast<int>(party_.size());
+    if ((direction == Up || direction == Down) && count > 0) {
+        target_ = (target_ + (direction == Down ? 1 : count - 1)) % count;
+        sound_.command(FF6_SFX_MENU_MOVE, 0, 0);
+    }
+    if (input.cancel) {
+        sound_.command(FF6_SFX_MENU_MOVE, 0, 0);
+        targeting_ = false;
+    } else if (input.confirm) {
+        const int item = items_[static_cast<size_t>(selected_)].id;
+        const int character = party_[static_cast<size_t>(target_)].id;
+        if (!hooks_ || !hooks_->canUse || !hooks_->use || !hooks_->canUse(item, character) || !hooks_->use(item, character)) {
+            sound_.command(FF6_SFX_MENU_INVALID, 0, 0);
+            return;
+        }
+        sound_.command(FF6_SFX_MENU_SUCCESS, 0, 0);
+        if (hooks_->items) items_ = hooks_->items();
+        if (hooks_->party) party_ = hooks_->party();
+        if (items_.empty()) {
+            inList_ = targeting_ = false;
+            selected_ = first_ = 0;
+            return;
+        }
+        selected_ = std::min(selected_, static_cast<int>(items_.size()) - 1);
+        first_ = std::max(0, std::min(first_, selected_));
+        if (selected_ >= first_ + FF6_ITEM_ROWS) first_ = selected_ - FF6_ITEM_ROWS + 1;
+        if (items_[static_cast<size_t>(selected_)].id != item) targeting_ = false;  // the last one was used
+    }
+}
+
+// DrawItemTargetMenu: the item and its quantity on the left, the characters on the right.
+void ItemMenu::drawTarget() {
+    using Layer = MenuScreen::Layer;
+    screen_.clear();
+    screen_.setTextOffset(0);
+    screen_.setClip(0, FF6_SCREEN_HEIGHT);
+    screen_.window(10, 1, 19, 24);
+    screen_.window(1, 1, 13, 2);
+    screen_.window(1, 5, 7, 3);
+    const MenuItem& chosen = items_[static_cast<size_t>(selected_)];
+    const uint8_t* name = screen_.data().itemNames.data() + static_cast<size_t>(chosen.id) * FF6_ITEM_NAME_BYTES;
+    screen_.codes(2, 2, std::vector<uint8_t>(name, name + FF6_ITEM_NAME_BYTES), Layer::Bg3, FF6_MENU_BG3_DEFAULT);
+    screen_.text(2, 6, ":" + number(chosen.quantity, 2), Layer::Bg3, FF6_MENU_BG3_DEFAULT);
+    static const int kPortraits[FF6_CHAR_COUNT] = FF6_MENU_PORTRAITS_OF_CHARACTER;
+    for (size_t slot = 0; slot < party_.size() && slot < FF6_PARTY_SIZE; ++slot) {
+        const MenuCharacter& c = party_[slot];
+        const int row = 3 + static_cast<int>(slot) * FF6_MENU_BLOCK_STEP;
+        if (c.id >= 0 && c.id < FF6_CHAR_COUNT) {
+            screen_.portrait(FF6_ITEM_TARGET_PORTRAIT_X, FF6_MENU_PORTRAIT_Y + static_cast<int>(slot) * FF6_MENU_PORTRAIT_STEP, kPortraits[c.id]);
+        }
+        screen_.text(16, row, characterName(c.id), Layer::Bg1, FF6_MENU_BG1_DEFAULT);
+        screen_.text(18, row + 2, "LV", Layer::Bg1, FF6_MENU_BG1_TEAL);
+        screen_.text(18, row + 3, "HP", Layer::Bg1, FF6_MENU_BG1_TEAL);
+        screen_.text(18, row + 4, "MP", Layer::Bg1, FF6_MENU_BG1_TEAL);
+        screen_.text(25, row + 3, "/", Layer::Bg1, FF6_MENU_BG1_DEFAULT);
+        screen_.text(25, row + 4, "/", Layer::Bg1, FF6_MENU_BG1_DEFAULT);
+        screen_.text(23, row + 2, number(c.level, 2), Layer::Bg1, FF6_MENU_BG1_DEFAULT);
+        screen_.text(21, row + 3, number(c.hp, 4), Layer::Bg1, FF6_MENU_BG1_DEFAULT);
+        screen_.text(26, row + 3, number(c.maxHp, 4), Layer::Bg1, FF6_MENU_BG1_DEFAULT);
+        screen_.text(21, row + 4, number(c.mp, 4), Layer::Bg1, FF6_MENU_BG1_DEFAULT);
+        screen_.text(26, row + 4, number(c.maxMp, 4), Layer::Bg1, FF6_MENU_BG1_DEFAULT);
+    }
+    screen_.hand(FF6_ITEM_TARGET_CURSOR_X, FF6_MENU_CHARACTER_CURSOR_Y + FF6_MENU_PORTRAIT_STEP * target_);
 }
 
 }  // namespace ff6

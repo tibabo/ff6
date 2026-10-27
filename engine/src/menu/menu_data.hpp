@@ -21,7 +21,21 @@ struct MenuData {
     // The colors 1 to 7 that each pattern starts with, BGR555.
     std::array<std::array<uint16_t, FF6_MENU_WINDOW_COLORS>, FF6_MENU_WINDOW_COUNT> windowColors{};
     // The name of each item: its symbol and 12 letters, in the codes of the small font.
-    std::vector<uint8_t> itemNames;};
+    std::vector<uint8_t> itemNames;
+    std::vector<uint16_t> itemDescPtrs;  // where the description of each item starts in itemDescriptions
+    std::vector<uint8_t> itemDescriptions;  // texts in the codes of the small font: 0x01 starts a line, 0 ends the text
+    // The names of the abilities, one after the other, in the codes of the small font.
+    std::vector<uint8_t> spellNames, esperNames, bushidoNames, blitzNames;
+
+    // The codes of the name of a spell, an esper, a swordtech or a blitz; empty when there is no such thing.
+    std::vector<uint8_t> spellName(int index) const;
+    std::vector<uint8_t> esperName(int index) const;
+    std::vector<uint8_t> bushidoName(int index) const;
+    std::vector<uint8_t> blitzName(int index) const;
+
+    // The codes of the description of an item, without the end; empty for an item that has none.
+    std::vector<uint8_t> itemDescription(int item) const;
+};
 
 MenuData loadMenuData(const std::string& packDir);
 

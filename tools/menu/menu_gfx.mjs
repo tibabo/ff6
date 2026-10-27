@@ -38,6 +38,40 @@ export function readItemNames(rom) {
   return Buffer.from(rom.subarray(ITEM_NAMES, ITEM_NAMES + ITEM_COUNT * ITEM_NAME_BYTES));
 }
 
+const ITEM_DESC = 0x2d6400;  // ED/6400: texts in the codes of the small font, 0x01 for a new line, 0 at the end
+const ITEM_DESC_PTRS = 0x2d7aa0;  // ED/7AA0: a word for each item, from the start of the texts
+export const ITEM_DESC_BYTES = 0x13a0;
+
+// The names of the abilities in the codes of the small font: a symbol and six letters for a spell, eight letters
+// for an esper, ten for a swordtech or a blitz.
+export const SPELL_COUNT = 54;
+export const SPELL_NAME_BYTES = 7;
+export const ESPER_COUNT = 27;
+export const ESPER_NAME_BYTES = 8;
+export const TECH_COUNT = 8;
+export const TECH_NAME_BYTES = 10;
+const SPELL_NAMES = 0x26f567;  // E6/F567
+const ESPER_NAMES = 0x26f6e1;  // E6/F6E1
+const BUSHIDO_NAMES = 0x0f3c40;  // CF/3C40
+const BLITZ_NAMES = 0x26f831;  // E6/F831
+
+export function readSkillNames(rom) {
+  return Buffer.concat([
+    rom.subarray(SPELL_NAMES, SPELL_NAMES + SPELL_COUNT * SPELL_NAME_BYTES),
+    rom.subarray(ESPER_NAMES, ESPER_NAMES + ESPER_COUNT * ESPER_NAME_BYTES),
+    rom.subarray(BUSHIDO_NAMES, BUSHIDO_NAMES + TECH_COUNT * TECH_NAME_BYTES),
+    rom.subarray(BLITZ_NAMES, BLITZ_NAMES + TECH_COUNT * TECH_NAME_BYTES),
+  ]);
+}
+
+// The pointers of the 256 items, then the texts.
+export function readItemDescriptions(rom) {
+  return Buffer.concat([
+    rom.subarray(ITEM_DESC_PTRS, ITEM_DESC_PTRS + ITEM_COUNT * 2),
+    rom.subarray(ITEM_DESC, ITEM_DESC + ITEM_DESC_BYTES),
+  ]);
+}
+
 const WINDOW_GFX = 0x2d0000;
 const WINDOW_PAL = 0x2d1c00;
 export const WINDOW_COUNT = 8;
@@ -73,5 +107,5 @@ export function buildMenuData(rom, version) {
   header.write(MENU_MAGIC, 0, 8, 'ascii');
   header.writeUInt32LE(version, 8);
   return Buffer.concat([header, readMenuFont(rom), readMenuPalette(rom), readCursorTiles(rom), readCursorPalette(rom),
-    readPortraits(rom), readWindows(rom), readItemNames(rom)]);
+    readPortraits(rom), readWindows(rom), readItemNames(rom), readItemDescriptions(rom), readSkillNames(rom)]);
 }

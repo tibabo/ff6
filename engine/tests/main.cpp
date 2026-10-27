@@ -26,6 +26,7 @@ int main() {
     testEvent();
     testEventCmd();
     testMenu();
+    testParty();
     testGame();
     if (test::failures != 0) {
         std::fprintf(stderr, "%d check(s) failed\n", test::failures);

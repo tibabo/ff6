@@ -30,6 +30,13 @@ bool flag(const Json& object, const char* key) {
     return value->boolean;
 }
 
+// A whole number between two limits, from a list.
+int element(const Json& array, size_t index, int low, int high) {
+    const Json& value = array.items[index];
+    if (value.type != Json::Type::Number || value.number < low || value.number > high) throw std::runtime_error("save: bad item");
+    return static_cast<int>(value.number);
+}
+
 const Json& list(const Json& object, const char* key) {
     const Json* value = object.find(key);
     if (!value || value->type != Json::Type::Array) throw std::runtime_error(std::string("save: missing list ") + key);
@@ -79,6 +86,46 @@ std::string saveToJson(const SaveState& state) {
     if (state.hasColors) {
         out << ",\n  \"fontColor\": " << state.fontColor << ",\n  \"windowColors\": ";
         appendList(out, std::vector<int>(state.windowColors.begin(), state.windowColors.end()));
+    }
+    if (state.hasParty) {
+        const PartyState& party = state.party;
+        out << ",\n  \"gil\": " << party.gil << ", \"steps\": " << party.steps << ",\n  \"stats\": [\n";
+        for (size_t i = 0; i < party.characters.size(); ++i) {
+            const CharacterState& c = party.characters[i];
+            out << "    {\"actor\": " << c.actor << ", \"level\": " << c.level << ", \"hp\": " << c.hp << ", \"maxHp\": " << c.maxHp
+                << ", \"mp\": " << c.mp << ", \"maxMp\": " << c.maxMp << ", \"experience\": " << c.experience
+                << ", \"vigor\": " << c.vigor << ", \"speed\": " << c.speed << ", \"stamina\": " << c.stamina
+                << ", \"magicPower\": " << c.magicPower << ", \"equipment\": ";
+            appendList(out, std::vector<int>(c.equipment.begin(), c.equipment.end()));
+            std::vector<int> known;
+            for (size_t spell = 0; spell < party.spells[i].size(); ++spell) {
+                if (party.spells[i][spell]) known.push_back(static_cast<int>(spell));
+            }
+            out << ", \"spells\": ";
+            appendList(out, known);
+            out << "}" << (i + 1 < party.characters.size() ? "," : "") << "\n";
+        }
+        out << "  ],\n  \"items\": [";
+        bool first = true;
+        for (const InventorySlot& slot : party.inventory) {
+            if (slot.item == FF6_ITEM_EMPTY) continue;
+            out << (first ? "" : ", ") << "[" << slot.item << ", " << slot.quantity << "]";
+            first = false;
+        }
+        out << "]";
+        std::vector<int> opened;
+        for (size_t i = 0; i < party.treasures.size(); ++i) {
+            if (party.treasures[i]) opened.push_back(static_cast<int>(i));
+        }
+        out << ",\n  \"treasures\": ";
+        appendList(out, opened);
+        std::vector<int> espers;
+        for (size_t i = 0; i < party.espers.size(); ++i) {
+            if (party.espers[i]) espers.push_back(static_cast<int>(i));
+        }
+        out << ",\n  \"espers\": ";
+        appendList(out, espers);
+        out << ", \"swordtechs\": " << party.swordtechs << ", \"blitzes\": " << party.blitzes;
     }
     out << "\n}\n";
     return out.str();
@@ -134,6 +181,52 @@ SaveState saveFromJson(const std::string& text) {
         if (colors.size() != state.windowColors.size()) throw std::runtime_error("save: there must be 56 window colors");
         std::copy(colors.begin(), colors.end(), state.windowColors.begin());
         state.hasColors = true;
+    }
+    if (root.find("stats")) {
+        PartyState& party = state.party;
+        party.gil = number(root, "gil", 0, FF6_MAX_GIL);
+        party.steps = number(root, "steps", 0, FF6_MAX_STEPS);
+        const Json& stats = list(root, "stats");
+        if (stats.items.size() != party.characters.size()) throw std::runtime_error("save: there must be 16 sets of statistics");
+        for (size_t i = 0; i < party.characters.size(); ++i) {
+            const Json& item = stats.items[i];
+            CharacterState& c = party.characters[i];
+            c.actor = number(item, "actor", 0, FF6_CHAR_PROP_COUNT - 1);
+            c.level = number(item, "level", 1, FF6_MAX_LEVEL);
+            c.maxHp = number(item, "maxHp", 0, FF6_MAX_HP);
+            c.maxMp = number(item, "maxMp", 0, FF6_MAX_MP);
+            c.hp = number(item, "hp", 0, FF6_MAX_HP);
+            c.mp = number(item, "mp", 0, FF6_MAX_MP);
+            c.experience = number(item, "experience", 0, FF6_MAX_EXPERIENCE);
+            c.vigor = number(item, "vigor", 0, FF6_STAT_MAX);
+            c.speed = number(item, "speed", 0, FF6_STAT_MAX);
+            c.stamina = number(item, "stamina", 0, FF6_STAT_MAX);
+            c.magicPower = number(item, "magicPower", 0, FF6_STAT_MAX);
+            const std::vector<int> equipment = ids(item, "equipment", FF6_ITEM_COUNT);
+            if (equipment.size() != c.equipment.size()) throw std::runtime_error("save: there must be 6 pieces of equipment");
+            std::copy(equipment.begin(), equipment.end(), c.equipment.begin());
+            if (item.find("spells")) {
+                for (const int spell : ids(item, "spells", FF6_SPELL_COUNT)) party.spells[i][static_cast<size_t>(spell)] = true;
+            }
+        }
+        size_t used = 0;
+        for (const Json& pair : list(root, "items").items) {
+            if (pair.type != Json::Type::Array || pair.items.size() != 2 || used >= party.inventory.size()) {
+                throw std::runtime_error("save: bad item");
+            }
+            InventorySlot& slot = party.inventory[used++];
+            slot.item = element(pair, 0, 0, FF6_ITEM_COUNT - 2);
+            slot.quantity = element(pair, 1, 1, FF6_MAX_ITEM_QUANTITY);
+        }
+        if (root.find("treasures")) {
+            for (const int id : ids(root, "treasures", FF6_TREASURE_BIT_COUNT)) party.treasures[static_cast<size_t>(id)] = true;
+        }
+        if (root.find("espers")) {
+            for (const int id : ids(root, "espers", FF6_ESPER_COUNT)) party.espers[static_cast<size_t>(id)] = true;
+            party.swordtechs = static_cast<unsigned>(number(root, "swordtechs", 0, (1 << FF6_TECH_COUNT) - 1));
+            party.blitzes = static_cast<unsigned>(number(root, "blitzes", 0, (1 << FF6_TECH_COUNT) - 1));
+        }
+        state.hasParty = true;
     }
     return state;
 }

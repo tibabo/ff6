@@ -281,12 +281,29 @@ bool EventRunner::step(EventHost& host) {
         case FF6_EVENT_FADE_IN_SPEED:
         case FF6_EVENT_FADE_OUT_SPEED:
         case FF6_EVENT_FADE_STOP:
+        case FF6_EVENT_SET_CHAR_PROP:
+        case FF6_EVENT_NORMALIZE_LEVEL:
+        case FF6_EVENT_GIVE_ITEM:
+        case FF6_EVENT_TAKE_ITEM:
+        case FF6_EVENT_GIVE_GIL:
+        case FF6_EVENT_TAKE_GIL:
+        case FF6_EVENT_CHANGE_HP:
+        case FF6_EVENT_CHANGE_MP:
+        case FF6_EVENT_REMOVE_EQUIPMENT:
+        case FF6_EVENT_GIVE_ESPER:
+        case FF6_EVENT_TAKE_ESPER:
+        case FF6_EVENT_GIVE_SWDTECHS:
+        case FF6_EVENT_GIVE_BUM_RUSH:
         case FF6_EVENT_MOVE_PARTY: {
             const size_t at = pc_ + 1;
             host.fieldCommand(op, at < script.size() ? &script[at] : nullptr,
                               std::min(length - 1, script.size() - std::min(at, script.size())));
             return next();
         }
+        case FF6_EVENT_SHOP:  // the menu takes the screen, and the event goes on once it is closed
+            host.fieldCommand(op, pc_ + 1 < script.size() ? &script[pc_ + 1] : nullptr, length - 1);
+            next();
+            return false;
         case FF6_EVENT_PAUSE_LONG:
             pause_ = byteAt(1) * FF6_EVENT_LONG_PAUSE_UNIT;
             return next();

@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Game data and field rules, one source per file of the disassembly (src/field, src/event, src/data): no graphics library.
 add_library(ff6_core STATIC
   src/data/json.cpp
+  src/data/game_rules.cpp
   src/data/pack.cpp
   src/data/save.cpp
   src/field/anim.cpp
@@ -31,7 +32,10 @@ add_library(ff6_core STATIC
   src/menu/item_menu.cpp
   src/menu/menu_data.cpp
   src/menu/menu_screen.cpp
-  src/menu/window_style.cpp)
+  src/menu/shop_menu.cpp
+  src/menu/window_style.cpp
+  src/state/char_stats.cpp
+  src/state/party_ops.cpp)
 target_include_directories(ff6_core PUBLIC src)
 
 # Game state and drawing through the abstract ff6::Renderer: still no graphics library.
@@ -84,7 +88,8 @@ if(BUILD_TESTING)
     tests/field/scroll_tests.cpp
     tests/field/sprite_data_tests.cpp
     tests/field/text_tests.cpp
-    tests/menu/menu_tests.cpp)
+    tests/menu/menu_tests.cpp
+    tests/state/party_tests.cpp)
   target_link_libraries(ff6_tests PRIVATE ff6_game ff6_audio)
   add_test(NAME ff6_tests COMMAND ff6_tests)
 endif()

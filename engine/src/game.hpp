@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "data/pack.hpp"
+#include "data/game_rules.hpp"
 #include "data/save.hpp"
 #include "field/anim.hpp"
 #include "field/entrance.hpp"
@@ -21,8 +22,10 @@
 #include "field/text.hpp"
 #include "input.hpp"
 #include "menu/field_menu.hpp"
+#include "menu/shop_menu.hpp"
 #include "renderer.hpp"
 #include "sound.hpp"
+#include "state/party_ops.hpp"
 
 namespace ff6 {
 
@@ -57,7 +60,13 @@ public:
     bool fading() const override { return fade_ != 0; }
     MenuPhase menuPhase() const { return menuPhase_; }
     const FieldMenu& menu() const { return menu_; }
+    const ShopMenu& shop() const { return shop_; }
+    bool shopOpen() const { return shopOpen_; }
     const GameConfig& config() const { return config_; }
+    const GameRules& rules() const { return rules_; }
+    // The characters, the inventory and the gil.
+    PartyState& party() { return state_; }
+    const PartyState& party() const { return state_; }
     // What the Save option of the menu does with the state of the game; without one, it saves nothing.
     void setSaveHandler(std::function<void(const SaveState&)> handler) { saveHandler_ = std::move(handler); }
     // Ends the fades at once, for captures.
@@ -89,12 +98,20 @@ private:
     void copyPlayerToLead(Npc& lead) const;
     void invalidateStrips();
     void checkArrival();
-    void talkToNpc();
+    bool talkToNpc();
+    bool openTreasure();
+    void showOpenedTreasures();
+    void appendItemName(int item);
     bool openDoor(int direction);
     void changeMapData(const uint8_t* bytes, size_t size);
     void moveParty(int tileX, int tileY);
     void tickMenu(const InputState& input);
-    MenuStatus menuStatus() const;
+    void openShop(int shop);
+    MenuStatus menuStatus();
+    MenuCharacter menuCharacter(int id, const CharacterState& state) const;
+    std::vector<MenuItem> inventoryItems() const;
+    std::vector<MenuCharacter> partyCharacters() const;
+    CharacterMask availableCharacters() const;
     void leaveThroughEntrance(const EntranceTarget& target);
     void composeDialogue();
     void drawSprites(bool above);
@@ -114,11 +131,18 @@ private:
     MenuData menuData_;
     MenuScreen menuScreen_;
     FieldMenu menu_;
+    ShopMenu shop_;
+    bool shopOpen_ = false;  // the menu that is open is a shop, not the field menu
     MenuPhase menuPhase_ = MenuPhase::Closed;
     GameConfig config_;
+    GameRules rules_;
+    PartyState state_;
     std::function<void(const SaveState&)> saveHandler_;
     uint32_t frame_ = 0;
     std::set<int> warnedObjects_;  // objects that are not there, reported once
+    std::vector<uint8_t> dialogueText_;  // the dialogue that is open, with the values that the game fills in
+    long foundGil_ = -1;  // what the dialogue says about the chest that was just opened; -1 for nothing
+    int receivedItem_ = -1;
     bool screenLocked_ = false;  // the screen follows the camera object instead of the party
     int leadSavedMovement_ = FF6_OBJ_MOVE_USER;  // what the lead does again when the event is over
     bool restorePending_ = false;

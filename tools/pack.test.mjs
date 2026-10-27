@@ -36,7 +36,7 @@ test('LZSS expands literals and overlapping ring references', () => {
 test('dialogue encoding rejects characters missing from the ROM font unless lenient', () => {
   const rom = Buffer.alloc(0);
   const tokens = ['A', { type: 'control', code: 1, name: 'newline', args: [] }, { type: 'control', code: 0x19, name: 'gp', args: [] }];
-  assert.deepEqual([...encodeDialogueForEngine(rom, tokens)], [0x20, 1, 0]);
+  assert.deepEqual([...encodeDialogueForEngine(rom, tokens)], [0x20, 1, 0x19, 0]);
   assert.throws(() => encodeDialogueForEngine(rom, ['\u00e9']), /missing from the ROM font: \u00e9/);
   assert.deepEqual([...encodeDialogueForEngine(rom, ['\u00e9'], { lenient: true })], [0x5f, 0]);
 });

@@ -53,6 +53,8 @@ void testGame() {
         for (int frame = 1; frame < FF6_STEP_FRAMES; ++frame) game.tick(idle);
     }
     CHECK(game.player().tileY() == 40 && !game.dialogue().active());
+    CHECK(game.party().steps == 5);  // one for each tile that the party walked
+    CHECK(game.party().characters[0].level == FF6_DEFAULT_LEVEL && game.party().gil == 0);
     game.tick(confirm);
     for (int i = 0; i < 10; ++i) game.tick(idle);
     CHECK(game.dialogue().active());
@@ -142,6 +144,7 @@ void testGame() {
         ff6::SoundProgram program(audio);
         LoggedSound logged(program);
         ff6::Game inn(ff6::loadCommonData(pack), pack, 0x1C, renderer, logged, party);
+        inn.party().gil = 1000;  // the inn takes its price
         for (int object = 0x31; object < 0x35; ++object) {
             CHECK((inn.objects().object(object) != nullptr) == (party.size() == 4 || object == 0x31));
         }
@@ -167,6 +170,7 @@ void testGame() {
             {FF6_SOUND_PAUSE_SONG, 0x38, 0xFF}, {FF6_SOUND_PLAY_SONG, 0x17, 0x00}, {FF6_SOUND_SET_SONG_VOLUME, 0x20, 0xFF}};
         CHECK(commands == expected);  // the town song, a fade out, Nighty Night, then the town song fading in
         CHECK(doorOpened);  // the event opens the door of the room, with the tiles of the open door
+        CHECK(inn.party().gil < 1000 && inn.party().gil > 0);
         CHECK(program.currentSong() == 0x17);
     }
 
@@ -181,6 +185,40 @@ void testGame() {
         CHECK(moved.objects().npcs().size() == 1 && moved.brightness() == FF6_BRIGHTNESS_FULL);
         moved.tick({ff6::Right, false});  // the party is in the hands of the player again
         CHECK(moved.player().moving());
+    }
+
+    {  // the shop command: the screen goes to the shop, the party buys something, and the field comes back
+        ff6::CommonData data = ff6::loadCommonData(pack);
+        const uint32_t startup = ff6::loadMap(pack, 0x1C).startupEvent;
+        const std::vector<uint8_t> script = {FF6_EVENT_SHOP, 0, 0xFE};  // the weapons of Narshe
+        std::copy(script.begin(), script.end(), data.eventScript.begin() + startup);
+        ff6::Game shopper(std::move(data), pack, 0x1C, renderer, sound);
+        shopper.party().gil = 5000;
+        for (int i = 0; i < 300 && !(shopper.menuPhase() == ff6::MenuPhase::Open && !shopper.fading()); ++i) shopper.tick(idle);
+        CHECK(shopper.shopOpen() && shopper.shop().mode() == ff6::ShopMode::Options);
+        shopper.draw();
+        const int first = ff6::shopStock(shopper.rules(), 0)[0];
+        const int price = ff6::shopPrice(shopper.rules(), 0, first, 0);
+        shopper.tick(confirm);  // buy
+        shopper.tick(idle);
+        shopper.tick(confirm);  // the first weapon
+        shopper.tick(idle);
+        shopper.tick(confirm);  // one of it
+        shopper.tick(idle);
+        CHECK(shopper.party().gil == 5000 - price && ff6::itemQuantity(shopper.party(), first) == 1);
+        ff6::InputState back;
+        back.cancel = true;
+        shopper.tick(back);  // to the options
+        shopper.tick(idle);
+        shopper.tick({ff6::Right, false});
+        shopper.tick(idle);
+        shopper.tick({ff6::Right, false});
+        shopper.tick(idle);
+        shopper.tick(confirm);  // exit
+        CHECK(shopper.shop().closed());
+        for (int i = 0; i < 300 && shopper.menuPhase() != ff6::MenuPhase::Closed; ++i) shopper.tick(idle);
+        for (int i = 0; i < 40; ++i) shopper.tick(idle);
+        CHECK(!shopper.shopOpen() && shopper.menuPhase() == ff6::MenuPhase::Closed && shopper.brightness() == FF6_BRIGHTNESS_FULL);
     }
 
     {  // the menu button fades the field out and the menu in; the cancel button brings the field back
@@ -229,5 +267,45 @@ void testGame() {
             CHECK(again.characters[i].party == saved.characters[i].party && again.characters[i].slot == saved.characters[i].slot);
             CHECK(again.characters[i].gfx == saved.characters[i].gfx && again.characters[i].palette == saved.characters[i].palette);
         }
+    }
+
+    {  // a chest gives its item once, tells so in a dialogue, stays open, and is open again in a saved game
+        const uint32_t chestMap = 38;
+        const int chestX = 65, chestY = 28;  // an item chest: item 0xC8 and treasure bit 0x0B
+        test::RecordingSound chestSound;
+        ff6::Game chests(ff6::loadCommonData(pack), pack, chestMap, renderer, chestSound);
+        for (int i = 0; i < 600; ++i) chests.tick(idle);
+        const auto cell = [&](const ff6::Game& game) {
+            const ff6::MapLayout& layout = game.map().layers[FF6_BG1];
+            return layout.cells[static_cast<size_t>(chestY) * layout.width + chestX];
+        };
+        CHECK(cell(chests) == FF6_TILE_CHEST_CLOSED);
+        struct Side { int dx, dy, toward; };
+        for (const Side side : {Side{0, 1, ff6::Up}, Side{0, -1, ff6::Down}, Side{1, 0, ff6::Left}, Side{-1, 0, ff6::Right}}) {
+            if (chests.party().treasures[0x0B]) break;
+            chests.placeParty(chestX + side.dx, chestY + side.dy);
+            chests.tick({side.toward, false});
+            for (int frame = 0; frame < FF6_STEP_FRAMES; ++frame) chests.tick(idle);
+            if (chests.player().facing() != side.toward) continue;
+            chests.tick(confirm);
+        }
+        CHECK(chests.party().treasures[0x0B] && chests.party().inventory[0].item == 0xC8 && chests.party().inventory[0].quantity == 1);
+        CHECK(cell(chests) == FF6_TILE_CHEST_OPEN);
+        CHECK(!chestSound.commands.empty() && chestSound.commands.back().arg1 == FF6_SFX_TREASURE_CHEST);
+        for (int i = 0; i < 10; ++i) chests.tick(idle);
+        CHECK(chests.dialogue().active());  // "Received the item!"
+        size_t glyphs = 0;  // the dialogue names the item: more than the words around it
+        for (int i = 0; i < 600 && chests.dialogue().active(); ++i) {
+            chests.tick(i % 30 == 0 ? confirm : idle);
+            glyphs = std::max(glyphs, chests.dialogue().glyphs().size());
+        }
+        CHECK(glyphs > 14);
+        chests.tick(confirm);  // an open chest gives nothing more
+        for (int i = 0; i < 60; ++i) chests.tick(idle);
+        CHECK(chests.party().inventory[0].quantity == 1);
+        const ff6::SaveState saved = ff6::saveFromJson(ff6::saveToJson(chests.saveState()));
+        ff6::Game restored(ff6::loadCommonData(pack), pack, saved, renderer, chestSound);
+        CHECK(restored.party().treasures[0x0B] && restored.party().inventory[0].item == 0xC8);
+        CHECK(cell(restored) == FF6_TILE_CHEST_OPEN);
     }
 }
