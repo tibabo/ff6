@@ -104,6 +104,7 @@ void Objects::setPartySlots(const std::array<int, FF6_PARTY_SIZE>& slots) {
         if (partySlots_[i] < 0 || activeParty_ <= 0) continue;
         chars_[static_cast<size_t>(partySlots_[i])].party = activeParty_;
         chars_[static_cast<size_t>(partySlots_[i])].partySlot = static_cast<int>(i);
+        chars_[static_cast<size_t>(partySlots_[i])].map = mapId_;  // the active party is where the screen is
     }
 }
 
@@ -158,6 +159,9 @@ void Objects::placeParty(int tileX, int tileY) {
 }
 
 void Objects::enterMap(int mapId, int tileX, int tileY, int facing) {
+    for (Npc& character : chars_) {  // the characters that are in no party stay on the map that they were created on
+        if (character.party == 0 && character.enabled && character.map != mapId) character.enabled = character.visible = false;
+    }
     for (Npc& character : chars_) {
         if (activeParty_ <= 0 || character.party != activeParty_) continue;
         character.map = mapId;

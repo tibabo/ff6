@@ -24,8 +24,8 @@ struct NpcProp {
     int facing = Down;
     bool noTurn = false;  // does not turn toward the party when activated
     int animFrame = 0;
+    int vehicle = 0;  // FF6_VEHICLE_MASK bits: none, chocobo, magitek or raft
 };
-
 NpcProp decodeNpcProp(const uint8_t* bytes);
 
 // An object of obj.asm that stands for an npc: where it is, how it moves and which script it runs.
@@ -49,6 +49,7 @@ struct Npc {
     int jumpHeight = 0;  // pixels above the ground
     int priority = FF6_OBJ_PRIORITY_NORMAL;  // sprite order override
     bool passThrough = false;  // may walk onto a tile that another object holds
+    int vehicle = 0;  // FF6_VEHICLE_* flags: the type and whether the rider shows
     bool touch = false;  // starts its event when the party touches it
     bool topAbove = false, bottomAbove = false;  // sprite priority of the tile under the npc
     int strip = -1;  // texture of the sprite frames, set by the game

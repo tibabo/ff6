@@ -87,7 +87,8 @@ bool Objects::nextCommand(Npc& npc) {
             npc.priority = arg(1) & 3;
             npc.scriptPtr += 1;
             return true;
-        case FF6_OBJ_CMD_VEHICLE:  // vehicles are not supported: only the argument is skipped
+        case FF6_OBJ_CMD_VEHICLE:
+            npc.vehicle |= arg(1) & (FF6_VEHICLE_MASK | FF6_VEHICLE_RIDER);
             npc.scriptPtr += 1;
             return true;
         case FF6_OBJ_CMD_SHOW:

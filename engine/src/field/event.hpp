@@ -92,6 +92,7 @@ private:
     uint32_t pc_ = 0;
     std::vector<Frame> stack_;
     int pause_ = 0;  // frames that the event still waits
+    bool waitDialogue_ = true;  // the event waits for the dialogue that is open
     int waitObject_ = -1;  // the object whose script the event waits for
     int waited_ = 0;  // frames spent waiting for it
     int soundWaited_ = 0;  // frames spent waiting for the sound program

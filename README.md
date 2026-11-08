@@ -155,6 +155,25 @@ le Wave Cannon), pour la regarder avec `--capture ... --after images`.
 Le rendu des combats et des animations est decrit dans
 [docs/rendu-et-animations.md](docs/rendu-et-animations.md).
 
+Sans option de depart (`--map`, `--party`, `--battle`, `--load`, `--stock`),
+le jeu commence comme sur la console : l'ecran de licence, le titre (l'orage
+sur Narshe, les eclairs, le logo dans les flammes), puis l'histoire (« Long
+ago, the War of the Magi... », les armures Magitek) et l'ouverture, la marche
+des trois armures dans la neige avec les noms de l'equipe, avant la partie
+elle-meme. Les scenes sont celles du jeu, executees comme il le fait : un
+programme de cinematique, ses graphismes, ses palettes et ses textes sont lus
+dans la ROM (`title.ff6data`), et `engine/src/cutscene/ppu.cpp` dessine, comme
+le processeur d'image de la console, les modes 1 et 7, les sprites, la table
+de couleurs, les changements de registres ligne par ligne (HDMA) et les
+mathematiques de couleur. Une pression sur la touche de validation pendant le
+titre ou l'ouverture (sauf pendant la licence) les termine et ouvre le menu
+New Game / Continue ; Continue reprend `ff6-save.json` (ou le fichier de
+`--save`). Sans pression, le titre, l'histoire et l'ouverture s'enchainent,
+puis la partie commence a Narshe. `--new-game 1` y force le depart, meme avec
+`--capture`, et `--cutscene title` ou `--cutscene opening` avec
+`--capture image.png --wait images` joue seulement cette scene et enregistre
+l'ecran apres `images` images.
+
 Sous Windows, l'executable est `build\engine\Release\ff6.exe`, et `SDL2.dll`
 doit se trouver a cote de lui (vcpkg l'y copie normalement).
 
@@ -162,11 +181,11 @@ doit se trouver a cote de lui (vcpkg l'y copie normalement).
 d'evenements), `audio.ff6data` (echantillons BRR, enveloppes et scripts des
 musiques), `menu.ff6data` (police et palettes des menus, main du curseur,
 portraits, descriptions des objets, noms des magies, esprits et techniques), `game.ff6data` (proprietes des personnages, des objets et des
-boutiques, tables de niveaux et d'apprentissage), `battle.ff6data` (monstres, noms, objets laches, formations et groupes de combats), `battlegfx.ff6data` (images, palettes et pochoirs des monstres, fonds de combat, poses des personnages), `attackanim.ff6data` (scripts, images et palettes des animations de sorts et d'armes) et une carte par fichier dans `maps/` ; il n'ecrase jamais un
+boutiques, tables de niveaux et d'apprentissage), `battle.ff6data` (monstres, noms, objets laches, formations et groupes de combats), `battlegfx.ff6data` (images, palettes et pochoirs des monstres, fonds de combat, poses des personnages), `attackanim.ff6data` (scripts, images et palettes des animations de sorts et d'armes), `title.ff6data` (programme des cinematiques, graphismes du titre et de l'ouverture, tables de hasard et de sinus) et une carte par fichier dans `maps/` ; il n'ecrase jamais un
 dossier existant. `--text` utilise un `dialogues.json` modifie. Un caractere
 absent de la police de la ROM, par exemple un accent, provoque une erreur
 explicite. Le pack contient des donnees du jeu : ne pas le distribuer. Le format
-est versionne (version 9 : tables de Sketch et de Control) ; un ancien pack
+est versionne (version 13 : titre, ouverture et vehicules) ; un ancien pack
 doit etre regenere.
 
 Controles :
@@ -194,6 +213,14 @@ et `images` images sont simulees avant la capture.
 
 Limites actuelles :
 
+- Titre et ouverture : la musique est celle du jeu (morceaux 2 et 4), mais
+  le menu qui suit n'a que deux choix (New Game et Continue, un seul fichier
+  de sauvegarde JSON) au lieu des trois emplacements de la console. Les
+  armures Magitek sont dessinees depuis les graphismes de la ROM (marche, pas et
+  passager). Les textes de l'histoire sont affiches
+  sans cadre et ne bloquent pas l'evenement, mais restent a l'ecran jusqu'a
+  une pression de la touche de validation.
+
 - Decor : pas d'animation de palette, pas de cartes du monde (0 a 2). La
   transparence (mathematiques de couleur : addition, soustraction, moitie)
   est reproduite pour bg1/bg2/bg3 et les sprites, avec la couleur fixe a zero.
@@ -201,7 +228,10 @@ Limites actuelles :
   leur bruit ; une porte ouverte redevient fermee si la carte est rechargee.
 - PNJ : ils errent ou restent en place selon leurs donnees, et leurs scripts
   d'objets (marche, pauses, sauts, tours, apparition, interrupteurs) sont
-  executes, y compris pendant les evenements. Vehicules, PNJ a graphismes
+  executes, y compris pendant les evenements. Les vehicules des cartes (chocobo,
+  armure Magitek, radeau), avec ou sans passager, viennent des donnees des PNJ
+  et des commandes d'evenement et d'objet ; ceux de la carte du monde
+  (aeronefs) n'existent pas, faute de carte du monde. PNJ a graphismes
   speciaux et animations speciales sont ignores ; le hasard n'est pas celui de
   la console.
 - Evenements : sont executes les dialogues, les choix, les interrupteurs, les

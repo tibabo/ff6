@@ -14,8 +14,11 @@
 
 #include "audio/audio_data.hpp"
 #include "audio/sound_program.hpp"
+#include "cutscene/opening.hpp"
+#include "cutscene/title.hpp"
 #include "data/attack_anim.hpp"
 #include "data/save.hpp"
+#include "data/title_data.hpp"
 #include "game.hpp"
 #include "state/party_ops.hpp"
 #include "sdl/sdl_audio.hpp"
@@ -124,9 +127,9 @@ void playGame(ff6::Game& game, ff6::SdlRenderer& renderer, const std::string& sa
     const double ticksPerFrame = static_cast<double>(SDL_GetPerformanceFrequency()) / FF6_FRAMES_PER_SECOND;
     Uint64 previous = SDL_GetPerformanceCounter();
     double accumulator = 0;
-    std::printf("Map %u. Arrows/WASD or controller to move, Enter/Space/A to talk,\n"
+    std::printf("Arrows/WASD or controller to move, Enter/Space/A to talk (or to end the title screen),\n"
                 "F5 to save to %s, F11 or Alt+Enter for fullscreen, F10 for integer scaling, Escape to quit.\n",
-                static_cast<unsigned>(game.map().id), savePath.c_str());
+                savePath.c_str());
     bool running = true;
     while (running) {
         SDL_Event event;
@@ -140,7 +143,7 @@ void playGame(ff6::Game& game, ff6::SdlRenderer& renderer, const std::string& sa
                     renderer.toggleFullscreen();
                 }
                 if (key == SDLK_F10) renderer.toggleIntegerScale();
-                if (key == SDLK_F5) {
+                if (key == SDLK_F5 && !game.cutsceneOpen() && !game.loadMenuOpen()) {
                     try {
                         ff6::writeSave(savePath, game.saveState());
                         std::printf("Saved the game to %s\n", savePath.c_str());
@@ -194,12 +197,15 @@ struct Start {
     int battle = -1, battleBackground = -1;  // a battle that starts at once, over the field
     int playAnimation = -1;  // an attack whose animation plays in that battle
     bool stock = false;  // weapons, tools and every Lore, to try the commands that need them
+    bool newGame = false;  // begin like the console: the title screen, the story, the opening
+    std::string cutscene;  // "title" or "opening": only that scene, for a capture
 };
 
 std::unique_ptr<ff6::Game> makeGame(ff6::CommonData common, const std::string& packDir, const Start& start,
                                     ff6::SdlRenderer& renderer, ff6::Sound& sound) {
-    std::unique_ptr<ff6::Game> game = start.save ? std::make_unique<ff6::Game>(std::move(common), packDir, *start.save, renderer, sound)
-                                                 : std::make_unique<ff6::Game>(std::move(common), packDir, start.map, renderer, sound, start.party);
+    std::unique_ptr<ff6::Game> game = start.newGame ? std::make_unique<ff6::Game>(std::move(common), packDir, ff6::NewGame{}, renderer, sound)
+                                      : start.save ? std::make_unique<ff6::Game>(std::move(common), packDir, *start.save, renderer, sound)
+                                                   : std::make_unique<ff6::Game>(std::move(common), packDir, start.map, renderer, sound, start.party);
     if (start.stock) {
         for (int item = FF6_STOCK_FIRST_ITEM; item < FF6_STOCK_FIRST_ITEM + FF6_STOCK_ITEMS; ++item) ff6::giveItem(game->party(), item);
         for (int item = FF6_STOCK_FIRST_TOOL; item < FF6_STOCK_FIRST_TOOL + FF6_STOCK_TOOLS; ++item) ff6::giveItem(game->party(), item);
@@ -208,10 +214,39 @@ std::unique_ptr<ff6::Game> makeGame(ff6::CommonData common, const std::string& p
     return game;
 }
 
+// Plays one scene (the title screen or the opening) without a window for `--wait` frames, then saves the screen.
+void captureCutscene(const std::string& packDir, const std::string& name, const Capture& capture, ff6::SdlRenderer& renderer) {
+    const ff6::TitleData data = ff6::loadTitleData(packDir);
+    ff6::NoSound sound;
+    std::unique_ptr<ff6::Cutscene> scene;
+    if (name == "title") {
+        scene = std::make_unique<ff6::TitleScene>(data, sound);
+    } else if (name == "opening") {
+        scene = std::make_unique<ff6::OpeningScene>(data, sound);
+    } else {
+        throw std::runtime_error("--cutscene takes title or opening");
+    }
+    for (int frame = 0; frame < capture.waitFrames && !scene->finished(); ++frame) scene->tick({});
+    std::vector<uint8_t> pixels(static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL);
+    scene->draw(pixels.data());
+    const ff6::TextureId texture = renderer.createTexture(FF6_SCREEN_WIDTH, FF6_SCREEN_HEIGHT, nullptr, ff6::TextureUsage::Dynamic);
+    const ff6::Rect screen{0, 0, FF6_SCREEN_WIDTH, FF6_SCREEN_HEIGHT};
+    renderer.updateTexture(texture, pixels.data());
+    renderer.beginFrame();
+    renderer.draw(texture, screen, screen);
+    renderer.endFrame();
+    renderer.saveFrame(capture.path);
+    std::printf("Saved %s (%s, %d frames)\n", capture.path.c_str(), name.c_str(), capture.waitFrames);
+}
+
 int run(const std::string& packDir, const Start& start, const std::string& savePath, const Capture* capture, long music) {
     ff6::CommonData common = ff6::loadCommonData(packDir);
     SdlRuntime sdl;
     ff6::SdlRenderer renderer(capture != nullptr);
+    if (capture && !start.cutscene.empty()) {
+        captureCutscene(packDir, start.cutscene, *capture, renderer);
+        return 0;
+    }
     if (capture) {  // no sound device for a capture
         ff6::NoSound sound;
         const std::unique_ptr<ff6::Game> game = makeGame(std::move(common), packDir, start, renderer, sound);
@@ -249,6 +284,15 @@ int run(const std::string& packDir, const Start& start, const std::string& saveP
             std::printf("Saved the game to %s\n", savePath.c_str());
         } catch (const std::exception& error) {
             std::fprintf(stderr, "Could not save: %s\n", error.what());
+        }
+    });
+    game->setLoadHandler([&savePath]() -> std::unique_ptr<ff6::SaveState> {
+        if (!std::ifstream(savePath).good()) return nullptr;
+        try {
+            return std::make_unique<ff6::SaveState>(ff6::readSave(savePath));
+        } catch (const std::exception& error) {
+            std::fprintf(stderr, "Could not load %s: %s\n", savePath.c_str(), error.what());
+            return nullptr;
         }
     });
     playGame(*game, renderer, savePath);
@@ -296,7 +340,7 @@ void writeAnimSheet(const std::string& packDir, int attack, int layer, const std
 }  // namespace
 
 int main(int argc, char** argv) {
-    const char* usage = "Usage: %s <data-pack-dir> [--map n] [--party terra,locke,...] [--battle n [--bg n]] [--play attack] [--stock 1] [--anim attack [--layer 0|1|2]] [--load save.json] [--save save.json] [--music song] [--capture out.bmp [--at x,y] [--wait frames] [--moves URDL...] [--talk frames] [--keys ABURDL.] [--after frames]]\n";
+    const char* usage = "Usage: %s <data-pack-dir> [--map n] [--party terra,locke,...] [--battle n [--bg n]] [--play attack] [--stock 1] [--anim attack [--layer 0|1|2]] [--load save.json] [--save save.json] [--music song] [--new-game 1] [--cutscene title|opening --capture out.bmp --wait frames] [--capture out.bmp [--at x,y] [--wait frames] [--moves URDL...] [--talk frames] [--keys ABURDL.] [--after frames]]\n";
     if (argc < 2) {
         std::fprintf(stderr, usage, argc > 0 ? argv[0] : "ff6");
         return 2;
@@ -308,6 +352,9 @@ int main(int argc, char** argv) {
         std::vector<int> party;
         int battle = -1, battleBackground = -1, animAttack = -1, animLayer = 0, playAnimation = -1;
         bool stock = false;
+        bool mapGiven = false;
+        bool forceNewGame = false;
+        std::string cutscene;
         std::string loadPath;
         std::string savePath = FF6_SAVE_DEFAULT_FILE;
         for (int i = 2; i < argc; i += 2) {
@@ -317,6 +364,11 @@ int main(int argc, char** argv) {
                 const long map = std::stol(argv[i + 1], nullptr, 0);
                 if (map < 0 || map > FF6_MAX_MAP_ARGUMENT) throw std::runtime_error("invalid --map");
                 startMap = static_cast<uint32_t>(map);
+                mapGiven = true;
+            } else if (option == "--cutscene") {
+                cutscene = argv[i + 1];
+            } else if (option == "--new-game") {
+                forceNewGame = std::stoi(argv[i + 1]) != 0;
             } else if (option == "--music") {
                 music = std::stol(argv[i + 1]);
                 if (music < 0) throw std::runtime_error("invalid --music");
@@ -380,6 +432,7 @@ int main(int argc, char** argv) {
         if (capture.path.empty() && (!capture.moves.empty() || capture.talkFrames >= 0 || capture.menuCursor >= 0 || capture.waitFrames > 0 || capture.atX >= 0 || !capture.keys.empty() || capture.afterFrames > 0)) {
             throw std::runtime_error("--at, --wait, --moves, --talk, --keys and --after require --capture");
         }
+        if (!cutscene.empty() && capture.path.empty()) throw std::runtime_error("--cutscene requires --capture");
         if (animAttack >= 0) {
             if (capture.path.empty()) throw std::runtime_error("--anim requires --capture");
             writeAnimSheet(argv[1], animAttack, animLayer, capture.path);
@@ -392,6 +445,9 @@ int main(int argc, char** argv) {
         start.playAnimation = playAnimation;
         start.stock = stock;
         start.party = party;
+        start.cutscene = cutscene;
+        // Without a map, a party, a battle or a save to start from, the game begins like the console does.
+        start.newGame = forceNewGame || (capture.path.empty() && !mapGiven && party.empty() && battle < 0 && loadPath.empty() && !stock && playAnimation < 0);
         if (!loadPath.empty()) start.save = std::make_unique<ff6::SaveState>(ff6::readSave(loadPath));
         return run(argv[1], start, savePath, capture.path.empty() ? nullptr : &capture, music);
     } catch (const std::exception& error) {

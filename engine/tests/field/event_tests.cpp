@@ -355,6 +355,40 @@ void testEvent() {
         CHECK(host.fieldCommands.size() == 1 && host.fieldCommands[0].op == 0x73);
         CHECK(host.fieldCommands[0].bytes == std::vector<uint8_t>({0x04, 0x24, 0x01, 0x02, 0x04, 0x14}));
     }
+    {  // an asynchronous dialogue lets the event go on while the text is open, a plain one does not
+        const ff6::CommonData common = test::makeCommon({0x48, 0x01, 0x00, 0xB4, 0x02, 0x4B, 0x02, 0x00, 0xFE});
+        ff6::EventBits bits = freshBits();
+        test::FakeHost host;
+        ff6::EventRunner runner(common, bits);
+        runner.start(0);
+        for (int i = 0; i < 6; ++i) runner.update(host);  // the text of the first one is never closed
+        CHECK(host.opened == std::vector<uint32_t>({1, 2}));
+        runner.update(host);
+        CHECK(host.opened.size() == 2 && runner.running());  // the second one waits for the player
+    }
+    {  // the title screen, the opening and the saved games go to the game, and the event waits for a frame after each
+        const ff6::CommonData common = test::makeCommon({0xA9, 0xAA, 0xAB, 0xAC, 0xFE});
+        ff6::EventBits bits = freshBits();
+        test::FakeHost host;
+        ff6::EventRunner runner(common, bits);
+        runner.start(0);
+        runner.update(host);
+        CHECK(host.fieldCommands.size() == 1 && host.fieldCommands[0].op == FF6_EVENT_TITLE_SCREEN);
+        for (int i = 0; i < 4; ++i) runner.update(host);
+        CHECK(host.fieldCommands.size() == 4 && host.fieldCommands[3].op == FF6_EVENT_RESTORE_GAME);
+        CHECK(host.fieldCommands[1].op == FF6_EVENT_OPENING && host.fieldCommands[2].op == FF6_EVENT_LOAD_MENU);
+        CHECK(!runner.running());
+    }
+    {  // the map of the parent of a house is remembered, not loaded
+        const ff6::CommonData common = test::makeCommon({0x6C, 0x00, 0x00, 0x54, 0x21, 0x00, 0xFE});
+        ff6::EventBits bits = freshBits();
+        test::FakeHost host;
+        ff6::EventRunner runner(common, bits);
+        runner.start(0);
+        runner.update(host);
+        CHECK(host.mapChanges.empty() && host.fieldCommands.size() == 1 && host.fieldCommands[0].op == FF6_EVENT_SET_PARENT_MAP);
+        CHECK(host.fieldCommands[0].bytes == std::vector<uint8_t>({0x00, 0x00, 0x54, 0x21, 0x00}));
+    }
     const uint8_t trigger[FF6_EVENT_TRIGGER_SIZE] = {8, 46, 0xFF, 0x38, 0x02};
     const ff6::EventTrigger decoded = ff6::decodeEventTrigger(trigger);
     CHECK(decoded.x == 8 && decoded.y == 46 && decoded.offset == 0x238FF);

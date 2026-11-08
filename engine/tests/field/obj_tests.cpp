@@ -20,7 +20,11 @@ void testObj() {
     CHECK(prop.eventOffset == 0x2D2A7 && prop.palette == 1 && prop.switchId == 768);
     CHECK(prop.x == 8 && prop.y == 38 && prop.gfx == 54 && prop.facing == ff6::Down);
     CHECK(!prop.special && !prop.noTurn && prop.animFrame == 0 && prop.layerPriority == FF6_OBJ_PRIORITY_ABOVE);
-    CHECK(prop.speed == FF6_OBJ_DEFAULT_SPEED && prop.movement == FF6_OBJ_MOVE_NONE);
+    CHECK(prop.speed == FF6_OBJ_DEFAULT_SPEED && prop.movement == FF6_OBJ_MOVE_NONE && prop.vehicle == 0);
+    bytes[7] |= 0x80;  // the two top bits of the movement byte are the vehicle: 2 is the Magitek armor
+    CHECK(ff6::decodeNpcProp(bytes.data()).vehicle == FF6_VEHICLE_MAGITEK);
+    bytes[7] = 0x40;
+    CHECK(ff6::decodeNpcProp(bytes.data()).vehicle == FF6_VEHICLE_CHOCOBO);
 
     // Every property item is an object, numbered from 0x10: also one that its switch hides, and one with its own graphics.
     ff6::MapData map = test::makeMap();
@@ -147,6 +151,10 @@ void testObj() {
         scene.objects.command(FF6_EVENT_OBJ_EVENT, npc, 0x1234);
         scene.objects.command(FF6_EVENT_OBJ_PASS_ON, npc, 0);
         CHECK(npc.prop.gfx == 9 && npc.prop.palette == 4 && npc.eventOffset == 0x1234 && npc.passThrough);
+        scene.objects.command(FF6_EVENT_OBJ_VEHICLE, npc, FF6_VEHICLE_RAFT | FF6_VEHICLE_RIDER);
+        CHECK(npc.vehicle == (FF6_VEHICLE_RAFT | FF6_VEHICLE_RIDER));
+        scene.objects.command(FF6_EVENT_OBJ_VEHICLE, npc, FF6_VEHICLE_MAGITEK);  // the event sets the type and the rider
+        CHECK(npc.vehicle == FF6_VEHICLE_MAGITEK);
         scene.objects.command(FF6_EVENT_OBJ_PASS_OFF, npc, 0);
         CHECK(!npc.passThrough);
     }

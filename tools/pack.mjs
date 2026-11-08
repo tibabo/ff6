@@ -12,7 +12,7 @@ import {
   loadTileset, readMapProperties, BG3_GFX_BYTES, BG3_PALETTE_BYTES,
 } from './field/map.mjs';
 import {
-  SPRITE_GFX_COUNT, SPRITE_PAL_COUNT, buildSpriteGfx, readSpritePalettes,
+  SPRITE_GFX_COUNT, SPRITE_PAL_COUNT, buildSpriteGfx, readSpritePalettes, readVehicleGfx,
 } from './field/obj.mjs';
 import {
   buildFontRows, buildFontWidths, buildWindowTiles, encodeDialogueForEngine,
@@ -28,10 +28,11 @@ import { buildAttackAnim } from './battle/attack_anim.mjs';
 import { buildBattleGfx } from './battle/battle_gfx.mjs';
 import { buildAudioData } from './sound/audio_data.mjs';
 import { buildMenuData } from './menu/menu_gfx.mjs';
+import { buildTitleData } from './cutscene/title_opening.mjs';
 
 export const COMMON_MAGIC = 'FF6COMMN';
 export const MAP_MAGIC = 'FF6MAP01';
-export const PACK_VERSION = 10;
+export const PACK_VERSION = 13;
 export const FIRST_FIELD_MAP = 3;  // maps 0-2 are the world maps
 
 class Writer {
@@ -101,6 +102,7 @@ export function buildCommonData(rom, { textFile } = {}) {
   const script = readEventScript(rom);
   out.u32(script.length);
   out.bytes(script);
+  out.bytes(readVehicleGfx(rom));
   return out.build();
 }
 
@@ -180,6 +182,7 @@ export function writePack(rom, outDir, options = {}) {
     writeFileSync(join(temp, 'battle.ff6data'), buildBattleData(rom, PACK_VERSION), { flag: 'wx' });
     writeFileSync(join(temp, 'battlegfx.ff6data'), buildBattleGfx(rom, PACK_VERSION), { flag: 'wx' });
     writeFileSync(join(temp, 'attackanim.ff6data'), buildAttackAnim(rom, PACK_VERSION), { flag: 'wx' });
+    writeFileSync(join(temp, 'title.ff6data'), buildTitleData(rom, PACK_VERSION), { flag: 'wx' });
     const written = [];
     const skipped = [];
     for (let mapId = FIRST_FIELD_MAP; mapId < MAP_COUNT; mapId += 1) {

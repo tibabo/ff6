@@ -26,7 +26,9 @@
 
 #define FF6_FRAME_WIDTH 16
 #define FF6_FRAME_HEIGHT 24
-#define FF6_FRAME_COUNT 12
+#define FF6_FRAME_COUNT 16  // down, up, left, right, then the poses of a rider facing left and right
+#define FF6_FRAME_RIDING_LEFT 12  // two frames
+#define FF6_FRAME_RIDING_RIGHT 14  // two frames
 #define FF6_FRAME_BYTES (FF6_FRAME_WIDTH * FF6_FRAME_HEIGHT * FF6_BYTES_PER_PIXEL)
 #define FF6_SPRITE_TOP_HEIGHT 16  // upper body, drawn apart so that tiles can cover only it
 #define FF6_SPRITE_BOTTOM_HEIGHT (FF6_FRAME_HEIGHT - FF6_SPRITE_TOP_HEIGHT)
@@ -124,7 +126,7 @@
 #define FF6_PACK_MAGIC_SIZE 8
 #define FF6_COMMON_MAGIC "FF6COMMN"
 #define FF6_MAP_MAGIC "FF6MAP01"
-#define FF6_PACK_VERSION 10
+#define FF6_PACK_VERSION 13
 #define FF6_COMMON_FILE "common.ff6data"
 #define FF6_MAP_DIR "maps"
 #define FF6_MAP_FILE_EXTENSION ".ff6map"
@@ -368,7 +370,8 @@
 #define FF6_EVENT_DLG_ASYNC 0x48
 #define FF6_EVENT_DLG 0x4B
 #define FF6_EVENT_LOAD_MAP_FIRST 0x6A
-#define FF6_EVENT_LOAD_MAP_LAST 0x6C
+#define FF6_EVENT_LOAD_MAP_LAST 0x6B
+#define FF6_EVENT_SET_PARENT_MAP 0x6C  // the map that the exits of a house lead back to: map and facing, x, y
 #define FF6_EVENT_LOAD_MAP_SIZE 6
 #define FF6_EVENT_CALL 0xB2
 #define FF6_EVENT_CHOICE 0xB6
@@ -1385,3 +1388,34 @@
 #define FF6_DLG_FROM_MENU_CODE 0x60  // a code of the small font of the menus minus this is a glyph of the dialogues
 #define FF6_MENU_CODE_LAST_GLYPH 0xDF
 
+
+// ---- Title screen and opening (cutscene program of the game, title.ff6data) --------------------------------
+#define FF6_TITLE_FILE "title.ff6data"
+#define FF6_TITLE_MAGIC "FF6TITL1"
+#define FF6_TITLE_PROGRAM_BYTES 11363  // the program of the cutscenes, which runs from $7e5000
+#define FF6_TITLE_PROGRAM_BASE 0x5000
+#define FF6_TITLE_GFX_BYTES 44712  // what the game decompresses to $7f0000
+#define FF6_TITLE_MAP_GFX_COUNT 4  // the sealed gate, then three graphics of Narshe
+#define FF6_TITLE_MAP_GFX_BYTES 0x2000
+#define FF6_TITLE_TABLE_BYTES 256  // the table of random numbers, then the sine table
+#define FF6_EVENT_TITLE_SCREEN 0xA9  // event commands: the title screen, the opening, the menu of saved games, the load
+#define FF6_EVENT_OPENING 0xAA
+#define FF6_EVENT_LOAD_MENU 0xAB
+#define FF6_EVENT_RESTORE_GAME 0xAC
+#define FF6_EVENT_SCRIPT_GAME_START 0x5E33  // where the game begins: the title, then the story and the opening
+#define FF6_EVENT_BIT_SKIPPED 0x2FF  // set when a button ended a cutscene, or a saved game was chosen
+#define FF6_GAME_START_MAP 19  // loaded in the dark before the event of the start of the game takes over
+
+// ---- Vehicles (DrawChoco, DrawMagitek, DrawRaft): the graphics that the objects ride on ------------------------
+#define FF6_VEHICLE_GFX_BYTES 0x1C00
+#define FF6_VEHICLE_GFX_VRAM 0x7200  // where the game puts them in the video memory, in words
+#define FF6_VEHICLE_MASK 0x60  // the type of vehicle in the flags of the vehicle commands
+#define FF6_VEHICLE_CHOCOBO 0x20
+#define FF6_VEHICLE_MAGITEK 0x40
+#define FF6_VEHICLE_RAFT 0x60
+#define FF6_VEHICLE_RIDER 0x80  // the rider shows
+#define FF6_VEHICLE_SHIFT 1  // the vehicle of an npc is in the two top bits of its byte of movement
+#define FF6_VEHICLE_NPC_MASK 0xC0
+#define FF6_EVENT_OBJ_VEHICLE 0x44
+#define FF6_VEHICLE_SPRITE_SIZE 16  // the vehicles are made of sprites of 16 x 16 pixels
+#define FF6_VEHICLE_MAGITEK_VARIANTS 16  // four facings, four steps

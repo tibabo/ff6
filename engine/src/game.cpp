@@ -22,6 +22,8 @@ struct Drawable {
     int frame;
     int screenX, screenY;
     bool topAbove, bottomAbove;
+    bool onVehicle = false;
+    VehicleLook look;  // what it rides, when it does
 };
 
 }  // namespace
@@ -29,17 +31,26 @@ struct Drawable {
 Game::Game(CommonData common, std::string packDir, uint32_t startMap, Renderer& renderer, Sound& sound,
            const std::vector<int>& party)
     : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
-      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_) {
+      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
+      loadMenu_(menuScreen_, sound_) {
     initialize(startMap, party, nullptr);
 }
 
 Game::Game(CommonData common, std::string packDir, const SaveState& save, Renderer& renderer, Sound& sound)
     : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
-      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_) {
+      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
+      loadMenu_(menuScreen_, sound_) {
     initialize(static_cast<uint32_t>(save.map), {}, &save);
 }
 
-void Game::initialize(uint32_t startMap, const std::vector<int>& party, const SaveState* save) {
+Game::Game(CommonData common, std::string packDir, NewGame, Renderer& renderer, Sound& sound)
+    : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
+      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
+      loadMenu_(menuScreen_, sound_) {
+    initialize(FF6_GAME_START_MAP, {}, nullptr, true);
+}
+
+void Game::initialize(uint32_t startMap, const std::vector<int>& party, const SaveState* save, bool newGame) {
     bits_.init(common_);
     menuData_ = loadMenuData(packDir_);
     rules_ = loadGameRules(packDir_);
@@ -69,7 +80,8 @@ void Game::initialize(uint32_t startMap, const std::vector<int>& party, const Sa
         facing = save->facing;
     }
     common_.windowTiles = buildWindowTiles(menuData_, config_);
-    if (!loadMapNow(startMap, x, y, facing, true, true)) throw std::runtime_error("the start map is not in the data pack");
+    if (!loadMapNow(startMap, x, y, facing, !newGame, !newGame)) throw std::runtime_error("the start map is not in the data pack");
+    if (newGame) startEvent(FF6_EVENT_SCRIPT_GAME_START);  // the screen stays dark: the first command shows the title
 }
 
 // The state of the story and of the characters, before the map is loaded.
@@ -157,6 +169,13 @@ int Game::stripFor(int gfx, int palette) {
     strips_.push_back(buildSpriteStrip(common_, gfx, palette));
     stripIndex_[key] = static_cast<int>(strips_.size() - 1);
     return stripIndex_[key];
+}
+
+const std::vector<uint8_t>& Game::vehicleSprite(int palette, uint16_t word) {
+    const std::pair<int, int> key(palette, word);
+    auto found = vehicleSprites_.find(key);
+    if (found == vehicleSprites_.end()) found = vehicleSprites_.emplace(key, buildVehicleSprite(common_, palette, word)).first;
+    return found->second;
 }
 
 int Game::stripOf(Npc& object) {
@@ -288,6 +307,7 @@ void Game::openDialogue(uint32_t id, uint16_t flags) {
     }
     const DialogueText filled{text.codes ? dialogueText_.data() : nullptr, dialogueText_.size()};
     dialogue_.open(filled, common_.fontWidths, (flags & FF6_DLG_FLAG_BOTTOM) != 0);
+    dialogueTextOnly_ = (flags & FF6_DLG_FLAG_TEXT_ONLY) != 0;
 }
 
 // The name of an item in the glyphs of the dialogues, without the symbol that comes first and the spaces at the end.
@@ -414,6 +434,15 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
         case FF6_EVENT_MOVE_PARTY:
             moveParty(byteAt(0), byteAt(1));
             break;
+        case FF6_EVENT_SET_PARENT_MAP: {
+            const int word = byteAt(0) | (byteAt(1) << 8);
+            hasParent_ = true;
+            parentMap_ = static_cast<uint32_t>(word & FF6_ENTRANCE_MAP_MASK);
+            parentX_ = byteAt(2);
+            parentY_ = byteAt(3);
+            parentFacing_ = (word >> FF6_ENTRANCE_FACING_SHIFT) & FF6_NPC_DIR_MASK;
+            break;
+        }
         case FF6_EVENT_SET_CHAR_PROP:
             setCharacterProperties(state_, rules_, byteAt(0), byteAt(1), availableCharacters());
             break;
@@ -484,6 +513,16 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
             break;
         case FF6_EVENT_FADE_STOP:
             fade_ = 0;
+            break;
+        case FF6_EVENT_TITLE_SCREEN:
+        case FF6_EVENT_OPENING:
+            startCutscene(op == FF6_EVENT_OPENING);
+            break;
+        case FF6_EVENT_LOAD_MENU:
+            openLoadMenu();
+            break;
+        case FF6_EVENT_RESTORE_GAME:
+            restoreRequested_ = true;
             break;
         default:
             break;
@@ -663,6 +702,11 @@ bool Game::openDoor(int direction) {
 
 void Game::tick(const InputState& input) {
     ++frame_;
+    if (cutscene_) {
+        cutscene_->tick(input);
+        if (cutscene_->finished()) endCutscene();
+        return;
+    }
     if (menuPhase_ != MenuPhase::Closed) {
         tickMenu(input);
         return;
@@ -677,6 +721,11 @@ void Game::tick(const InputState& input) {
     const bool wasBusy = dialogue_.active() || event_.running();
     if (dialogue_.active()) dialogue_.update(input.confirm, input.direction);
     event_.update(*this);
+    if (restoreRequested_) {
+        restoreRequested_ = false;
+        restoreSavedGame();
+        return;
+    }
     if (fadeInPending_ && !event_.running()) {
         fadeInPending_ = false;
         startFade(true, FF6_BRIGHTNESS_STEP);
@@ -860,6 +909,52 @@ MenuStatus Game::menuStatus() {
     return status;
 }
 
+// Event commands 0xA9 and 0xAA: the title screen or the opening takes the screen, and the event goes on once it is over,
+// with a bit that tells whether a press of the button ended it.
+void Game::startCutscene(bool opening) {
+    if (!titleDataLoaded_) {
+        titleData_ = loadTitleData(packDir_);
+        titleDataLoaded_ = true;
+    }
+    if (opening) {
+        cutscene_ = std::make_unique<OpeningScene>(titleData_, sound_);
+    } else {
+        cutscene_ = std::make_unique<TitleScene>(titleData_, sound_);
+    }
+    brightness_ = 0;
+    fade_ = 0;
+    fadeInPending_ = false;
+}
+
+void Game::endCutscene() {
+    bits_.set(FF6_EVENT_BIT_SKIPPED, cutscene_->skipped());
+    cutscene_.reset();
+    brightness_ = 0;
+    fade_ = 0;
+}
+
+// Event command 0xAB: the choice between a new game and a saved one; the bit says whether the player chose to go on.
+void Game::openLoadMenu() {
+    loadMenu_.open(loadHandler_ && loadHandler_() != nullptr);
+    loadMenuOpen_ = true;
+    menuPhase_ = MenuPhase::FadingOut;
+    brightness_ = 0;
+    fade_ = 0;
+}
+
+// Event command 0xAC: the game goes on where the save left it, as if it had just been started from it.
+void Game::restoreSavedGame() {
+    const std::unique_ptr<SaveState> save = loadHandler_ ? loadHandler_() : nullptr;
+    if (!save) return;
+    event_.stop();
+    bits_.init(common_);
+    objects_.resetCharacters();
+    for (int i = 0; i < FF6_CHAR_COUNT; ++i) setCharacterProperties(state_, rules_, i, i, 0);
+    restore(*save);
+    common_.windowTiles = buildWindowTiles(menuData_, config_);
+    loadMapNow(static_cast<uint32_t>(save->map), save->x, save->y, save->facing, true, true);
+}
+
 // Event command 0x9B: the shop takes the screen like the menu does, and the event goes on once it is closed.
 void Game::openShop(int shop) {
     if (shop < 0 || shop >= FF6_SHOP_COUNT) return;
@@ -943,9 +1038,15 @@ void Game::tickMenu(const InputState& input) {
     updateBrightness();
     if (fading()) return;
     if (menuPhase_ == MenuPhase::FadingOut) {
-        if (!shopOpen_ && !battleOpen_) menu_.open(menuStatus(), config_);
+        if (!shopOpen_ && !battleOpen_ && !loadMenuOpen_) menu_.open(menuStatus(), config_);
         menuPhase_ = MenuPhase::Open;
         startFade(true, FF6_BRIGHTNESS_STEP);
+    } else if (menuPhase_ == MenuPhase::Open && loadMenuOpen_) {
+        loadMenu_.update(input);
+        if (loadMenu_.closed()) {
+            menuPhase_ = MenuPhase::Leaving;
+            startFade(false, FF6_BRIGHTNESS_STEP);
+        }
     } else if (menuPhase_ == MenuPhase::Open && battleOpen_) {
         battleScreen_.update(input);
         if (battleScreen_.finished()) {
@@ -967,6 +1068,13 @@ void Game::tickMenu(const InputState& input) {
         }
     } else {
         menuPhase_ = MenuPhase::Closed;
+        if (loadMenuOpen_) {  // the story goes on in the dark, with what the player chose
+            loadMenuOpen_ = false;
+            bits_.set(FF6_EVENT_BIT_SKIPPED, loadMenu_.continueChosen());
+            brightness_ = 0;
+            fade_ = 0;
+            return;
+        }
         shopOpen_ = false;
         if (battleOpen_) endBattle();
         common_.windowTiles = buildWindowTiles(menuData_, config_);  // the dialogues have the windows of the config
@@ -978,7 +1086,7 @@ void Game::composeDialogue() {
     std::vector<uint8_t>& image = overlayPixels_;
     std::fill(image.begin(), image.end(), 0);
     const int windowY = dialogue_.atBottom() ? FF6_WINDOW_BOTTOM_Y : FF6_WINDOW_Y;
-    drawWindow(image, common_.windowTiles, FF6_WINDOW_X, windowY, FF6_WINDOW_COLS, FF6_WINDOW_ROWS);
+    if (!dialogueTextOnly_) drawWindow(image, common_.windowTiles, FF6_WINDOW_X, windowY, FF6_WINDOW_COLS, FF6_WINDOW_ROWS);
     const int originX = FF6_TEXT_ORIGIN_X;
     const int originY = windowY + (FF6_TEXT_ORIGIN_Y - FF6_WINDOW_Y);
     const uint8_t shadow[FF6_BYTES_PER_PIXEL] = FF6_TEXT_SHADOW_RGBA;
@@ -1016,9 +1124,18 @@ void Game::drawSprites(bool above) {
     std::vector<Drawable> drawables;
     const auto add = [&](Npc& object) {
         const int layer = object.prop.scrollBg2 ? FF6_BG2 : FF6_BG1;
-        drawables.push_back({object.pixelY(), stripOf(object), object.frame, object.pixelX() - scroll_.x(layer),
-                             object.pixelY() - FF6_SPRITE_Y_OFFSET - object.jumpHeight - scroll_.y(layer),
-                             object.topIsAbove(), object.bottomIsAbove()});
+        Drawable drawable{object.pixelY(), stripOf(object), object.frame, object.pixelX() - scroll_.x(layer),
+                          object.pixelY() - FF6_SPRITE_Y_OFFSET - object.jumpHeight - scroll_.y(layer),
+                          object.topIsAbove(), object.bottomIsAbove()};
+        if ((object.vehicle & FF6_VEHICLE_MASK) != 0) {
+            // The steps come from the position along the axis that it moves on, and the lead is moved by the player.
+            const bool led = &object == objects_.lead() && player_.moving();
+            const bool horizontal = object.speedX != 0 || (led && (object.facing == Left || object.facing == Right));
+            drawable.onVehicle = true;
+            drawable.look = vehicleLook(object.vehicle, object.facing, horizontal ? object.pixelX() : object.pixelY(),
+                                        horizontal || object.speedY != 0 || led);
+        }
+        drawables.push_back(drawable);
     };
     for (Npc& character : objects_.characters()) {
         if (character.blocks() && character.map == objects_.mapId()) add(character);
@@ -1031,6 +1148,19 @@ void Game::drawSprites(bool above) {
     uint8_t* screen = spritePixels_[above ? 1 : 0].data();
     for (const Drawable& sprite : drawables) {
         const std::vector<uint8_t>& strip = strips_[static_cast<size_t>(sprite.strip)];
+        if (sprite.onVehicle) {
+            // The OAM order puts the front first and the bottom sprites after the top ones: paint the back first.
+            for (auto piece = sprite.look.pieces.rbegin(); piece != sprite.look.pieces.rend(); ++piece) {
+                if ((piece->top ? sprite.topAbove : sprite.bottomAbove) != above) continue;
+                const int x = sprite.screenX + piece->x, y = sprite.screenY + piece->y;
+                if (piece->tile == 0) {
+                    drawSpriteRows(screen, strip, sprite.look.riderFrame, piece->firstRow, piece->rows, x, y);
+                } else {
+                    drawVehicleSprite(screen, vehicleSprite(spritePalette_[FF6_SPRITE_PALETTE_SLOTS - 1], piece->tile), x, y);
+                }
+            }
+            continue;
+        }
         if (sprite.topAbove == above) {
             drawSpriteRows(screen, strip, sprite.frame, 0, FF6_SPRITE_TOP_HEIGHT, sprite.screenX, sprite.screenY);
         }
@@ -1042,9 +1172,19 @@ void Game::drawSprites(bool above) {
 }
 
 void Game::draw() {
+    if (cutscene_) {
+        cutscene_->draw(screenPixels_.data());
+        renderer_.beginFrame();
+        renderer_.updateTexture(screen_, screenPixels_.data());
+        renderer_.draw(screen_, kScreen, kScreen);
+        renderer_.endFrame();
+        return;
+    }
     if (menuPhase_ == MenuPhase::Open || menuPhase_ == MenuPhase::Leaving) {
         if (battleOpen_) {
             battleScreen_.draw();
+        } else if (loadMenuOpen_) {
+            loadMenu_.draw();
         } else if (shopOpen_) {
             shop_.draw();
         } else {

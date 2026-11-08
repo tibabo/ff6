@@ -9,7 +9,7 @@ import { readBg3Anim, readBgAnim } from './field/anim.mjs';
 import { readMapColorMath } from './field/scroll.mjs';
 import { readLongEntrances, readShortEntrances } from './field/entrance.mjs';
 import { MAP_PROP_SIZE, loadLayout, readMapProperties } from './field/map.mjs';
-import { SPRITE_GFX_COUNT, buildSpriteGfx, spriteGfxOffset } from './field/obj.mjs';
+import { SPRITE_FRAMES, SPRITE_GFX_COUNT, buildSpriteGfx, spriteGfxOffset } from './field/obj.mjs';
 import { encodeDialogueForEngine } from './field/text.mjs';
 import { decodeNpcProp, readNpcProps, readNpcSwitchDefaults } from './event/npc_prop.mjs';
 import { readEventScript, readEventTriggers } from './event/event_trigger.mjs';
@@ -94,7 +94,7 @@ test('parallax, animation and sprite tables read the documented layouts', { skip
   const steam = readBg3Anim(rom, 6);
   assert.ok(steam.data.length > 0 && steam.size > 0 && steam.frames.every(offset => offset < steam.data.length));
   assert.equal(spriteGfxOffset(rom, 0), 0x150000);  // Terra
-  assert.equal(buildSpriteGfx(rom, 0).length, 12 * 16 * 24);
+  assert.equal(buildSpriteGfx(rom, 0).length, SPRITE_FRAMES.length * 16 * 24);
   assert.ok(buildSpriteGfx(rom, 0).some(index => index !== 0));
   assert.throws(() => buildSpriteGfx(rom, SPRITE_GFX_COUNT), /Invalid sprite graphics/);
   // Layers that are declared larger than their layout are padded with empty cells.

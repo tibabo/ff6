@@ -14,6 +14,11 @@ add_library(ff6_core STATIC
   src/data/attack_anim.cpp
   src/data/pack.cpp
   src/data/save.cpp
+  src/data/title_data.cpp
+  src/cutscene/core.cpp
+  src/cutscene/opening.cpp
+  src/cutscene/ppu.cpp
+  src/cutscene/title.cpp
   src/field/anim.cpp
   src/field/bg.cpp
   src/field/color.cpp
@@ -33,6 +38,7 @@ add_library(ff6_core STATIC
   src/menu/config_menu.cpp
   src/menu/field_menu.cpp
   src/menu/item_menu.cpp
+  src/menu/load_menu.cpp
   src/menu/menu_data.cpp
   src/menu/menu_screen.cpp
   src/menu/shop_menu.cpp
@@ -104,6 +110,10 @@ if(BUILD_TESTING)
     tests/field/sprite_data_tests.cpp
     tests/field/text_tests.cpp
     tests/menu/menu_tests.cpp
+    tests/menu/load_menu_tests.cpp
+    tests/cutscene/ppu_tests.cpp
+    tests/cutscene/core_tests.cpp
+    tests/cutscene/scene_tests.cpp
     tests/state/party_tests.cpp)
   target_link_libraries(ff6_tests PRIVATE ff6_game ff6_audio)
   add_test(NAME ff6_tests COMMAND ff6_tests)

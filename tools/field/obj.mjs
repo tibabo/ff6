@@ -12,8 +12,8 @@ export const SPRITE_PAL_COUNT = 60;
 const SPRITE_PAL_BYTES = 32;
 export const FRAME_WIDTH = 16;
 export const FRAME_HEIGHT = 24;
-// Down 1-3, up 1-3, left 1-3, then right 1-3 (left frames with the flip bit).
-export const SPRITE_FRAMES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 0x46, 0x47, 0x48];
+// Down 1-3, up 1-3, left 1-3, then right 1-3 (left frames with the flip bit), then riding left 1-2 and riding right 1-2.
+export const SPRITE_FRAMES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 0x46, 0x47, 0x48, 0x2e, 0x2f, 0x6e, 0x6f];
 const TILES_PER_FRAME = 6;
 const TILE_BYTES = 32;
 
@@ -57,4 +57,11 @@ export function buildSpriteGfx(rom, gfx) {
 // Raw BGR555 colors, 16 per palette. Palettes 0-7 are the default slots of the sprite palettes in vram.
 export function readSpritePalettes(rom) {
   return Buffer.from(slice(rom, MAP_SPRITE_PAL, SPRITE_PAL_COUNT * SPRITE_PAL_BYTES, 'Sprite palettes'));
+}
+
+const VEHICLE_GFX = 0x183000;  // D8/3000, 4bpp: the Magitek armor, the chocobo and the raft
+export const VEHICLE_GFX_BYTES = 0x1c00;
+
+export function readVehicleGfx(rom) {
+  return Buffer.from(slice(rom, VEHICLE_GFX, VEHICLE_GFX_BYTES, 'Vehicle graphics'));
 }

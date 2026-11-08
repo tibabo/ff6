@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
@@ -12,6 +13,8 @@
 #include "data/pack.hpp"
 #include "battle/battle_screen.hpp"
 #include "battle/encounters.hpp"
+#include "cutscene/opening.hpp"
+#include "cutscene/title.hpp"
 #include "data/battle_data.hpp"
 #include "data/game_rules.hpp"
 #include "data/save.hpp"
@@ -25,6 +28,7 @@
 #include "field/text.hpp"
 #include "input.hpp"
 #include "menu/field_menu.hpp"
+#include "menu/load_menu.hpp"
 #include "menu/shop_menu.hpp"
 #include "renderer.hpp"
 #include "sound.hpp"
@@ -35,6 +39,10 @@ namespace ff6 {
 // The menu takes the screen: the field fades out, the menu fades in, and the other way round when it is closed.
 enum class MenuPhase { Closed, FadingOut, Open, Leaving };
 
+// Marks a game that begins like the console: the title screen, then the story and the opening, which ends with the choice
+// of a new game or a saved one.
+struct NewGame {};
+
 // The field: game state and the drawing of it. It reaches the graphics library only through Renderer.
 class Game : private EventHost {
 public:
@@ -44,6 +52,8 @@ public:
          const std::vector<int>& party = {});
     // A game that goes on where a save left it.
     Game(CommonData common, std::string packDir, const SaveState& save, Renderer& renderer, Sound& sound);
+    // A game that begins with the event of the start of the game, which shows the title screen first.
+    Game(CommonData common, std::string packDir, NewGame, Renderer& renderer, Sound& sound);
     // What is needed to go on from here: see SaveState.
     SaveState saveState() const;
 
@@ -75,6 +85,11 @@ public:
     const PartyState& party() const { return state_; }
     // What the Save option of the menu does with the state of the game; without one, it saves nothing.
     void setSaveHandler(std::function<void(const SaveState&)> handler) { saveHandler_ = std::move(handler); }
+    // Where the menu after the title and the load command get the saved game from: null when there is none.
+    void setLoadHandler(std::function<std::unique_ptr<SaveState>()> handler) { loadHandler_ = std::move(handler); }
+    // The title screen or the opening has the screen.
+    bool cutsceneOpen() const { return cutscene_ != nullptr; }
+    bool loadMenuOpen() const { return loadMenuOpen_; }
     // Ends the fades at once, for captures.
     void finishFade();
     // Starts battle number `battle` (0 to 575) over the field, with the background number `background` (-1 for the map's).
@@ -94,12 +109,13 @@ private:
     Sound& sound() override { return sound_; }
 
     bool loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEvent, bool fadeIn);
-    void initialize(uint32_t startMap, const std::vector<int>& party, const SaveState* save);
+    void initialize(uint32_t startMap, const std::vector<int>& party, const SaveState* save, bool newGame = false);
     void restore(const SaveState& save);
     void startFade(bool in, int speed);
     void updateBrightness();
     void applyBrightness(std::vector<uint8_t>& image) const;
     int stripFor(int gfx, int palette);
+    const std::vector<uint8_t>& vehicleSprite(int palette, uint16_t word);
     int stripOf(Npc& object);
     void startEvent(uint32_t offset);
     void followScroll();
@@ -115,6 +131,10 @@ private:
     void moveParty(int tileX, int tileY);
     void tickMenu(const InputState& input);
     void openShop(int shop);
+    void startCutscene(bool opening);
+    void endCutscene();
+    void openLoadMenu();
+    void restoreSavedGame();
     void startBattle(int group, int flags);
     void beginBattle(int battle, int flags);
     void launchBattle(int battle, int background);
@@ -160,9 +180,17 @@ private:
     GameRules rules_;
     PartyState state_;
     std::function<void(const SaveState&)> saveHandler_;
+    std::function<std::unique_ptr<SaveState>()> loadHandler_;
+    TitleData titleData_;
+    bool titleDataLoaded_ = false;
+    std::unique_ptr<Cutscene> cutscene_;  // the title screen or the opening, which take the screen like the menu does
+    LoadMenu loadMenu_;
+    bool loadMenuOpen_ = false;
+    bool restoreRequested_ = false;  // the event asked for the saved game: it is loaded once the event is out of the way
     uint32_t frame_ = 0;
     std::set<int> warnedObjects_;  // objects that are not there, reported once
     std::vector<uint8_t> dialogueText_;  // the dialogue that is open, with the values that the game fills in
+    bool dialogueTextOnly_ = false;  // the dialogue has no window, for the story of the opening
     long foundGil_ = -1;  // what the dialogue says about the chest that was just opened; -1 for nothing
     int receivedItem_ = -1;
     bool screenLocked_ = false;  // the screen follows the camera object instead of the party
@@ -186,6 +214,7 @@ private:
     std::array<std::vector<uint8_t>, 2> spritePixels_;  // below and above the high priority layers
     std::vector<std::vector<uint8_t>> strips_;  // RGBA sprite strips
     std::map<std::pair<int, int>, int> stripIndex_;  // by graphics and palette
+    std::map<std::pair<int, int>, std::vector<uint8_t>> vehicleSprites_;  // by palette and word of the tile
     std::vector<uint8_t> screenPixels_, overlayPixels_;
 };
 

@@ -47,6 +47,7 @@ NpcProp decodeNpcProp(const uint8_t* bytes) {
     prop.facing = bytes[8] & FF6_NPC_DIR_MASK;
     prop.noTurn = (bytes[8] & FF6_NPC_NO_TURN) != 0;
     prop.animFrame = bytes[8] >> FF6_NPC_ANIM_FRAME_SHIFT;
+    prop.vehicle = (bytes[7] & FF6_VEHICLE_NPC_MASK) >> FF6_VEHICLE_SHIFT;
     return prop;
 }
 
@@ -82,6 +83,7 @@ void Objects::init(const MapData& map, const EventBits& bits) {
         npc.movement = npc.prop.movement;
         npc.priority = npc.prop.layerPriority;
         npc.passThrough = npc.prop.special;  // InitSpecialNPCGfx
+        npc.vehicle = npc.prop.vehicle;
         const uint8_t low = map.propAt(npc.prop.x, npc.prop.y) & FF6_PROP_LOW_MASK;
         npc.topAbove = (low & FF6_TILE_PRIORITY_TOP) != 0;
         npc.bottomAbove = (low & FF6_TILE_PRIORITY_BOTTOM) != 0;
@@ -185,11 +187,12 @@ void Objects::command(uint8_t op, Npc& npc, uint32_t arg) {
         case FF6_EVENT_OBJ_PASS_ON: npc.passThrough = true; break;
         case FF6_EVENT_OBJ_GFX: npc.prop.gfx = static_cast<int>(arg); break;
         case FF6_EVENT_OBJ_PAL: npc.prop.palette = static_cast<int>(arg) & FF6_NPC_PAL_MASK; break;
+        case FF6_EVENT_OBJ_VEHICLE: npc.vehicle = static_cast<int>(arg) & (FF6_VEHICLE_MASK | FF6_VEHICLE_RIDER); break;
         case FF6_EVENT_OBJ_CREATE:
             if (!npc.enabled) {
                 npc.enabled = true;
                 npc.visible = false;
-                if (npc.map < 0) npc.map = mapId_;  // a character created by an event is on the current map
+                if (npc.map < 0 || npc.map != mapId_) npc.map = mapId_;  // a character created by an event is on the current map
             }
             break;
         case FF6_EVENT_OBJ_DELETE:

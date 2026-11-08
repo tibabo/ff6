@@ -1,6 +1,7 @@
 #include <array>
 #include <algorithm>
 #include <cstdlib>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -346,5 +347,47 @@ void testGame() {
         CHECK(box.party().treasures[static_cast<size_t>(boxBit)]);
         for (int i = 0; i < 3000 && !box.battleOpen(); ++i) box.tick(i % 20 == 0 ? confirm : idle);
         CHECK(box.battleOpen());
+    }
+    {  // a new game begins with the title screen; a press of the button ends it, and a new game starts the story
+        test::RecordingSound startSound;
+        ff6::Game start(ff6::loadCommonData(pack), pack, ff6::NewGame{}, renderer, startSound);
+        CHECK(!start.cutsceneOpen() && start.brightness() == 0);
+        start.tick(idle);
+        CHECK(start.cutsceneOpen() && !start.eventBits().get(FF6_EVENT_BIT_SKIPPED));
+        CHECK(startSound.commands.size() == 1 && startSound.commands[0].command == FF6_SOUND_PLAY_SONG && startSound.commands[0].arg1 == 2);
+        for (int i = 0; i < 400; ++i) start.tick(idle);
+        CHECK(start.cutsceneOpen());
+        start.draw();
+        CHECK(renderer.draws.size() == 1 && renderer.draws.front().destination.w == FF6_SCREEN_WIDTH);  // one full-screen image
+        start.tick(confirm);
+        for (int i = 0; i < 60 && !start.loadMenuOpen(); ++i) start.tick(idle);
+        CHECK(!start.cutsceneOpen() && start.loadMenuOpen() && start.eventBits().get(FF6_EVENT_BIT_SKIPPED));
+        for (int i = 0; i < 60; ++i) start.tick(idle);  // the menu fades in
+        start.draw();
+        CHECK(renderer.draws.size() == 1 && start.brightness() == FF6_BRIGHTNESS_FULL);
+        start.tick(confirm);  // no saved game: it is the new game
+        for (int i = 0; i < 100 && start.loadMenuOpen(); ++i) start.tick(idle);
+        CHECK(!start.loadMenuOpen() && !start.eventBits().get(FF6_EVENT_BIT_SKIPPED));
+        for (int i = 0; i < 400 && !start.dialogue().active(); ++i) start.tick(idle);
+        CHECK(start.map().id == 23 && start.dialogue().active());  // "Long ago, the War of the Magi...", over the mountains
+    }
+    {  // with a saved game, the menu goes on with it: the map and the story come back
+        ff6::Game played(ff6::loadCommonData(pack), pack, 0x1C, renderer, sound);
+        played.party().gil = 1234;
+        const ff6::SaveState saved = played.saveState();
+        test::RecordingSound startSound;
+        ff6::Game start(ff6::loadCommonData(pack), pack, ff6::NewGame{}, renderer, startSound);
+        start.setLoadHandler([&saved] { return std::make_unique<ff6::SaveState>(saved); });
+        start.tick(idle);
+        for (int i = 0; i < 400; ++i) start.tick(idle);  // the license, then the beginning of the title
+        start.tick(confirm);
+        for (int i = 0; i < 60 && !start.loadMenuOpen(); ++i) start.tick(idle);
+        CHECK(start.loadMenuOpen());
+        for (int i = 0; i < 60; ++i) start.tick(idle);
+        start.tick(confirm);  // the menu begins on "Continue"
+        for (int i = 0; i < 100 && start.loadMenuOpen(); ++i) start.tick(idle);
+        for (int i = 0; i < 100 && start.map().id != 0x1C; ++i) start.tick(idle);
+        CHECK(start.map().id == 0x1C);
+        CHECK(start.party().gil == 1234 && !start.cutsceneOpen() && !start.loadMenuOpen());
     }
 }

@@ -87,6 +87,7 @@ void EventRunner::start(uint32_t offset) {
     running_ = true;
     pc_ = offset;
     pause_ = 0;
+    waitDialogue_ = true;
     waitObject_ = -1;
     waited_ = 0;
     soundWaited_ = 0;
@@ -143,7 +144,7 @@ bool EventRunner::conditionMet(uint8_t op, bool* ok) const {
 }
 
 void EventRunner::update(EventHost& host) {
-    if (!running_ || host.dialogueBusy()) return;
+    if (!running_ || (waitDialogue_ && host.dialogueBusy())) return;
     for (int i = 0; i < FF6_EVENT_COMMANDS_PER_TICK && running_; ++i) {
         if (pause_ > 0) {
             --pause_;
@@ -227,6 +228,7 @@ bool EventRunner::step(EventHost& host) {
         case FF6_EVENT_DLG:
         case FF6_EVENT_DLG_ASYNC: {
             const uint16_t word = static_cast<uint16_t>(byteAt(1) | (byteAt(2) << 8));
+            waitDialogue_ = op == FF6_EVENT_DLG;  // the asynchronous one lets the event go on while the text is shown
             next();
             host.openDialogue(word & FF6_DLG_ID_MASK, static_cast<uint16_t>(word & ~FF6_DLG_ID_MASK));
             return false;
@@ -246,6 +248,7 @@ bool EventRunner::step(EventHost& host) {
             return next();
         case FF6_EVENT_OBJ_GFX:
         case FF6_EVENT_OBJ_PAL:
+        case FF6_EVENT_OBJ_VEHICLE:
             host.objectCommand(op, byteAt(1), byteAt(2));
             return next();
         case FF6_EVENT_OBJ_EVENT:
@@ -294,17 +297,22 @@ bool EventRunner::step(EventHost& host) {
         case FF6_EVENT_TAKE_ESPER:
         case FF6_EVENT_GIVE_SWDTECHS:
         case FF6_EVENT_GIVE_BUM_RUSH:
-        case FF6_EVENT_MOVE_PARTY: {
+        case FF6_EVENT_MOVE_PARTY:
+        case FF6_EVENT_SET_PARENT_MAP: {
             const size_t at = pc_ + 1;
             host.fieldCommand(op, at < script.size() ? &script[at] : nullptr,
                               std::min(length - 1, script.size() - std::min(at, script.size())));
             return next();
         }
         case FF6_EVENT_SHOP:  // the menu takes the screen, and the event goes on once it is closed
-        case FF6_EVENT_BATTLE:  // so does the battle
+        case FF6_EVENT_BATTLE:  // so does the battle, and the title screen, the opening and the menu of saved games
         case FF6_EVENT_BATTLE_COLLISION:
         case FF6_EVENT_RANDOM_BATTLE:
         case FF6_EVENT_BOX_BATTLE:
+        case FF6_EVENT_TITLE_SCREEN:
+        case FF6_EVENT_OPENING:
+        case FF6_EVENT_LOAD_MENU:
+        case FF6_EVENT_RESTORE_GAME:
             host.fieldCommand(op, pc_ + 1 < script.size() ? &script[pc_ + 1] : nullptr, length - 1);
             next();
             return false;

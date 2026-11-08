@@ -97,6 +97,7 @@ CommonData loadCommonData(const std::string& packDir) {
     common.dialogueCodes = reader.bytes(common.dialogueOffsets.back());
     common.npcSwitchDefaults = reader.bytes(FF6_NPC_SWITCH_BYTES);
     common.eventScript = reader.bytes(reader.u32());
+    common.vehicleGfx = reader.bytes(FF6_VEHICLE_GFX_BYTES);
     if (reader.remaining() != 0) throw std::runtime_error("common data has trailing bytes");
     return common;
 }

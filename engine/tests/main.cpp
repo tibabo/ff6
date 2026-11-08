@@ -32,6 +32,10 @@ int main() {
     testEvent();
     testEventCmd();
     testMenu();
+    testLoadMenu();
+    testPpu();
+    testCutsceneCore();
+    testCutsceneScenes();
     testParty();
     testGame();
     if (test::failures != 0) {
