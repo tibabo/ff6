@@ -17,13 +17,6 @@ std::string number(long value, int width, bool zeroes = false) {
     return text.substr(text.size() - static_cast<size_t>(width));
 }
 
-std::string characterName(int id) {
-    static const char* const kNames[] = FF6_CHARACTER_NAMES;
-    std::string name = id >= 0 && id < FF6_CHAR_COUNT ? kNames[id] : "";
-    if (!name.empty()) name[0] = static_cast<char>(name[0] - 'a' + 'A');
-    return name;
-}
-
 }  // namespace
 
 void FieldMenu::open(const MenuStatus& status, GameConfig& config) {

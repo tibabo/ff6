@@ -144,8 +144,16 @@ node ff6.mjs build-pack --rom "Final Fantasy 6 [US].smc" --out output/pack
 cmake -S engine -B build/engine -DCMAKE_BUILD_TYPE=Release
 cmake --build build/engine --config Release
 FF6_PACK="$PWD/output/pack" ctest --test-dir build/engine -C Release
-./build/engine/ff6 output/pack [--map 20] [--party terra,locke] [--music 22] [--load ff6-save.json] [--save ff6-save.json]
+./build/engine/ff6 output/pack [--map 20] [--party terra,locke] [--battle 0 [--bg 0]] [--music 22] [--load ff6-save.json] [--save ff6-save.json]
 ```
+
+`--battle n` (0 a 575) lance directement le combat n au-dessus de la carte,
+avec le decor `--bg n` (0 a 52) ou celui de la carte ; avec `--capture` il
+enregistre l'ecran de combat apres `--wait` images ; `--play n` y joue
+l'animation de l'attaque n du premier monstre vers le groupe (par exemple 183,
+le Wave Cannon), pour la regarder avec `--capture ... --after images`.
+Le rendu des combats et des animations est decrit dans
+[docs/rendu-et-animations.md](docs/rendu-et-animations.md).
 
 Sous Windows, l'executable est `build\engine\Release\ff6.exe`, et `SDL2.dll`
 doit se trouver a cote de lui (vcpkg l'y copie normalement).
@@ -154,11 +162,11 @@ doit se trouver a cote de lui (vcpkg l'y copie normalement).
 d'evenements), `audio.ff6data` (echantillons BRR, enveloppes et scripts des
 musiques), `menu.ff6data` (police et palettes des menus, main du curseur,
 portraits, descriptions des objets, noms des magies, esprits et techniques), `game.ff6data` (proprietes des personnages, des objets et des
-boutiques, tables de niveaux et d'apprentissage) et une carte par fichier dans `maps/` ; il n'ecrase jamais un
+boutiques, tables de niveaux et d'apprentissage), `battle.ff6data` (monstres, noms, objets laches, formations et groupes de combats), `battlegfx.ff6data` (images, palettes et pochoirs des monstres, fonds de combat, poses des personnages), `attackanim.ff6data` (scripts, images et palettes des animations de sorts et d'armes) et une carte par fichier dans `maps/` ; il n'ecrase jamais un
 dossier existant. `--text` utilise un `dialogues.json` modifie. Un caractere
 absent de la police de la ROM, par exemple un accent, provoque une erreur
 explicite. Le pack contient des donnees du jeu : ne pas le distribuer. Le format
-est versionne (version 2 : ajout des mathematiques de couleur) ; un ancien pack
+est versionne (version 9 : tables de Sketch et de Control) ; un ancien pack
 doit etre regenere.
 
 Controles :
@@ -228,8 +236,8 @@ Limites actuelles :
   carte donne son contenu une seule fois (objet, ou argent a raison de cent fois
   la valeur), joue l'evenement « Received ... ! » / « Found ... GP! » / « Empty! »
   avec le nom de l'objet ou la somme dans le texte, et ouvre le coffre ; un coffre
-  ouvert le reste au rechargement de la carte et dans la sauvegarde. Les coffres
-  a monstre restent fermes (pas de combats).
+  ouvert le reste au rechargement de la carte et dans la sauvegarde. Un coffre
+  a monstre lance l'evenement du jeu (commande 0x8E) puis le combat de son groupe.
 - Boutiques : BUY, SELL et EXIT ; la liste de ce que vend la boutique avec ses
   prix (modifies, dans certaines boutiques, selon le personnage de tete), la
   description et ce que le groupe possede deja ; la quantite se choisit avec
@@ -238,7 +246,103 @@ Limites actuelles :
   textes sont proches de celles du jeu, pas exactes, et les personnages
   animes de la boutique ne sont pas dessines.
 - Niveaux : un personnage gagne de l'experience avec `addExperience` (PV, PM,
-  magies et techniques de chaque niveau), mais aucun combat ne l'appelle encore.
+  magies et techniques de chaque niveau), appele a la fin d'un combat gagne.
+- Combats : les commandes d'evenement 0x4C et 0x4D lancent le combat de leur
+  groupe (le premier, ou le second une fois sur quatre) ; l'evenement reprend
+  quand il est fini. L'ecran est du texte dans des fenetres (monstres par nom,
+  PV et jauge de chaque personnage, les commandes de l'acteur, la liste des
+  magies et des objets, cible, messages) :
+  le fond de combat de la carte, les monstres a la place que donne la formation
+  et les personnages debout, a genoux ou a terre sont dessines avec leurs vraies
+  images et palettes (`battlegfx.ff6data`), et les degats s'affichent au-dessus
+  de la cible. Le champ ondule dans le desert, le brasier et sous l'eau
+  (d'un cote et de l'autre) et, vers le haut et le bas seulement, dans le reve de
+  Cyan et chez les tentacules ; les monstres qui tombent se dissolvent, et un
+  personnage qui fuit court vers le bord de l'ecran ; les monstres sont retournes lors
+  d'une attaque dans le dos ou, un sur deux, d'une attaque en tenaille, et les
+  actions ont leur effet : le personnage avance et frappe, lance un sort, se
+  protege ou grimace, le monstre touche clignote puis s'efface, le champ
+  s'eclaire de la couleur de l'element, et le groupe leve les bras a la
+  victoire. Les sorts, les techniques et les coups d'arme jouent les vraies
+  animations du jeu (`battle/attack_anim_player.cpp` execute leurs scripts de
+  sprites, un fil par cible, avec les couches bg1 et bg3, les vecteurs, les
+  mouvements polaires, les teintes de palette du fond, des monstres, des
+  personnages et des animations, le deplacement et le masquage de la cible ou
+  de l'attaquant, les poses du personnage (81 et 82), les ondes de defilement
+  des fonds (AC a AE, en sinus d'amplitude approchee), la couleur ajoutee ou
+  retranchee d'une couche avec le sous-ecran (celle de chaque fonction
+  d'initialisation, table de `battle/attack_anim_inits.hpp`, et la commande
+  D4), la rotation de palette (A3
+  et A4, pour les palettes des sprites, de bg1 et de bg3), la fenetre en cercle
+  (A5 a A9, C3 et D3 : cercle, ovales, rayon du haut, dome d'Ultima, Bio Blast
+  et blobs) qui coupe les couches bg1 et bg3, le mode 7 (Odin, Raiden,
+  Crusader, H-Bomb, S. Cross et Overcast : plan transforme par la matrice du
+  script, sans fond ni fenetres, avec les degrades de couleur fixe) et les sons) ;
+  restent sautes : les triangles, la couleur fixe sur les calques,
+  la pose secondaire (C8),
+  le deplacement d'un personnage le long d'un vecteur (E5 et E6) et la plupart
+  des sous-commandes de `$80` propres a une attaque (tornade, perle,
+  arc-en-ciel, etc.) ; un trait blanc, un anneau ou des etincelles dessines a la main
+  remplacent l'animation d'une attaque qui n'en a pas. `--anim n --capture`
+  ecrit la planche des images d'une attaque.
+  Les noms des poses ne sont pas dans le jeu : elles sont choisies sur la planche
+  des personnages. Ne sont pas dessines : le defilement des fonds, les
+  animations des esprits et des attaques a vecteurs, les images des esprits et
+  des diablotins, et les icones de statut (le nom du personnage change de couleur : gris a terre, jaune quand il est pret, bleu-vert avec un statut) ;
+  les positions sont a peu pres celles des menus. Gauche dans le menu des
+  commandes ouvre la fenetre de Row et Defend, droite celle de Run, qui remplace le maintien des
+  boutons (Annuler l'arrete) ; une defaite affiche un ecran GAME OVER noir puis
+  remet le groupe debout avec tous ses PV, faute de titre.
+  Magie, objets et statuts (`battle/action.cpp`) suivent la table des attaques
+  du jeu (cible, element, drapeaux, puissance, taux de touche, statuts) : degats
+  de magie `puissance x 4 + niveau x pouvoir magique x puissance / 32` avec
+  variance, defense magique, Bouclier, degats partages entre cibles, soins,
+  absorption, drain, fractions des PV, resurrection (et mort des morts-vivants),
+  mort instantanee et sorts a niveau divisible, elements faibles, nuls ou
+  absorbes des monstres, Reflet qui renvoie, Defense, objets consommables (dont
+  l'Elixir). Les statuts sont les 32 du jeu avec leurs effets sur les jauges
+  (Stop, Sommeil, Lenteur, Hate), Poison, Regen, Sap, Condamne, Berserk et
+  Confusion (le personnage agit seul), et leurs compteurs. Les monstres suivent
+  les scripts d'IA du jeu (`battle/ai.cpp` ; `battle.ff6data` porte les scripts
+  et les noms d'attaques) : attaques au hasard parmi trois, cibles, les 28
+  conditions (PV, PM, statut, niveau, minuteries, variables, interrupteurs,
+  monstres restants, dernier coup recu...), attente, variables, effets divers
+  et script de riposte quand un personnage les touche. Les dialogues, les
+  changements de combat, les entrees et sorties de monstres, les evenements et les
+  animations des scripts sont ignores, ainsi que la recrue de Gau. Les commandes
+  Fight, Magic, Item, Tools (les outils d'Edgar, jamais consommes), Steal,
+  SwdTech, Blitz, Lore (les sorts de Strago, appris quand un monstre l'en
+  touche ; sauvegardes), Morph et Revert (les degats de Terra doublent 600 pas
+  de jauge), Runic (Celes absorbe en PM la prochaine magie qui la vise), Defend,
+  Row et Run marchent (vol selon les niveaux, rangee arriere qui divise les
+  coups sauf armes longues) ; Throw (une arme de l'inventaire, perdue, pour deux
+  fois sa puissance), Jump (un coup de degats doubles, sans le delai du saut),
+  Mimic (le dernier Fight, Magic ou Item), MagiTek (les huit tirs), Shock, Health
+  (Cura) et X Magic (deux sorts dans un tour) et Summon
+  marchent aussi : un esprit se porte depuis la liste Espers du menu Skills
+  (Entree sur l'esprit ; un seul porteur ; sauvegarde), donne la commande Summon,
+  et ne s'invoque qu'une fois par combat, son image paraissant au milieu du champ ; les reliques Atlas, Boucles d'oreilles,
+  Economiseur, Epingle d'or, Sniper Sight et Sneak Ring comptent, et
+  l'equipement protege : elements absorbes, nuls, faibles ou diminues, statuts
+  refuses, statuts poses au debut (Bouclier, Hate...) et element de l'arme.
+  Manquent les effets des autres reliques, les effets speciaux hors Elixir,
+  et les commandes Rage, Dance, Leap et Slot (affichees en grise) : Rage, Dance et Leap
+  dependent de la carte du monde (Veldt, terrains), absente du moteur ; Slot
+  veut sa machine a sous, que le pack n'a pas. Sketch utilise l'une des deux
+  attaques du monstre (la table du jeu, la seconde si un octet aleatoire
+  vaut au moins 0x40) ; Sketch et Control reussissent selon la formule du jeu
+  (niveau du lanceur sur celui du monstre, reduit d'un tiers avec le Beret ou
+  la Couronne) et echouent sur les monstres qui les refusent (octet 19 de leurs
+  proprietes) ; Control, si le monstre obeit, lui fait lancer tout de suite une
+  de ses quatre attaques de la table, sans attendre sa jauge. Capture (un coup
+  suivi d'un vol s'il blesse), GP Rain (niveau x 30 gils, doubles en degats
+  et partages entre les cibles) et Possess (6 fois sur 10 ; le monstre et le
+  personnage quittent le combat) suivent les formules du jeu.
+  Rencontres aleatoires des cartes (hors carte du monde) : a chaque pas, un
+  compteur grandit du taux de la carte, et un combat de son groupe commence quand
+  un nombre de la table du jeu passe sous son octet haut, par l'evenement du jeu
+  (commande 0x4E). Les charmes qui changent le taux ne sont pas lus, et le
+  compteur et la table de nombres ne sont pas sauvegardes.
 - Sauvegarde : le moteur a son propre format, un fichier JSON (pas de SRAM
   emulee). F5 ecrit `ff6-save.json` (ou le fichier de `--save`) et
   `--load fichier` reprend la partie : carte, case et direction du groupe,
@@ -322,7 +426,7 @@ Limites actuelles :
   `build/engine/ff6_audio pack --song n --seconds 30 --wav out.wav` ecrit un
   morceau dans un fichier WAV, `--sample n [--pitch p] [--hold s]` un
   echantillon seul, et `--sfx n [--pan p]` ou `--system n` un effet sonore.
-- Pas de combats, de menus, d'escaliers diagonaux ni de remappage
+- Pas de menus complets, d'escaliers diagonaux ni de remappage
   des touches ; pas de graphismes HD.
 - La compilation n'a ete validee que sur macOS arm64 (Apple clang, SDL2 2.32).
 
@@ -331,7 +435,8 @@ desassemblage de reference (`src/field`, `src/event`, `src/data`) :
 
 | Dossier | Fichiers | Role |
 | --- | --- | --- |
-| `data/` | `pack`, `save`, `game_rules` | lecture du pack (donnees communes et tables des personnages, objets et niveaux), sauvegarde JSON |
+| `data/` | `pack`, `save`, `game_rules`, `battle_data`, `battle_gfx` | lecture du pack (donnees communes, tables des personnages, objets et niveaux, monstres et formations, images des monstres), sauvegarde JSON |
+| `battle/` | `battle`, `action`, `battle_screen`, `encounters` | combat : jauges ATB et types de combat, attaque physique, magie, objets, statuts, fuite, victoire (experience, argent, objets) ; ecran en fenetres de texte, lance par les evenements et les rencontres aleatoires |
 | `state/` | `party_state`, `party_ops`, `char_stats` | personnages, inventaire et argent, commandes d'evenement qui les changent, statistiques calculees avec l'equipement |
 | `field/` | `map`, `bg`, `anim`, `scroll`, `color` | carte, rendu de bg1/bg2/bg3, animations, defilement et parallaxe, composition avec transparence |
 | `field/` | `player`, `obj`, `obj_party`, `obj_script`, `sprite_data` | deplacements du groupe, objets (PNJ, personnages, camera, groupe) et leurs scripts, images des sprites |
@@ -378,9 +483,11 @@ genere par `build-pack`, pour leurs tests sur les vraies donnees.
 - Cartes du monde, animation de palette et autres textes.
 - Commandes d'evenements restantes (defilements, changements de decor
   anime, eclairs, tremblements, filtres de couleur, mosaique).
-- Portage natif des menus et combats ; coffres a monstre, soins d'etat,
+- Portage natif des menus et combats ; soins d'etat,
   tente et sac de couchage, esprits equipes, Lore/Rage/Dance, Rmove/Empty/
-  Optimum, et les combats (donc le gain d'experience).
+  Optimum, rencontres de la carte du monde, graphismes et animations des
+  combats, commandes de combat autres que Fight, Magic, Item, Steal,
+  SwdTech, Blitz, Defend et Row.
 - Audio natif sans emulation du SPC700 : mode mono.
 - Interface adaptable aux ecrans larges et remappage des commandes.
 - Gestion des graphismes HD.

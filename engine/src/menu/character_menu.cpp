@@ -10,13 +10,6 @@ namespace {
 
 using Layer = MenuScreen::Layer;
 
-std::string characterName(int id) {
-    static const char* const kNames[] = FF6_CHARACTER_NAMES;
-    std::string name = id >= 0 && id < FF6_CHAR_COUNT ? kNames[id] : "";
-    if (!name.empty()) name[0] = static_cast<char>(name[0] - 'a' + 'A');
-    return name;
-}
-
 std::string number(long value, int width) {
     char buffer[32];
     std::snprintf(buffer, sizeof(buffer), "%*ld", width, value);
@@ -115,7 +108,13 @@ void CharacterMenu::update(const InputState& input) {
             sound_.command(FF6_SFX_MENU_MOVE, 0, 0);
             listing_ = false;
         } else if (input.confirm) {
-            sound_.command(FF6_SFX_MENU_INVALID, 0, 0);
+            const bool esper = cursor_ == 0 && hooks_ && hooks_->equipEsper && listCursor_ < static_cast<int>(character_.espers.size());
+            if (esper) {
+                character_ = hooks_->equipEsper(character_.id, character_.espers[static_cast<size_t>(listCursor_)]);
+                sound_.command(FF6_SFX_MENU_SELECT, 0, 0);
+            } else {
+                sound_.command(FF6_SFX_MENU_INVALID, 0, 0);
+            }
         }
         return;
     }
@@ -251,7 +250,10 @@ void CharacterMenu::drawSkills() {
         const SkillList& names = c.skills[static_cast<size_t>(cursor_)];
         screen_.window(FF6_SKILL_LIST_WINDOW_X, 3, FF6_SKILL_LIST_WINDOW_WIDTH, FF6_SKILL_LIST_ROWS + 2);
         for (int i = 0; i < FF6_SKILL_LIST_ROWS && listScroll_ + i < static_cast<int>(names.size()); ++i) {
-            screen_.codes(FF6_SKILL_LIST_X, 4 + i, names[static_cast<size_t>(listScroll_ + i)], Layer::Bg1, FF6_MENU_BG1_DEFAULT);
+            const bool carried = cursor_ == 0 && listScroll_ + i < static_cast<int>(c.espers.size()) &&
+                                 c.espers[static_cast<size_t>(listScroll_ + i)] == c.equippedEsper;
+            screen_.codes(FF6_SKILL_LIST_X, 4 + i, names[static_cast<size_t>(listScroll_ + i)], Layer::Bg1,
+                          carried ? FF6_MENU_BG1_TEAL : FF6_MENU_BG1_DEFAULT);
         }
         screen_.hand(FF6_SKILL_LIST_X * FF6_MENU_TILE_SIZE - FF6_MENU_CURSOR_SIZE,
                      (4 + listCursor_ - listScroll_) * FF6_MENU_TILE_SIZE + FF6_ITEM_CURSOR_DY);

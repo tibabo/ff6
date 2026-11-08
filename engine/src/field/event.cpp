@@ -301,6 +301,10 @@ bool EventRunner::step(EventHost& host) {
             return next();
         }
         case FF6_EVENT_SHOP:  // the menu takes the screen, and the event goes on once it is closed
+        case FF6_EVENT_BATTLE:  // so does the battle
+        case FF6_EVENT_BATTLE_COLLISION:
+        case FF6_EVENT_RANDOM_BATTLE:
+        case FF6_EVENT_BOX_BATTLE:
             host.fieldCommand(op, pc_ + 1 < script.size() ? &script[pc_ + 1] : nullptr, length - 1);
             next();
             return false;

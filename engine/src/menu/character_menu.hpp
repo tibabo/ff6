@@ -24,6 +24,8 @@ struct MenuCharacter {
     int equipment[FF6_MENU_EQUIP_SLOTS] = {FF6_ITEM_EMPTY, FF6_ITEM_EMPTY, FF6_ITEM_EMPTY,
                                            FF6_ITEM_EMPTY, FF6_ITEM_EMPTY, FF6_ITEM_EMPTY};  // right hand to second relic
     std::array<SkillList, FF6_MENU_SKILL_LISTS> skills;  // espers, magic, swordtechs, blitzes, lores, rages and dances
+    std::vector<int> espers;  // the number of each esper of skills[0]
+    int equippedEsper = -1;  // the esper that the character carries
 };
 
 enum class CharacterScreen { Status, Equip, Relic, Skills };
@@ -33,6 +35,7 @@ struct EquipHooks {
     std::function<std::vector<int>(int character, int slot)> choices;  // the items of the inventory that fit the slot
     std::function<MenuCharacter(int character, int slot, int item)> preview;  // the character with the item on
     std::function<MenuCharacter(int character, int slot, int item)> equip;  // does it, and gives the character back
+    std::function<MenuCharacter(int character, int esper)> equipEsper;  // carries the esper (or lets it go), and gives the character back
 };
 
 // The screens of one character (src/menu/status.asm, equip.asm and skills.asm): the equipment can be changed, and the

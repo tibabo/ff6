@@ -308,4 +308,43 @@ void testGame() {
         CHECK(restored.party().treasures[0x0B] && restored.party().inventory[0].item == 0xC8);
         CHECK(cell(restored) == FF6_TILE_CHEST_OPEN);
     }
+
+    {  // a monster in a box: the chest opens, the event tells, and the battle starts
+        uint32_t boxMap = 0;
+        int boxX = 0, boxY = 0, boxBit = 0;
+        for (uint32_t id = FF6_FIRST_SUB_MAP; id < FF6_BATTLE_MAP_COUNT && boxMap == 0; ++id) {
+            ff6::MapData candidate;
+            try {
+                candidate = ff6::loadMap(pack, id);
+            } catch (const std::runtime_error&) {
+                continue;
+            }
+            for (size_t i = 0; i + FF6_TREASURE_PROP_SIZE <= candidate.treasures.size(); i += FF6_TREASURE_PROP_SIZE) {
+                const uint8_t* chest = &candidate.treasures[i];
+                const int kind = chest[2] | (chest[3] << 8);
+                if (!(kind & FF6_TREASURE_KIND_MONSTER)) continue;
+                boxMap = id;
+                boxX = chest[0];
+                boxY = chest[1];
+                boxBit = kind & FF6_TREASURE_BIT_MASK;
+                break;
+            }
+        }
+        CHECK(boxMap != 0);
+        test::RecordingSound boxSound;
+        ff6::Game box(ff6::loadCommonData(pack), pack, boxMap, renderer, boxSound);
+        for (int i = 0; i < 600; ++i) box.tick(idle);
+        struct Side { int dx, dy, toward; };
+        for (const Side side : {Side{0, 1, ff6::Up}, Side{0, -1, ff6::Down}, Side{1, 0, ff6::Left}, Side{-1, 0, ff6::Right}}) {
+            if (box.party().treasures[static_cast<size_t>(boxBit)]) break;
+            box.placeParty(boxX + side.dx, boxY + side.dy);
+            box.tick({side.toward, false});
+            for (int frame = 0; frame < FF6_STEP_FRAMES; ++frame) box.tick(idle);
+            if (box.player().facing() != side.toward) continue;
+            box.tick(confirm);
+        }
+        CHECK(box.party().treasures[static_cast<size_t>(boxBit)]);
+        for (int i = 0; i < 3000 && !box.battleOpen(); ++i) box.tick(i % 20 == 0 ? confirm : idle);
+        CHECK(box.battleOpen());
+    }
 }

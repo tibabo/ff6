@@ -10,13 +10,6 @@ namespace {
 
 const char* const kOptions[FF6_ITEM_OPTION_COUNT] = {"USE", "ARRANGE", "RARE"};
 
-std::string characterName(int id) {
-    static const char* const kNames[] = FF6_CHARACTER_NAMES;
-    std::string name = id >= 0 && id < FF6_CHAR_COUNT ? kNames[id] : "";
-    if (!name.empty()) name[0] = static_cast<char>(name[0] - 'a' + 'A');
-    return name;
-}
-
 std::string number(int value, int width) {
     char buffer[16];
     std::snprintf(buffer, sizeof(buffer), "%*d", width, value);

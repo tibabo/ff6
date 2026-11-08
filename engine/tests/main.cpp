@@ -6,6 +6,12 @@
 int main() {
     testPack();
     testSave();
+    testBattleData();
+    testBattleGfx();
+    testAttackAnim();
+    testAttackAnimPlayer();
+    testBattle();
+    testBattleActions();
     testAudioData();
     testBrr();
     testDspVoice();

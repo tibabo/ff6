@@ -41,6 +41,14 @@ public:
     void hand(int x, int y);
     // A portrait of the game, 40x40 pixels, with its upper left corner at a pixel of the screen.
     void portrait(int x, int y, int portrait);
+    // A picture of RGBA pixels, w x h, with its upper left corner at a pixel of the screen; what is outside is cut.
+    void image(int x, int y, int w, int h, const uint8_t* rgba);
+    // The same, with the colors added to the ones that are there (or taken from them), by half if `half`.
+    void imageMath(int x, int y, int w, int h, const uint8_t* rgba, bool subtract, bool half);
+    // Blends a color over a rectangle of the screen, `percent` of it.
+    void tint(int x, int y, int w, int h, int red, int green, int blue, int percent);
+    // One pixel of a color, for the effects that are drawn and not painted.
+    void plot(int x, int y, int red, int green, int blue);
     const std::vector<uint8_t>& pixels() const { return pixels_; }
 
 private:
@@ -57,6 +65,8 @@ private:
 
 // The code of a character of the text of the menus, FF6_MENU_CODE_SPACE for one that the font does not have.
 uint8_t menuCode(char character);
+// The name of a character of the game, from 0 for Terra; empty for a number that is not one.
+std::string characterName(int id);
 // The portrait of a character of the game, from 0 for Terra.
 int menuPortrait(int character);
 

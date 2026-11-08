@@ -10,6 +10,9 @@
 #include <vector>
 
 #include "data/pack.hpp"
+#include "battle/battle_screen.hpp"
+#include "battle/encounters.hpp"
+#include "data/battle_data.hpp"
 #include "data/game_rules.hpp"
 #include "data/save.hpp"
 #include "field/anim.hpp"
@@ -62,6 +65,9 @@ public:
     const FieldMenu& menu() const { return menu_; }
     const ShopMenu& shop() const { return shop_; }
     bool shopOpen() const { return shopOpen_; }
+    const BattleScreen& battle() const { return battleScreen_; }
+    BattleScreen& battle() { return battleScreen_; }
+    bool battleOpen() const { return battleOpen_; }
     const GameConfig& config() const { return config_; }
     const GameRules& rules() const { return rules_; }
     // The characters, the inventory and the gil.
@@ -71,6 +77,8 @@ public:
     void setSaveHandler(std::function<void(const SaveState&)> handler) { saveHandler_ = std::move(handler); }
     // Ends the fades at once, for captures.
     void finishFade();
+    // Starts battle number `battle` (0 to 575) over the field, with the background number `background` (-1 for the map's).
+    void startBattleNumber(int battle, int background = -1);
 
 private:
     // EventHost
@@ -107,6 +115,11 @@ private:
     void moveParty(int tileX, int tileY);
     void tickMenu(const InputState& input);
     void openShop(int shop);
+    void startBattle(int group, int flags);
+    void beginBattle(int battle, int flags);
+    void launchBattle(int battle, int background);
+    void checkEncounter();
+    void endBattle();
     MenuStatus menuStatus();
     MenuCharacter menuCharacter(int id, const CharacterState& state) const;
     std::vector<MenuItem> inventoryItems() const;
@@ -133,6 +146,15 @@ private:
     FieldMenu menu_;
     ShopMenu shop_;
     bool shopOpen_ = false;  // the menu that is open is a shop, not the field menu
+    BattleData battleData_;
+    BattleGfx battleGfx_;
+    AttackAnim attackAnim_;
+    BattleScreen battleScreen_;
+    bool battleOpen_ = false;  // the screen is the battle: it takes the place of the menu
+    uint32_t battleSeed_ = 1;
+    Encounters encounters_;
+    int pendingBattle_ = 0;  // the battle that the random battle event starts
+    int boxGroup_ = 0;  // the group of the monster in the box that was just opened
     MenuPhase menuPhase_ = MenuPhase::Closed;
     GameConfig config_;
     GameRules rules_;

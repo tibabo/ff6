@@ -95,7 +95,7 @@ std::string saveToJson(const SaveState& state) {
             out << "    {\"actor\": " << c.actor << ", \"level\": " << c.level << ", \"hp\": " << c.hp << ", \"maxHp\": " << c.maxHp
                 << ", \"mp\": " << c.mp << ", \"maxMp\": " << c.maxMp << ", \"experience\": " << c.experience
                 << ", \"vigor\": " << c.vigor << ", \"speed\": " << c.speed << ", \"stamina\": " << c.stamina
-                << ", \"magicPower\": " << c.magicPower << ", \"equipment\": ";
+                << ", \"magicPower\": " << c.magicPower << ", \"esper\": " << c.esper << ", \"equipment\": ";
             appendList(out, std::vector<int>(c.equipment.begin(), c.equipment.end()));
             std::vector<int> known;
             for (size_t spell = 0; spell < party.spells[i].size(); ++spell) {
@@ -125,7 +125,7 @@ std::string saveToJson(const SaveState& state) {
         }
         out << ",\n  \"espers\": ";
         appendList(out, espers);
-        out << ", \"swordtechs\": " << party.swordtechs << ", \"blitzes\": " << party.blitzes;
+        out << ", \"swordtechs\": " << party.swordtechs << ", \"blitzes\": " << party.blitzes << ", \"lores\": " << party.lores;
     }
     out << "\n}\n";
     return out.str();
@@ -205,6 +205,7 @@ SaveState saveFromJson(const std::string& text) {
             const std::vector<int> equipment = ids(item, "equipment", FF6_ITEM_COUNT);
             if (equipment.size() != c.equipment.size()) throw std::runtime_error("save: there must be 6 pieces of equipment");
             std::copy(equipment.begin(), equipment.end(), c.equipment.begin());
+            if (item.find("esper")) c.esper = number(item, "esper", -1, FF6_ESPER_COUNT - 1);
             if (item.find("spells")) {
                 for (const int spell : ids(item, "spells", FF6_SPELL_COUNT)) party.spells[i][static_cast<size_t>(spell)] = true;
             }
@@ -225,6 +226,7 @@ SaveState saveFromJson(const std::string& text) {
             for (const int id : ids(root, "espers", FF6_ESPER_COUNT)) party.espers[static_cast<size_t>(id)] = true;
             party.swordtechs = static_cast<unsigned>(number(root, "swordtechs", 0, (1 << FF6_TECH_COUNT) - 1));
             party.blitzes = static_cast<unsigned>(number(root, "blitzes", 0, (1 << FF6_TECH_COUNT) - 1));
+            if (root.find("lores")) party.lores = static_cast<unsigned>(number(root, "lores", 0, (1 << FF6_LORE_COUNT) - 1));
         }
         state.hasParty = true;
     }

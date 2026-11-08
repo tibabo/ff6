@@ -14,6 +14,7 @@ struct CharacterState {
     long experience = 0;
     int vigor = 0, speed = 0, stamina = 0, magicPower = 0;  // without the equipment
     std::array<int, FF6_MENU_EQUIP_SLOTS> equipment{};  // right hand to second relic; FF6_ITEM_EMPTY for nothing
+    int esper = -1;  // the esper that it carries, which gives it the command Summon; -1 for none
 
     CharacterState() { equipment.fill(FF6_ITEM_EMPTY); }
 };
@@ -31,6 +32,7 @@ struct PartyState {
     std::array<std::array<bool, FF6_SPELL_COUNT>, FF6_CHAR_COUNT> spells{};  // the spells that each character knows
     std::array<bool, FF6_ESPER_COUNT> espers{};  // the espers that the party has
     unsigned swordtechs = 0, blitzes = 0;  // a bit for each one that is known
+    unsigned lores = 0;  // a bit for each lore that Strago knows
 };
 
 }  // namespace ff6

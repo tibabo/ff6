@@ -1,7 +1,12 @@
 #include "sdl/sdl_renderer.hpp"
 
+#include <algorithm>
+#include <cstdint>
+#include <fstream>
 #include <stdexcept>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "constants.hpp"
 
@@ -11,6 +16,94 @@
 #define FF6_SDL_CLEAR_RGBA 0, 0, 0, 255
 
 namespace ff6 {
+namespace {
+
+void put32(std::vector<uint8_t>& out, uint32_t value, bool bigEndian) {
+    for (int i = 0; i < 4; ++i) out.push_back(static_cast<uint8_t>(value >> (bigEndian ? 24 - 8 * i : 8 * i)));
+}
+
+uint32_t crc32(const uint8_t* data, size_t size, uint32_t crc = 0xFFFFFFFFu) {
+    for (size_t i = 0; i < size; ++i) {
+        crc ^= data[i];
+        for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+    }
+    return crc;
+}
+
+void chunk(std::vector<uint8_t>& out, const char* type, const std::vector<uint8_t>& data) {
+    put32(out, static_cast<uint32_t>(data.size()), true);
+    std::vector<uint8_t> body(type, type + 4);
+    body.insert(body.end(), data.begin(), data.end());
+    out.insert(out.end(), body.begin(), body.end());
+    put32(out, ~crc32(body.data(), body.size()), true);
+}
+
+// `rgb` is width x height x 3 bytes. A PNG without compression (stored blocks), which every viewer reads.
+std::vector<uint8_t> encodePng(const std::vector<uint8_t>& rgb, int width, int height) {
+    std::vector<uint8_t> raw;
+    for (int y = 0; y < height; ++y) {
+        raw.push_back(0);  // no filter
+        raw.insert(raw.end(), rgb.begin() + static_cast<std::ptrdiff_t>(y) * width * 3, rgb.begin() + static_cast<std::ptrdiff_t>(y + 1) * width * 3);
+    }
+    std::vector<uint8_t> zlib = {0x78, 0x01};
+    for (size_t at = 0; at < raw.size() || at == 0;) {
+        const size_t size = std::min<size_t>(raw.size() - at, 65535);
+        const bool last = at + size >= raw.size();
+        zlib.push_back(last ? 1 : 0);
+        zlib.push_back(static_cast<uint8_t>(size));
+        zlib.push_back(static_cast<uint8_t>(size >> 8));
+        zlib.push_back(static_cast<uint8_t>(~size));
+        zlib.push_back(static_cast<uint8_t>((~size) >> 8));
+        zlib.insert(zlib.end(), raw.begin() + static_cast<std::ptrdiff_t>(at), raw.begin() + static_cast<std::ptrdiff_t>(at + size));
+        at += size;
+        if (last) break;
+    }
+    uint32_t a = 1, b = 0;
+    for (const uint8_t byte : raw) {
+        a = (a + byte) % 65521;
+        b = (b + a) % 65521;
+    }
+    put32(zlib, (b << 16) | a, true);
+    std::vector<uint8_t> png = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+    std::vector<uint8_t> header;
+    put32(header, static_cast<uint32_t>(width), true);
+    put32(header, static_cast<uint32_t>(height), true);
+    header.insert(header.end(), {8, 2, 0, 0, 0});  // 8 bits, RGB
+    chunk(png, "IHDR", header);
+    chunk(png, "IDAT", zlib);
+    chunk(png, "IEND", {});
+    return png;
+}
+
+// A BMP of 24 bits with the plain 40-byte header, the rows from the bottom, as every viewer expects.
+std::vector<uint8_t> encodeBmp(const std::vector<uint8_t>& rgb, int width, int height) {
+    const size_t stride = (static_cast<size_t>(width) * 3 + 3) & ~static_cast<size_t>(3);
+    const uint32_t pixels = static_cast<uint32_t>(stride * static_cast<size_t>(height));
+    std::vector<uint8_t> bmp = {'B', 'M'};
+    put32(bmp, 54 + pixels, false);
+    put32(bmp, 0, false);
+    put32(bmp, 54, false);
+    put32(bmp, 40, false);
+    put32(bmp, static_cast<uint32_t>(width), false);
+    put32(bmp, static_cast<uint32_t>(height), false);
+    bmp.insert(bmp.end(), {1, 0, 24, 0});
+    put32(bmp, 0, false);
+    put32(bmp, pixels, false);
+    put32(bmp, 2835, false);
+    put32(bmp, 2835, false);
+    put32(bmp, 0, false);
+    put32(bmp, 0, false);
+    for (int y = height - 1; y >= 0; --y) {
+        for (int x = 0; x < width; ++x) {
+            const uint8_t* pixel = &rgb[(static_cast<size_t>(y) * width + x) * 3];
+            bmp.insert(bmp.end(), {pixel[2], pixel[1], pixel[0]});  // blue, green, red
+        }
+        bmp.insert(bmp.end(), stride - static_cast<size_t>(width) * 3, 0);
+    }
+    return bmp;
+}
+
+}  // namespace
 
 SdlRenderer::SdlRenderer(bool offscreen) : offscreen_(offscreen) {
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, FF6_SDL_SCALE_NEAREST);
@@ -88,11 +181,20 @@ void SdlRenderer::saveFrame(const std::string& path) {
     if (!offscreen_ || !target_) throw std::runtime_error("no offscreen frame to save");
     std::unique_ptr<SDL_Surface, Deleter> surface(SDL_CreateRGBSurfaceWithFormat(
         0, FF6_SCREEN_WIDTH, FF6_SCREEN_HEIGHT, FF6_BITS_PER_PIXEL, SDL_PIXELFORMAT_ARGB8888));
-    if (!surface || SDL_RenderReadPixels(renderer_.get(), nullptr, SDL_PIXELFORMAT_ARGB8888, surface->pixels,
-                                         surface->pitch) != 0 ||
-        SDL_SaveBMP(surface.get(), path.c_str()) != 0) {
+    if (!surface || SDL_RenderReadPixels(renderer_.get(), nullptr, SDL_PIXELFORMAT_ARGB8888, surface->pixels, surface->pitch) != 0) {
         throw std::runtime_error(std::string("capture failed: ") + SDL_GetError());
     }
+    std::vector<uint8_t> rgb;
+    rgb.reserve(static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * 3);
+    for (int y = 0; y < FF6_SCREEN_HEIGHT; ++y) {
+        const uint8_t* row = static_cast<const uint8_t*>(surface->pixels) + static_cast<size_t>(y) * surface->pitch;
+        for (int x = 0; x < FF6_SCREEN_WIDTH; ++x) rgb.insert(rgb.end(), {row[x * 4 + 2], row[x * 4 + 1], row[x * 4]});  // bytes are B, G, R, A
+    }
+    const bool png = path.size() > 4 && path.compare(path.size() - 4, 4, ".png") == 0;
+    const std::vector<uint8_t> file = png ? encodePng(rgb, FF6_SCREEN_WIDTH, FF6_SCREEN_HEIGHT) : encodeBmp(rgb, FF6_SCREEN_WIDTH, FF6_SCREEN_HEIGHT);
+    std::ofstream out(path, std::ios::binary);
+    out.write(reinterpret_cast<const char*>(file.data()), static_cast<std::streamsize>(file.size()));
+    if (!out) throw std::runtime_error("capture failed: cannot write " + path);
 }
 
 }  // namespace ff6

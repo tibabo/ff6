@@ -29,13 +29,13 @@ struct Drawable {
 Game::Game(CommonData common, std::string packDir, uint32_t startMap, Renderer& renderer, Sound& sound,
            const std::vector<int>& party)
     : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
-      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_) {
+      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_) {
     initialize(startMap, party, nullptr);
 }
 
 Game::Game(CommonData common, std::string packDir, const SaveState& save, Renderer& renderer, Sound& sound)
     : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
-      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_) {
+      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_) {
     initialize(static_cast<uint32_t>(save.map), {}, &save);
 }
 
@@ -43,6 +43,11 @@ void Game::initialize(uint32_t startMap, const std::vector<int>& party, const Sa
     bits_.init(common_);
     menuData_ = loadMenuData(packDir_);
     rules_ = loadGameRules(packDir_);
+    battleData_ = loadBattleData(packDir_);
+    battleGfx_ = loadBattleGfx(packDir_);
+    battleScreen_.setGfx(&battleGfx_);
+    attackAnim_ = loadAttackAnim(packDir_);
+    battleScreen_.setAttackAnim(&attackAnim_);
     for (int i = 0; i < FF6_CHAR_COUNT; ++i) setCharacterProperties(state_, rules_, i, i, 0);
     config_.windowColors = menuData_.windowColors;
     const size_t screenBytes = static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL;
@@ -439,6 +444,16 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
         case FF6_EVENT_SHOP:
             openShop(byteAt(0));
             break;
+        case FF6_EVENT_BATTLE:
+        case FF6_EVENT_BATTLE_COLLISION:
+            startBattle(byteAt(0), byteAt(1));
+            break;
+        case FF6_EVENT_BOX_BATTLE:
+            startBattle(boxGroup_, FF6_BATTLE_BG_DEFAULT);
+            break;
+        case FF6_EVENT_RANDOM_BATTLE:
+            beginBattle(pendingBattle_, FF6_BATTLE_BG_DEFAULT);
+            break;
         case FF6_EVENT_GIVE_ESPER:
             giveEsper(state_, byteAt(0));
             break;
@@ -533,6 +548,8 @@ void Game::checkArrival() {
                 return;
             }
         }
+        checkEncounter();
+        if (event_.running()) return;
     }
     EntranceTarget target;
     if (armed_ && checkEntrances(map_, x, y, &target) && !leaving_) {  // the screen fades out, then the map is loaded
@@ -565,7 +582,7 @@ bool Game::openTreasure() {
         if (chest[0] != x || chest[1] != y) continue;
         const int kind = chest[2] | (chest[3] << 8), contents = chest[4];
         const size_t bit = static_cast<size_t>(kind & FF6_TREASURE_BIT_MASK);
-        if ((kind & FF6_TREASURE_KIND_MONSTER) || state_.treasures[bit]) return false;
+        if (state_.treasures[bit]) return false;
         state_.treasures[bit] = true;
         uint32_t script = FF6_EVENT_SCRIPT_TREASURE_EMPTY;
         if (kind & FF6_TREASURE_KIND_GIL) {
@@ -576,6 +593,9 @@ bool Game::openTreasure() {
             receivedItem_ = contents;
             giveItem(state_, contents);
             script = FF6_EVENT_SCRIPT_TREASURE_ITEM;
+        } else if (kind & FF6_TREASURE_KIND_MONSTER) {
+            boxGroup_ = contents;
+            script = FF6_EVENT_SCRIPT_TREASURE_MONSTER;
         }
         startEvent(script);
         if (tile == FF6_TILE_CHEST_CLOSED) {
@@ -760,8 +780,11 @@ MenuCharacter Game::menuCharacter(int id, const CharacterState& state) const {
     character.nextLevel = experienceToNextLevel(rules_, state);
     for (size_t i = 0; i < state.equipment.size(); ++i) character.equipment[i] = state.equipment[i];
     for (int esper = 0; esper < FF6_ESPER_COUNT; ++esper) {
-        if (state_.espers[static_cast<size_t>(esper)]) character.skills[0].push_back(menuData_.esperName(esper));
+        if (!state_.espers[static_cast<size_t>(esper)]) continue;
+        character.skills[0].push_back(menuData_.esperName(esper));
+        character.espers.push_back(esper);
     }
+    character.equippedEsper = state.esper;
     for (int spell = 0; spell < FF6_SPELL_COUNT; ++spell) {
         if (state_.spells[static_cast<size_t>(id)][static_cast<size_t>(spell)]) {
             // The name, then the cost in mp: two digits, the first of them blank when it is 0.
@@ -776,6 +799,12 @@ MenuCharacter Game::menuCharacter(int id, const CharacterState& state) const {
     for (int tech = 0; tech < FF6_TECH_COUNT; ++tech) {
         if (state.actor == FF6_ACTOR_CYAN && (state_.swordtechs >> tech & 1)) character.skills[2].push_back(menuData_.bushidoName(tech));
         if (state.actor == FF6_ACTOR_SABIN && (state_.blitzes >> tech & 1)) character.skills[3].push_back(menuData_.blitzName(tech));
+    }
+    for (int lore = 0; lore < FF6_LORE_COUNT; ++lore) {
+        if (state.actor != FF6_ACTOR_STRAGO || !(state_.lores >> lore & 1)) continue;
+        std::vector<uint8_t> name = battleData_.attackName(FF6_ATTACK_FIRST_LORE + lore);
+        name.erase(std::find(name.begin(), name.end(), FF6_BATTLE_NAME_PAD_CODE), name.end());
+        character.skills[4].push_back(name);
     }
     return character;
 }
@@ -816,6 +845,14 @@ MenuStatus Game::menuStatus() {
         equipItem(state_, rules_, id, slot, item);
         return menuCharacter(id, state_.characters[static_cast<size_t>(id)]);
     };
+    status.equip.equipEsper = [this](int id, int esper) {
+        const bool let = state_.characters[static_cast<size_t>(id)].esper == esper;
+        for (CharacterState& other : state_.characters) {
+            if (other.esper == esper) other.esper = -1;  // an esper is carried by one character
+        }
+        if (!let) state_.characters[static_cast<size_t>(id)].esper = esper;
+        return menuCharacter(id, state_.characters[static_cast<size_t>(id)]);
+    };
     status.gil = state_.gil;
     status.steps = state_.steps;
     status.hours = static_cast<int>(std::min<uint32_t>(frame_ / FF6_MENU_FRAMES_PER_HOUR, FF6_MENU_MAX_HOURS));
@@ -843,13 +880,78 @@ void Game::openShop(int shop) {
     startFade(false, FF6_BRIGHTNESS_STEP);
 }
 
+// Event commands 0x4C and 0x4D: the battle of an event group (the first one, or the second in one case of four) takes the
+// screen, and the event goes on once it is over. The conditional battles and the background are not read.
+void Game::startBattle(int group, int flags) {
+    battleSeed_ = battleSeed_ * FF6_BATTLE_SEED_STEP + frame_ + 1;
+    BattleRandom random(battleSeed_);
+    beginBattle(battleData_.eventBattle(group, random.byte() >= FF6_EVENT_BATTLE_SECOND_LIMIT ? 1 : 0), flags);
+}
+
+// `flags` are the second byte of the event command: the low bits choose the background, or the map's with all of them set.
+void Game::beginBattle(int battle, int flags) {
+    int background = flags & FF6_BATTLE_BG_DEFAULT;
+    if (background == FF6_BATTLE_BG_DEFAULT) background = map_.prop[FF6_MAP_PROP_FLAGS] & FF6_MAP_BG_MASK;
+    launchBattle(battle, background);
+}
+
+void Game::startBattleNumber(int battle, int background) {
+    if (battle < 0 || battle >= FF6_BATTLE_COUNT) throw std::runtime_error("invalid battle number");
+    launchBattle(battle, background >= 0 ? background : map_.prop[FF6_MAP_PROP_FLAGS] & FF6_MAP_BG_MASK);
+}
+
+void Game::launchBattle(int battle, int background) {
+    std::vector<int> characters;
+    for (const int id : objects_.partySlots()) {
+        if (id >= 0 && characters.size() < FF6_BATTLE_PARTY_SLOTS) characters.push_back(id);
+    }
+    if (characters.empty()) return;
+    battleSeed_ = battleSeed_ * FF6_BATTLE_SEED_STEP + frame_ + 1;
+    BattleRandom random(battleSeed_);
+    if (battle & FF6_BATTLE_RANDOM_FLAG) battle = (battle & ~FF6_BATTLE_RANDOM_FLAG) + random.below(FF6_BATTLE_RANDOM_SPAN);
+    battleScreen_.start(battleData_, rules_, state_, characters, battle, battleSeed_, config_.battleSpeed(),
+                        (config_.battle & FF6_CONFIG_WAIT) != 0, background);
+    battleOpen_ = true;
+    menuPhase_ = MenuPhase::FadingOut;
+    startFade(false, FF6_BRIGHTNESS_STEP);
+}
+
+// CheckBattleSub, once the party has arrived on a tile: the random battle is an event, like in the game.
+void Game::checkEncounter() {
+    if (bits_.get(FF6_EVENT_BIT_NO_ENCOUNTERS)) return;
+    const int battle = encounters_.step(battleData_, static_cast<int>(map_.id), (map_.prop[FF6_MAP_PROP_ENCOUNTERS] & FF6_MAP_ENCOUNTERS_FLAG) != 0);
+    if (battle < 0) return;
+    pendingBattle_ = battle;
+    startEvent(FF6_EVENT_SCRIPT_RAND_BATTLE);
+}
+
+// A defeated party has no game over screen here: it stands up again with all its hp.
+void Game::endBattle() {
+    if (battleScreen_.outcome() == BattleOutcome::Lost) {
+        for (const Combatant& c : battleScreen_.battle()->combatants()) {
+            if (c.present && !c.monster) {
+                CharacterState& character = state_.characters[static_cast<size_t>(c.id)];
+                character.hp = calcStats(rules_, character).maxHp;
+            }
+        }
+    }
+    battleScreen_.close();
+    battleOpen_ = false;
+}
+
 void Game::tickMenu(const InputState& input) {
     updateBrightness();
     if (fading()) return;
     if (menuPhase_ == MenuPhase::FadingOut) {
-        if (!shopOpen_) menu_.open(menuStatus(), config_);
+        if (!shopOpen_ && !battleOpen_) menu_.open(menuStatus(), config_);
         menuPhase_ = MenuPhase::Open;
         startFade(true, FF6_BRIGHTNESS_STEP);
+    } else if (menuPhase_ == MenuPhase::Open && battleOpen_) {
+        battleScreen_.update(input);
+        if (battleScreen_.finished()) {
+            menuPhase_ = MenuPhase::Leaving;
+            startFade(false, FF6_BRIGHTNESS_STEP);
+        }
     } else if (menuPhase_ == MenuPhase::Open && shopOpen_) {
         shop_.update(input);
         if (shop_.closed()) {
@@ -866,6 +968,7 @@ void Game::tickMenu(const InputState& input) {
     } else {
         menuPhase_ = MenuPhase::Closed;
         shopOpen_ = false;
+        if (battleOpen_) endBattle();
         common_.windowTiles = buildWindowTiles(menuData_, config_);  // the dialogues have the windows of the config
         startFade(true, FF6_BRIGHTNESS_STEP);
     }
@@ -940,7 +1043,9 @@ void Game::drawSprites(bool above) {
 
 void Game::draw() {
     if (menuPhase_ == MenuPhase::Open || menuPhase_ == MenuPhase::Leaving) {
-        if (shopOpen_) {
+        if (battleOpen_) {
+            battleScreen_.draw();
+        } else if (shopOpen_) {
             shop_.draw();
         } else {
             menu_.draw();

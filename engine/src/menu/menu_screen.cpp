@@ -7,6 +7,13 @@
 
 namespace ff6 {
 
+std::string characterName(int id) {
+    static const char* const kNames[] = FF6_CHARACTER_NAMES;
+    std::string name = id >= 0 && id < FF6_CHAR_COUNT ? kNames[id] : "";
+    if (!name.empty()) name[0] = static_cast<char>(name[0] - 'a' + 'A');
+    return name;
+}
+
 uint8_t menuCode(char character) {
     if (character >= 'A' && character <= 'Z') return static_cast<uint8_t>(FF6_MENU_CODE_UPPER_A + (character - 'A'));
     if (character >= 'a' && character <= 'z') return static_cast<uint8_t>(FF6_MENU_CODE_LOWER_A + (character - 'a'));
@@ -120,6 +127,53 @@ void MenuScreen::portrait(int x, int y, int portrait) {
             }
         }
     }
+}
+
+void MenuScreen::image(int x, int y, int w, int h, const uint8_t* rgba) {
+    for (int row = 0; row < h; ++row) {
+        if (y + row < 0 || y + row >= FF6_SCREEN_HEIGHT) continue;
+        for (int column = 0; column < w; ++column) {
+            if (x + column < 0 || x + column >= FF6_SCREEN_WIDTH) continue;
+            const uint8_t* pixel = rgba + (static_cast<size_t>(row) * w + column) * FF6_BYTES_PER_PIXEL;
+            if (pixel[FF6_ALPHA_OFFSET] != 0) blendPixel(pixels_, x + column, y + row, pixel);
+        }
+    }
+}
+
+void MenuScreen::imageMath(int x, int y, int w, int h, const uint8_t* rgba, bool subtract, bool half) {
+    for (int row = 0; row < h; ++row) {
+        if (y + row < 0 || y + row >= FF6_SCREEN_HEIGHT) continue;
+        for (int column = 0; column < w; ++column) {
+            if (x + column < 0 || x + column >= FF6_SCREEN_WIDTH) continue;
+            const uint8_t* pixel = rgba + (static_cast<size_t>(row) * w + column) * FF6_BYTES_PER_PIXEL;
+            if (pixel[FF6_ALPHA_OFFSET] == 0) continue;
+            uint8_t* under = &pixels_[(static_cast<size_t>(y + row) * FF6_SCREEN_WIDTH + x + column) * FF6_BYTES_PER_PIXEL];
+            for (int channel = 0; channel < 3; ++channel) {
+                int value = subtract ? under[channel] - pixel[channel] : under[channel] + pixel[channel];
+                if (half) value /= 2;
+                under[channel] = static_cast<uint8_t>(std::clamp(value, 0, 255));
+            }
+        }
+    }
+}
+
+void MenuScreen::tint(int x, int y, int w, int h, int red, int green, int blue, int percent) {
+    const int color[3] = {red, green, blue};
+    percent = std::clamp(percent, 0, 100);
+    for (int row = std::max(y, 0); row < std::min(y + h, FF6_SCREEN_HEIGHT); ++row) {
+        for (int column = std::max(x, 0); column < std::min(x + w, FF6_SCREEN_WIDTH); ++column) {
+            uint8_t* pixel = &pixels_[(static_cast<size_t>(row) * FF6_SCREEN_WIDTH + column) * FF6_BYTES_PER_PIXEL];
+            for (int channel = 0; channel < 3; ++channel) pixel[channel] = static_cast<uint8_t>((pixel[channel] * (100 - percent) + color[channel] * percent) / 100);
+        }
+    }
+}
+
+void MenuScreen::plot(int x, int y, int red, int green, int blue) {
+    if (x < 0 || y < 0 || x >= FF6_SCREEN_WIDTH || y >= FF6_SCREEN_HEIGHT) return;
+    uint8_t* pixel = &pixels_[(static_cast<size_t>(y) * FF6_SCREEN_WIDTH + x) * FF6_BYTES_PER_PIXEL];
+    pixel[0] = static_cast<uint8_t>(red);
+    pixel[1] = static_cast<uint8_t>(green);
+    pixel[2] = static_cast<uint8_t>(blue);
 }
 
 void MenuScreen::hand(int x, int y) {

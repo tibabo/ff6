@@ -3,6 +3,12 @@
 // Each test file of tests/ covers one source file of src/ and exposes one entry point.
 void testPack();
 void testSave();
+void testBattleData();
+void testBattleGfx();
+void testAttackAnim();
+void testAttackAnimPlayer();
+void testBattle();
+void testBattleActions();
 void testAudioData();
 void testBrr();
 void testDspVoice();

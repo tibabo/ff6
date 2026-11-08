@@ -98,11 +98,24 @@ CharacterStats calcStats(const GameRules& rules, const CharacterState& character
     stats.stamina = stamina;
     stats.magicPower = magic;
     stats.attackPower = rightPower + leftPower;
+    stats.handPower[0] = rightPower;
+    stats.handPower[1] = leftPower;
+    stats.handHitRate[0] = rules.item(rightItem)[FF6_ITEM_PROP_HIT_OR_MAGIC_DEFENSE];
+    stats.handHitRate[1] = rules.item(leftItem)[FF6_ITEM_PROP_HIT_OR_MAGIC_DEFENSE];
+    // The two-hand flag of a weapon stays only with the gauntlet; the copied weapon of the other hand has it too.
+    const bool gauntletWorn = (relic4 & FF6_RELIC4_GAUNTLET) != 0;
+    stats.handTwoHand[0] = gauntletWorn && (gauntlet || twoHanded(rightItem));
+    stats.handTwoHand[1] = gauntletWorn && (gauntlet || twoHanded(leftItem));
     stats.defense = defense;
     stats.magicDefense = magicDefense;
     stats.evade = evade;
     stats.magicBlock = magicBlock;
     stats.genjiGlove = (relic4 & FF6_RELIC4_GENJI_GLOVE) != 0;
+    stats.relic1 = relic1;
+    stats.relic3 = relic3;
+    stats.relic4 = relic4;
+    stats.handLongRange[0] = (rules.item(rightItem)[FF6_ITEM_PROP_WEAPON_FLAGS] & FF6_WEAPON_BACK_ROW) != 0;
+    stats.handLongRange[1] = (rules.item(leftItem)[FF6_ITEM_PROP_WEAPON_FLAGS] & FF6_WEAPON_BACK_ROW) != 0;
     stats.equipAnything = (relic4 & FF6_RELIC4_EQUIP_ANY) != 0;
     stats.maxHp = boosted(character.maxHp, relic1 & FF6_RELIC1_HP_50, relic1 & FF6_RELIC1_HP_25, relic1 & FF6_RELIC1_HP_12, FF6_MAX_HP);
     stats.maxMp = boosted(character.maxMp, relic1 & FF6_RELIC1_MP_50, relic1 & FF6_RELIC1_MP_25, relic1 & FF6_RELIC1_MP_12, FF6_MAX_MP);

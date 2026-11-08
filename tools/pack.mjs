@@ -23,12 +23,15 @@ import { readMapInitEvent } from './event/map_init_event.mjs';
 import { readTreasureProps } from './event/treasure_prop.mjs';
 import { readMapParallax } from './data/map_parallax.mjs';
 import { buildRulesData } from './data/game_rules.mjs';
+import { buildBattleData } from './battle/battle_data.mjs';
+import { buildAttackAnim } from './battle/attack_anim.mjs';
+import { buildBattleGfx } from './battle/battle_gfx.mjs';
 import { buildAudioData } from './sound/audio_data.mjs';
 import { buildMenuData } from './menu/menu_gfx.mjs';
 
 export const COMMON_MAGIC = 'FF6COMMN';
 export const MAP_MAGIC = 'FF6MAP01';
-export const PACK_VERSION = 5;
+export const PACK_VERSION = 10;
 export const FIRST_FIELD_MAP = 3;  // maps 0-2 are the world maps
 
 class Writer {
@@ -174,6 +177,9 @@ export function writePack(rom, outDir, options = {}) {
     writeFileSync(join(temp, 'audio.ff6data'), buildAudioData(rom, PACK_VERSION), { flag: 'wx' });
     writeFileSync(join(temp, 'menu.ff6data'), buildMenuData(rom, PACK_VERSION), { flag: 'wx' });
     writeFileSync(join(temp, 'game.ff6data'), buildRulesData(rom, PACK_VERSION), { flag: 'wx' });
+    writeFileSync(join(temp, 'battle.ff6data'), buildBattleData(rom, PACK_VERSION), { flag: 'wx' });
+    writeFileSync(join(temp, 'battlegfx.ff6data'), buildBattleGfx(rom, PACK_VERSION), { flag: 'wx' });
+    writeFileSync(join(temp, 'attackanim.ff6data'), buildAttackAnim(rom, PACK_VERSION), { flag: 'wx' });
     const written = [];
     const skipped = [];
     for (let mapId = FIRST_FIELD_MAP; mapId < MAP_COUNT; mapId += 1) {

@@ -9,6 +9,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(ff6_core STATIC
   src/data/json.cpp
   src/data/game_rules.cpp
+  src/data/battle_data.cpp
+  src/data/battle_gfx.cpp
+  src/data/attack_anim.cpp
   src/data/pack.cpp
   src/data/save.cpp
   src/field/anim.cpp
@@ -35,6 +38,12 @@ add_library(ff6_core STATIC
   src/menu/shop_menu.cpp
   src/menu/window_style.cpp
   src/state/char_stats.cpp
+  src/battle/battle.cpp
+  src/battle/action.cpp
+  src/battle/ai.cpp
+  src/battle/attack_anim_player.cpp
+  src/battle/battle_screen.cpp
+  src/battle/encounters.cpp
   src/state/party_ops.cpp)
 target_include_directories(ff6_core PUBLIC src)
 
@@ -69,6 +78,12 @@ if(BUILD_TESTING)
     tests/game_tests.cpp
     tests/data/pack_tests.cpp
     tests/data/save_tests.cpp
+    tests/data/battle_data_tests.cpp
+    tests/data/battle_gfx_tests.cpp
+    tests/data/attack_anim_tests.cpp
+    tests/battle/attack_anim_player_tests.cpp
+    tests/battle/battle_tests.cpp
+    tests/battle/action_tests.cpp
     tests/audio/audio_data_tests.cpp
     tests/audio/akao_tests.cpp
     tests/audio/brr_tests.cpp
