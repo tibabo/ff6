@@ -32,6 +32,7 @@ constexpr Entry kMode1Bg3Front[] = {{kBg3, 1}, {kObj, 3}, {kBg1, 1}, {kBg2, 1}, 
                                     {kBg1, 0}, {kBg2, 0}, {kObj, 1}, {kObj, 0}, {kBg3, 0}};
 constexpr Entry kMode1[] = {{kObj, 3}, {kBg1, 1}, {kBg2, 1}, {kObj, 2}, {kBg1, 0},
                             {kBg2, 0}, {kObj, 1}, {kObj, 0}, {kBg3, 1}, {kBg3, 0}};
+constexpr Entry kMode2[] = {{kBg1, 1}, {kObj, 3}, {kBg2, 1}, {kObj, 2}, {kBg1, 0}, {kObj, 1}, {kBg2, 0}, {kObj, 0}};
 constexpr Entry kMode7[] = {{kObj, 3}, {kObj, 2}, {kObj, 1}, {kBg1, 0}, {kObj, 0}};
 
 // The color of the pixel (x, y) of a 4 or 2 bits per pixel character, 0 when it is transparent.
@@ -54,9 +55,14 @@ void drawBg(const Ppu& ppu, int bg, int y, bool fourBits, Row& out) {
     const bool wide = (sc & 1) != 0, tall = (sc & 2) != 0;
     const int nibble = bg == kBg1 ? ppu.nba12 & 15 : bg == kBg2 ? ppu.nba12 >> 4 : ppu.nba34 & 15;
     const int chr = nibble * 0x1000, words = fourBits ? 16 : 8;
-    const int py = (y + line.vofs[index]) & (tall ? 511 : 255);
+    const bool columns = bg == kBg2 && line.bg2Columns;
+    int py = (y + line.vofs[index]) & (tall ? 511 : 255);
     for (int x = 0; x < kWidth; ++x) {
         const int px = (x + line.hofs[index]) & (wide ? 511 : 255);
+        if (columns) {
+            const int column = std::min(32, (x + (line.hofs[index] & 7)) >> 3);
+            py = (y + (column == 0 ? line.vofs[index] : line.bg2ColumnVofs[static_cast<size_t>(column)])) & (tall ? 511 : 255);
+        }
         const int tx = px >> 3, ty = py >> 3;
         int screen = 0;
         if (wide && tx >= 32) screen += 1;
@@ -134,9 +140,10 @@ struct Pick {
 
 // The front pixel of the layers in `mask` (bit n for bg n + 1, bit 4 for the objects).
 Pick frontPixel(int mask, int x, int mode, bool bg3Front, const std::array<Row, 3>& bg, const Row& objects, uint16_t backdrop) {
-    const Entry* begin = mode == 7 ? kMode7 : bg3Front ? kMode1Bg3Front : kMode1;
-    const Entry* end = mode == 7 ? kMode7 + sizeof(kMode7) / sizeof(kMode7[0])
-                                 : begin + (bg3Front ? sizeof(kMode1Bg3Front) / sizeof(kMode1Bg3Front[0]) : sizeof(kMode1) / sizeof(kMode1[0]));
+    const Entry* begin = mode == 7 ? kMode7 : mode == 2 ? kMode2 : bg3Front ? kMode1Bg3Front : kMode1;
+    const Entry* end = mode == 7   ? kMode7 + sizeof(kMode7) / sizeof(kMode7[0])
+                       : mode == 2 ? kMode2 + sizeof(kMode2) / sizeof(kMode2[0])
+                                   : begin + (bg3Front ? sizeof(kMode1Bg3Front) / sizeof(kMode1Bg3Front[0]) : sizeof(kMode1) / sizeof(kMode1[0]));
     for (const Entry* entry = begin; entry != end; ++entry) {
         const int bit = entry->source == kObj ? 0x10 : 1 << entry->source;
         if (!(mask & bit)) continue;

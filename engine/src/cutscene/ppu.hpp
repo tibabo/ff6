@@ -19,11 +19,13 @@ struct PpuSprite {
 
 // What the registers hold while one line is drawn; the HDMA tables of a cutscene change them from line to line.
 struct PpuLine {
-    uint8_t bgMode = 1;  // BGMODE: bits 0-2 the mode (1 or 7), bit 3 gives bg3 the highest priority
+    uint8_t bgMode = 1;  // BGMODE: bits 0-2 the mode (1, 2 or 7), bit 3 gives bg3 the highest priority
     std::array<uint16_t, 3> hofs{}, vofs{};  // bg1 to bg3
     int16_t m7a = 0, m7b = 0, m7c = 0, m7d = 0;
     uint8_t cgwsel = 0, cgadsub = 0;  // color math: bit 1 of CGWSEL picks the sub screen, then CGADSUB as the console has it
     std::array<uint8_t, 3> fixed{};  // the fixed color, 5 bits for red, green and blue
+    bool bg2Columns = false;  // offset per tile in mode 2: bg2 has its own vertical scroll in each column of 8 pixels
+    std::array<uint8_t, 33> bg2ColumnVofs{};  // the column 0 is the one that the scroll of the register gives
 };
 
 // A software version of the picture processor, as far as the title and the opening need it: modes 1 and 7, the

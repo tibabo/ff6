@@ -33,6 +33,8 @@ struct PartyState {
     std::array<bool, FF6_ESPER_COUNT> espers{};  // the espers that the party has
     unsigned swordtechs = 0, blitzes = 0;  // a bit for each one that is known
     unsigned lores = 0;  // a bit for each lore that Strago knows
+    std::array<bool, FF6_VELDT_BATTLE_COUNT> veldtBattles{};  // the battles that can come up on the veldt
+    int veldtPointer = 0;  // where the search for the next one starts ($1fa5)
 };
 
 }  // namespace ff6

@@ -3,6 +3,8 @@
 #include <cstdint>
 
 #include "data/battle_data.hpp"
+#include "data/world_data.hpp"
+#include "state/party_state.hpp"
 
 namespace ff6 {
 
@@ -14,7 +16,16 @@ public:
     // FF6_BATTLE_RANDOM_FLAG), or -1 for none. `enabled` is the flag of the map; the charms that change the rate are not read.
     int step(const BattleData& data, int map, bool enabled);
 
+    // CheckBattleWorld, one step on a tile of a world map with random battles: the tile has a battle background number
+    // (the high byte of its properties), and the tables are read at the sector of the map that the position is in. The
+    // group of the table, as with step, or -1; `background` is the battle background of the tile.
+    int stepWorld(const BattleData& data, const WorldData& world, int worldIndex, int tileBackground, int sectorX,
+                  int sectorY, int* background, PartyState* party = nullptr);
+
 private:
+    // GetVeldtBattle: the next of the battles that the party has fought and that the veldt can bring back.
+    int veldtBattle(const BattleData& data, PartyState* party);
+
     int number(const BattleData& data);  // UpdateBattleRng
     int groupNumber(const BattleData& data);  // UpdateBattleGrpRng
 

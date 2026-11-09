@@ -111,6 +111,11 @@ void testEvent() {
         play({0x6B, 0x20, 0x20, 0x29, 0x26, 0x40}, quiet, bits);
         CHECK(quiet.mapChanges.size() == 1 && !quiet.mapChanges[0].startupEvent && !quiet.mapChanges[0].fadeIn);
         CHECK(quiet.fieldCommands.empty());  // and this command does not fade out
+        // The last byte also says whether the party comes out of the map on board a vehicle.
+        test::FakeHost flying;
+        play({0x6B, 0x00, 0x00, 0x20, 0x26, 0x41}, flying, bits);
+        CHECK(flying.mapChanges.size() == 1 && flying.vehicle == FF6_EVENT_MAP_AIRSHIP && !flying.mapChanges[0].fadeIn);
+        CHECK(quiet.vehicle == 0);
         // The first command waits for the fade out to be over.
         const ff6::CommonData common = test::makeCommon(script);
         ff6::EventRunner runner(common, bits);

@@ -29,10 +29,11 @@ import { buildBattleGfx } from './battle/battle_gfx.mjs';
 import { buildAudioData } from './sound/audio_data.mjs';
 import { buildMenuData } from './menu/menu_gfx.mjs';
 import { buildTitleData } from './cutscene/title_opening.mjs';
+import { buildWorldData } from './world/world.mjs';
 
 export const COMMON_MAGIC = 'FF6COMMN';
 export const MAP_MAGIC = 'FF6MAP01';
-export const PACK_VERSION = 13;
+export const PACK_VERSION = 15;
 export const FIRST_FIELD_MAP = 3;  // maps 0-2 are the world maps
 
 class Writer {
@@ -183,6 +184,7 @@ export function writePack(rom, outDir, options = {}) {
     writeFileSync(join(temp, 'battlegfx.ff6data'), buildBattleGfx(rom, PACK_VERSION), { flag: 'wx' });
     writeFileSync(join(temp, 'attackanim.ff6data'), buildAttackAnim(rom, PACK_VERSION), { flag: 'wx' });
     writeFileSync(join(temp, 'title.ff6data'), buildTitleData(rom, PACK_VERSION), { flag: 'wx' });
+    writeFileSync(join(temp, 'world.ff6data'), buildWorldData(rom, PACK_VERSION), { flag: 'wx' });
     const written = [];
     const skipped = [];
     for (let mapId = FIRST_FIELD_MAP; mapId < MAP_COUNT; mapId += 1) {

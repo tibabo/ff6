@@ -39,7 +39,9 @@ InputState SdlInput::sample() {
                          confirmHeld_);
     state.cancel = edge(buttonHeld({SDL_SCANCODE_Z, SDL_SCANCODE_BACKSPACE}, SDL_CONTROLLER_BUTTON_B), cancelHeld_);
     state.menu = edge(buttonHeld({SDL_SCANCODE_X}, SDL_CONTROLLER_BUTTON_X), menuHeld_);
+    state.start = edge(buttonHeld({SDL_SCANCODE_TAB}, SDL_CONTROLLER_BUTTON_START), startHeld_);
     state.direction = direction();
+    state.held = heldButtons();
     return state;
 }
 
@@ -63,6 +65,30 @@ int SdlInput::direction() const {
         if (pressed[direction]) return direction;
     }
     return FF6_NO_DIRECTION;
+}
+
+// Every button that is down, for the airship, which turns and climbs at the same time.
+unsigned SdlInput::heldButtons() const {
+    const Uint8* keys = SDL_GetKeyboardState(nullptr);
+    unsigned held = 0;
+    if (keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_W]) held |= FF6_HELD_UP;
+    if (keys[SDL_SCANCODE_RIGHT] || keys[SDL_SCANCODE_D]) held |= FF6_HELD_RIGHT;
+    if (keys[SDL_SCANCODE_DOWN] || keys[SDL_SCANCODE_S]) held |= FF6_HELD_DOWN;
+    if (keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_A]) held |= FF6_HELD_LEFT;
+    if (buttonHeld({SDL_SCANCODE_RETURN, SDL_SCANCODE_SPACE, SDL_SCANCODE_KP_ENTER}, SDL_CONTROLLER_BUTTON_A)) held |= FF6_HELD_A;
+    if (buttonHeld({SDL_SCANCODE_Q}, SDL_CONTROLLER_BUTTON_LEFTSHOULDER)) held |= FF6_HELD_L;
+    if (buttonHeld({SDL_SCANCODE_E}, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) held |= FF6_HELD_R;
+    if (buttonHeld({SDL_SCANCODE_C}, SDL_CONTROLLER_BUTTON_Y)) held |= FF6_HELD_Y;
+    for (const auto& entry : controllers_) {
+        SDL_GameController* pad = entry.second;
+        const Sint16 x = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX);
+        const Sint16 y = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY);
+        if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_UP) || y < -FF6_STICK_DEAD_ZONE) held |= FF6_HELD_UP;
+        if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || x > FF6_STICK_DEAD_ZONE) held |= FF6_HELD_RIGHT;
+        if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_DOWN) || y > FF6_STICK_DEAD_ZONE) held |= FF6_HELD_DOWN;
+        if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || x < -FF6_STICK_DEAD_ZONE) held |= FF6_HELD_LEFT;
+    }
+    return held;
 }
 
 bool SdlInput::buttonHeld(const std::initializer_list<SDL_Scancode>& keys, SDL_GameControllerButton button) const {

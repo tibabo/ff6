@@ -18,6 +18,7 @@
 #include "data/battle_data.hpp"
 #include "data/game_rules.hpp"
 #include "data/save.hpp"
+#include "data/world_data.hpp"
 #include "field/anim.hpp"
 #include "field/entrance.hpp"
 #include "field/event.hpp"
@@ -33,6 +34,7 @@
 #include "renderer.hpp"
 #include "sound.hpp"
 #include "state/party_ops.hpp"
+#include "world/world_screen.hpp"
 
 namespace ff6 {
 
@@ -90,6 +92,13 @@ public:
     // The title screen or the opening has the screen.
     bool cutsceneOpen() const { return cutscene_ != nullptr; }
     bool loadMenuOpen() const { return loadMenuOpen_; }
+    // The party is on a world map, which has the screen, instead of a map of the field.
+    bool worldOpen() const { return world_ != nullptr; }
+    const WorldScreen* world() const { return world_.get(); }
+    // Where the party is, on whichever kind of map.
+    int partyTileX() const { return world_ ? world_->tileX() : player_.tileX(); }
+    int partyTileY() const { return world_ ? world_->tileY() : player_.tileY(); }
+    bool partyMoving() const { return world_ ? world_->moving() : player_.moving(); }
     // Ends the fades at once, for captures.
     void finishFade();
     // Starts battle number `battle` (0 to 575) over the field, with the background number `background` (-1 for the map's).
@@ -102,6 +111,7 @@ private:
     int dialogueChoiceCount() const override { return dialogue_.choiceCount(); }
     int dialogueChoice() const override { return dialogue_.choice(); }
     void changeMap(uint32_t map, int x, int y, int facing, bool startupEvent, bool fadeIn) override;
+    void setVehicle(int vehicle) override { pendingVehicle_ = vehicle; }
     bool startObjectScript(int object, uint32_t offset) override;
     bool objectBusy(int object) const override;
     void objectCommand(uint8_t op, int object, uint32_t arg) override;
@@ -109,6 +119,10 @@ private:
     Sound& sound() override { return sound_; }
 
     bool loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEvent, bool fadeIn);
+    bool enterWorld(uint32_t mapId, int x, int y, int facing, bool fadeIn);
+    void placeDoomGaze();
+    void tickWorld(const InputState& input);
+    WorldScreen::Lead worldLead() const;
     void initialize(uint32_t startMap, const std::vector<int>& party, const SaveState* save, bool newGame = false);
     void restore(const SaveState& save);
     void startFade(bool in, int speed);
@@ -138,6 +152,7 @@ private:
     void startBattle(int group, int flags);
     void beginBattle(int battle, int flags);
     void launchBattle(int battle, int background);
+    void recordVeldtBattle();
     void checkEncounter();
     void endBattle();
     MenuStatus menuStatus();
@@ -173,6 +188,7 @@ private:
     bool battleOpen_ = false;  // the screen is the battle: it takes the place of the menu
     uint32_t battleSeed_ = 1;
     Encounters encounters_;
+    int lastBattle_ = -1;  // the battle that started last
     int pendingBattle_ = 0;  // the battle that the random battle event starts
     int boxGroup_ = 0;  // the group of the monster in the box that was just opened
     MenuPhase menuPhase_ = MenuPhase::Closed;
@@ -184,6 +200,15 @@ private:
     TitleData titleData_;
     bool titleDataLoaded_ = false;
     std::unique_ptr<Cutscene> cutscene_;  // the title screen or the opening, which take the screen like the menu does
+    WorldData worldData_;
+    bool worldDataLoaded_ = false;
+    std::unique_ptr<WorldScreen> world_;  // the world map, which takes the place of the field
+    int airshipX_ = 0, airshipY_ = 0;  // the tile of the world map where the airship is parked
+    int pendingVehicle_ = 0;  // what the map that is going to load has the party on: FF6_EVENT_MAP_AIRSHIP
+    bool flightSaved_ = false;  // the party is on the deck of the airship, which flies on
+    int flightAngle_ = 0, flightAltitude_ = 0;
+    int doomGazeCounter_ = 0;
+    bool doomGazeBattle_ = false;  // the battle that is open is Doom Gaze
     LoadMenu loadMenu_;
     bool loadMenuOpen_ = false;
     bool restoreRequested_ = false;  // the event asked for the saved game: it is loaded once the event is out of the way

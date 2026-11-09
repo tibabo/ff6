@@ -38,6 +38,8 @@ public:
     virtual int dialogueChoice() const = 0;  // the choice the player made in it
     // `startupEvent`: the map runs its startup event once it is loaded; `fadeIn`: the screen fades in after it.
     virtual void changeMap(uint32_t map, int x, int y, int facing, bool startupEvent, bool fadeIn) = 0;
+    // The vehicle that the party is on when the map that changeMap loads is a world map (FF6_EVENT_MAP_AIRSHIP, ...).
+    virtual void setVehicle(int /*vehicle*/) {}
     // The object runs the script that starts at `offset` of the event script. False when it cannot.
     virtual bool startObjectScript(int object, uint32_t offset) = 0;
     virtual bool objectBusy(int object) const = 0;  // it runs a script or walks

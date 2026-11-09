@@ -68,6 +68,12 @@ ff6::SaveState sampleState() {
     state.party.steps = 4321;
     state.party.treasures[11] = true;
     state.party.treasures[511] = true;
+    state.party.veldtBattles[17] = true;
+    state.party.veldtBattles[511] = true;
+    state.party.veldtPointer = 63;
+    state.doomGazeCounter = 99;
+    state.airshipX = 137;
+    state.airshipY = 199;
     state.party.spells[0][45] = true;
     state.party.spells[6][1] = true;
     state.party.espers[3] = true;
@@ -117,6 +123,8 @@ void testSave() {
     CHECK(back.party.inventory[1].item == 0 && back.party.inventory[1].quantity == 99);
     CHECK(back.party.inventory[2].item == FF6_ITEM_EMPTY);
     CHECK(back.party.treasures[11] && back.party.treasures[511] && !back.party.treasures[12]);
+    CHECK(back.airshipX == 137 && back.airshipY == 199 && back.doomGazeCounter == 99);
+    CHECK(back.party.veldtBattles[17] && back.party.veldtBattles[511] && !back.party.veldtBattles[18] && back.party.veldtPointer == 63);
     CHECK(back.party.spells[0][45] && back.party.spells[6][1] && !back.party.spells[0][1] && !back.party.spells[1][45]);
     CHECK(back.party.espers[3] && !back.party.espers[4] && back.party.swordtechs == 0x0F && back.party.blitzes == 0x81);
     CHECK(!ff6::saveFromJson(ff6::saveToJson(ff6::SaveState())).hasParty);  // an older save has none

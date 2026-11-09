@@ -28,6 +28,8 @@ struct SaveState {
     std::array<int, FF6_SPRITE_PALETTE_SLOTS> spritePalettes{0, 1, 2, 3, 4, 5, 6, 7};  // palette of each slot
     bool hasParent = false;  // the map that the party goes back to from a house
     int parentMap = 0, parentX = 0, parentY = 0, parentFacing = 0;
+    int doomGazeCounter = 0;  // where the squares of Doom Gaze come from in the table of random numbers
+    int airshipX = 0, airshipY = 0;  // the tile of the world map where the airship is parked
     std::array<int, 3> config{FF6_CONFIG_BATTLE_DEFAULT, 0, 0};  // the bytes of GameConfig; a save without them has the defaults
     // The colors that the player chose; without them the font is white and the windows have the colors of the ROM.
     bool hasColors = false;

@@ -126,7 +126,7 @@
 #define FF6_PACK_MAGIC_SIZE 8
 #define FF6_COMMON_MAGIC "FF6COMMN"
 #define FF6_MAP_MAGIC "FF6MAP01"
-#define FF6_PACK_VERSION 13
+#define FF6_PACK_VERSION 15
 #define FF6_COMMON_FILE "common.ff6data"
 #define FF6_MAP_DIR "maps"
 #define FF6_MAP_FILE_EXTENSION ".ff6map"
@@ -389,6 +389,8 @@
 #define FF6_EVENT_SOUND_WAIT_LIMIT 3600  // and for the sound program
 #define FF6_EVENT_MAP_STARTUP_FLAG 0x80  // in the last byte of the load map commands
 #define FF6_EVENT_MAP_NO_FADE_IN_FLAG 0x40
+#define FF6_EVENT_MAP_VEHICLE_MASK 0x03  // the party comes out on the world map on board: 1 the airship, 2 a chocobo
+#define FF6_EVENT_MAP_AIRSHIP 1
 #define FF6_EVENT_FADE_IN_SPEED 0x59  // speed
 #define FF6_EVENT_FADE_OUT_SPEED 0x5A  // speed
 #define FF6_EVENT_FADE_STOP 0x5B
@@ -1419,3 +1421,70 @@
 #define FF6_EVENT_OBJ_VEHICLE 0x44
 #define FF6_VEHICLE_SPRITE_SIZE 16  // the vehicles are made of sprites of 16 x 16 pixels
 #define FF6_VEHICLE_MAGITEK_VARIANTS 16  // four facings, four steps
+
+// ---- World maps (world.ff6data) -----------------------------------------------------------------------------
+#define FF6_WORLD_FILE "world.ff6data"
+#define FF6_WORLD_MAGIC "FF6WRLD1"
+#define FF6_WORLD_COUNT 2  // the world of balance and the world of ruin
+#define FF6_WORLD_SIZE 256  // tiles on a side: the maps are 256 x 256 tiles of 16 x 16 pixels
+#define FF6_WORLD_TILEMAP_BYTES 0x10000
+#define FF6_WORLD_FORMATION_BYTES 0x400  // the four characters of each of the 256 tiles
+#define FF6_WORLD_CHR_BYTES 0x4000  // 256 mode 7 characters of 8 x 8 pixels, a byte for each
+#define FF6_WORLD_PALETTE_COLORS 128
+#define FF6_WORLD_TILE_PROPS 256
+#define FF6_WORLD_MINIMAP_BYTES 0x800
+#define FF6_WORLD_MISC_SPRITE_BYTES 0x1800
+#define FF6_WORLD_BATTLE_GROUP_BYTES 0x200
+#define FF6_WORLD_BATTLE_RATE_BYTES 0x80
+#define FF6_WORLD_SHORT_ENTRANCE_SIZE 6
+#define FF6_WORLD_EVENT_TRIGGER_SIZE 5
+#define FF6_WORLD_SPRITE_COUNT 52  // the mini-map takes the sprites 0 to 19, the character or the airship the others
+#define FF6_WORLD_MAP_LINES 224
+#define FF6_WORLD_SCALE_TOP 0x9000  // $8b: the scale of the first line, which the battle zoom changes
+#define FF6_WORLD_DIVISOR_START 0x8FFF  // $8d: the divisor of the first line, in 8.8 fixed point
+#define FF6_WORLD_DIVISOR_END 0xFFFF  // $8f
+#define FF6_WORLD_BORDER 8  // the columns at each side of the screen that the window hides
+#define FF6_WORLD_BATTLE_SFX 0xC1
+#define FF6_WORLD_ZOOM_STEPS 34
+#define FF6_WORLD_BATTLE_BACKGROUNDS {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 0x2F, 3, 5, 5, 6, 7}  // WorldBattleBGTbl: eight for each world
+#define FF6_WORLD_BACKGROUND_RATE_SHIFTS {3, 2, 1, 2, 3, 0, 3, 3}  // BattleBGRateTbl
+#define FF6_WORLD_BACKGROUND_GROUPS {0, 1, 2, 1, 0, 3, 0, 0}  // BattleBGGroupTbl
+#define FF6_WORLD_NO_BATTLE_RATE 3
+#define FF6_WORLD_RATES {0x00C0, 0x0060, 0x0180, 0x0000}  // WorldBattleRateTbl, without the charms
+#define FF6_WORLD_VELDT_GROUP 0xFF
+#define FF6_VELDT_BATTLE_COUNT 512  // the battles that the veldt can bring up: a bit for each
+#define FF6_BATTLE_AUX_NOT_ON_VELDT 0x0200  // in the second word of the properties of a battle
+#define FF6_WORLD_TILE_BLOCKED 0x0010  // WorldTileProp: the party cannot walk on it
+#define FF6_WORLD_TILE_FOREST 0x0020
+#define FF6_WORLD_TILE_BATTLE 0x0040  // random battles happen on it
+#define FF6_EVENT_BIT_WORLD_ALT_SONG 0x1B8
+#define FF6_EVENT_BIT_AIRSHIP_VISIBLE 0x1B9  // the airship is on the world map, where it was parked
+#define FF6_EVENT_BIT_AIRSHIP_GROUND 0x1BA  // boarding it starts a scene of the story instead of a flight
+#define FF6_EVENT_BIT_VELDT 0x1BB
+#define FF6_EVENT_BIT_KEEP_SONG 0x1CC
+#define FF6_EVENT_BIT_FLOATING_LIFTED 0x9E
+#define FF6_SONG_TERRA 0x06
+#define FF6_SONG_VELDT 0x19
+#define FF6_SONG_DARK_WORLD 0x4F
+#define FF6_SONG_SEARCHING_FOR_FRIENDS 0x4C
+#define FF6_EVENT_SCRIPT_GAME_OVER 0x2E566  // the scene that follows a lost battle, called by the event of the random battles
+#define FF6_BATTLE_FLAG_DEFEATED 0x40  // set when the party lost, for the events that follow a battle
+#define FF6_BATTLE_FLAG_DOOM_GAZE_DEFEATED 0x48  // battle flag 1 of $1dd2: no more Doom Gaze
+#define FF6_DOOM_GAZE_BATTLE_GROUP 93  // of the event battles
+#define FF6_BATTLE_BG_AIRSHIP_WOR 0x29
+#define FF6_EVENT_SCRIPT_DOOM_GAZE_DEFEATED 0x96  // of the airship scripts, in the event script
+#define FF6_DOOM_GAZE_COUNTER_STEP 3  // $1f6d, the place in the table of random numbers that its squares come from, at each load
+#define FF6_WORLD_ANIM_FRAMES 108
+#define FF6_WORLD_ANIM_DATA_BYTES 0x13D6
+#define FF6_WORLD_ANIM_GFX_BYTES 0x800
+#define FF6_WORLD_AIRSHIP_GFX_BYTES 0x1800
+#define FF6_WORLD_BACKDROP_GFX_BYTES 0x2000
+#define FF6_WORLD_BACKDROP_TILES_BYTES 0x1000
+#define FF6_HELD_UP (1u << 0)  // InputState::held: the directions as the Facing values number them, then the buttons
+#define FF6_HELD_RIGHT (1u << 1)
+#define FF6_HELD_DOWN (1u << 2)
+#define FF6_HELD_LEFT (1u << 3)
+#define FF6_HELD_A (1u << 4)
+#define FF6_HELD_L (1u << 5)
+#define FF6_HELD_R (1u << 6)
+#define FF6_HELD_Y (1u << 7)

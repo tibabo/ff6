@@ -14,6 +14,12 @@ void fillTarget(uint16_t mapWord, int destX, int destY, EntranceTarget* target) 
 
 }  // namespace
 
+EntranceTarget makeEntranceTarget(uint16_t mapWord, int destX, int destY) {
+    EntranceTarget target;
+    fillTarget(mapWord, destX, destY, &target);
+    return target;
+}
+
 bool checkEntrances(const MapData& map, int tileX, int tileY, EntranceTarget* target) {
     const std::vector<uint8_t>& longs = map.longEntrances;
     for (size_t i = 0; i + FF6_LONG_ENTRANCE_SIZE <= longs.size(); i += FF6_LONG_ENTRANCE_SIZE) {

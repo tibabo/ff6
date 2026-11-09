@@ -14,6 +14,9 @@ struct EntranceTarget {
     bool toParent = false;  // go back to the parent map instead
 };
 
+// What the map word of an entrance, and the tile that it leads to, ask for.
+EntranceTarget makeEntranceTarget(uint16_t mapWord, int destX, int destY);
+
 // Port of CheckLongEntrance and CheckShortEntrance: the entrance that the party standing on a tile triggers.
 bool checkEntrances(const MapData& map, int tileX, int tileY, EntranceTarget* target);
 

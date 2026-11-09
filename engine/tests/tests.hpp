@@ -33,5 +33,6 @@ void testLoadMenu();
 void testPpu();
 void testCutsceneCore();
 void testCutsceneScenes();
+void testWorld();
 void testParty();
 void testGame();

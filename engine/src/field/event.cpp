@@ -205,7 +205,9 @@ bool EventRunner::step(EventHost& host) {
         const int facing = (word >> FF6_ENTRANCE_FACING_SHIFT) & FF6_NPC_DIR_MASK;
         const bool startup = (byteAt(5) & FF6_EVENT_MAP_STARTUP_FLAG) != 0;
         const bool fadeIn = (byteAt(5) & FF6_EVENT_MAP_NO_FADE_IN_FLAG) == 0;
+        const int vehicle = byteAt(5) & FF6_EVENT_MAP_VEHICLE_MASK;
         next();  // the event goes on after the map is loaded, once its startup event is over
+        host.setVehicle(vehicle);
         host.changeMap(map, x, y, facing, startup, fadeIn);
         return false;
     }

@@ -1,5 +1,4 @@
 # FF6 : premiers outils pour un port natif
-
 Ce projet contient des outils de validation et d'extraction, ainsi qu'un premier
 prototype de moteur natif en C++ (voir "Moteur natif"). Ce n'est pas un
 emulateur : aucune instruction 65816 n'est executee. Le jeu complet n'est pas
@@ -181,11 +180,15 @@ doit se trouver a cote de lui (vcpkg l'y copie normalement).
 d'evenements), `audio.ff6data` (echantillons BRR, enveloppes et scripts des
 musiques), `menu.ff6data` (police et palettes des menus, main du curseur,
 portraits, descriptions des objets, noms des magies, esprits et techniques), `game.ff6data` (proprietes des personnages, des objets et des
-boutiques, tables de niveaux et d'apprentissage), `battle.ff6data` (monstres, noms, objets laches, formations et groupes de combats), `battlegfx.ff6data` (images, palettes et pochoirs des monstres, fonds de combat, poses des personnages), `attackanim.ff6data` (scripts, images et palettes des animations de sorts et d'armes), `title.ff6data` (programme des cinematiques, graphismes du titre et de l'ouverture, tables de hasard et de sinus) et une carte par fichier dans `maps/` ; il n'ecrase jamais un
+boutiques, tables de niveaux et d'apprentissage), `battle.ff6data` (monstres, noms, objets laches, formations et groupes de combats), `battlegfx.ff6data` (images, palettes et pochoirs des monstres, fonds de combat, poses des personnages), `attackanim.ff6data` (scripts, images et palettes des animations de sorts et d'armes), `title.ff6data` (programme des cinematiques, graphismes du titre et de l'ouverture, tables de hasard et de sinus), `world.ff6data` (les deux cartes du monde :
+tuiles, graphismes, palettes, proprietes des tuiles, mini-cartes, modifications
+selon les evenements, entrees, declencheurs, groupes et taux de combats, puis les
+sprites animes, le Blackjack et le Falcon, le ciel des vols) et une
+carte par fichier dans `maps/` ; il n'ecrase jamais un
 dossier existant. `--text` utilise un `dialogues.json` modifie. Un caractere
 absent de la police de la ROM, par exemple un accent, provoque une erreur
 explicite. Le pack contient des donnees du jeu : ne pas le distribuer. Le format
-est versionne (version 13 : titre, ouverture et vehicules) ; un ancien pack
+est versionne (version 15 : cartes du monde et dirigeable) ; un ancien pack
 doit etre regenere.
 
 Controles :
@@ -195,6 +198,11 @@ Controles :
 | Deplacement | Fleches / WASD | Croix ou stick gauche |
 | Parler / valider | Entree / Espace | A (bouton du bas) |
 | Menu | X | X |
+| Mini-carte du monde | Tab | Start |
+| Dirigeable : accelerer | Entree / Espace | A |
+| Dirigeable : tourner, monter, descendre | Gauche et droite, bas pour monter, haut pour descendre | Croix ou stick |
+| Dirigeable : virages serres, pas lateral | Q / E avec gauche / droite, C avec la croix | L / R avec la croix, Y avec la croix |
+| Dirigeable : atterrir, pont | Z, X | B, X |
 | Annuler | Z / Retour arriere | B |
 | Echelle entiere | F10 | |
 | Sauvegarder | F5 | |
@@ -221,8 +229,36 @@ Limites actuelles :
   sans cadre et ne bloquent pas l'evenement, mais restent a l'ecran jusqu'a
   une pression de la touche de validation.
 
-- Decor : pas d'animation de palette, pas de cartes du monde (0 a 2). La
-  transparence (mathematiques de couleur : addition, soustraction, moitie)
+- Cartes du monde : le monde de l'Equilibre et le monde de la Ruine sont
+  dessines comme sur la console, en mode 7 avec la perspective que la matrice
+  de chaque ligne donne (`engine/src/world/world_screen.cpp`, sur le processeur
+  d'image de `cutscene/ppu.cpp`) : les 64 x 64 tuiles autour du groupe, les
+  bords masques, le personnage (transparent a moitie dans les forets), la
+  mini-carte, l'eau et ses couleurs qui tournent. Le groupe marche d'une tuile
+  en 16 images, les cases bloquees l'arretent, les entrees menent aux cartes du
+  champ (et on revient sur la tuile d'ou l'on est entre), les declencheurs
+  jouent le script du monde (sauts conditionnels, bits, deplacements droits et
+  en diagonale, pauses, changement de carte) et les combats aleatoires suivent
+  la table du secteur
+  (celui ou la carte a ete chargee, comme dans le jeu) avec le zoom du jeu avant
+  le combat ; sur le Veldt, ils rejouent les combats deja livres (la liste est
+  sauvegardee). Le dirigeable (`world/world_flight.cpp`) est pose sur sa tuile
+  (Entree dessus pour decoller, ou la scene du jeu quand elle est prevue) ; le
+  vol est celui du jeu : mode 7 tourne selon le cap, ciel de la seconde couche
+  avec l'horizon qui bouge, vitesse, virage et montee de la console, ombre,
+  helices, mini-carte, transitions du decollage et de l'atterrissage, atterrissage
+  refuse sur l'eau et les montagnes, Tour de Kefka et caverne du Phenix,
+  pont (X) qui garde le cap et l'altitude pour le retour, pas lateral (Y),
+  ciel qui s'incline dans les virages, Doom Gaze (le combat se lance en tenant
+  les moteurs sur l'un de ses deux carres du monde de la Ruine, tires de la
+  table de hasard et changes a chaque chargement, puis la scene de la magicite
+  ; sa victoire est retenue dans les drapeaux de combat) et position du
+  dirigeable sauvegardee. Manquent le chocobo, le train fantome et leurs
+  scripts, la Fosse du Serpent (carte 2), le poison a chaque pas (le moteur ne
+  garde pas les etats des personnages) et les commandes du script du monde qui
+  deplacent ou dessinent autre chose que le personnage.
+- Decor : la transparence (mathematiques de couleur : addition, soustraction,
+  moitie)
   est reproduite pour bg1/bg2/bg3 et les sprites, avec la couleur fixe a zero.
   Les portes s'ouvrent quand le groupe marche vers elles (haut ou bas), avec
   leur bruit ; une porte ouverte redevient fermee si la carte est rechargee.
@@ -231,7 +267,7 @@ Limites actuelles :
   executes, y compris pendant les evenements. Les vehicules des cartes (chocobo,
   armure Magitek, radeau), avec ou sans passager, viennent des donnees des PNJ
   et des commandes d'evenement et d'objet ; ceux de la carte du monde
-  (aeronefs) n'existent pas, faute de carte du monde. PNJ a graphismes
+  (chocobo du monde) ne sont pas portes ; le dirigeable l'est. PNJ a graphismes
   speciaux et animations speciales sont ignores ; le hasard n'est pas celui de
   la console.
 - Evenements : sont executes les dialogues, les choix, les interrupteurs, les
@@ -321,8 +357,10 @@ Limites actuelles :
   des diablotins, et les icones de statut (le nom du personnage change de couleur : gris a terre, jaune quand il est pret, bleu-vert avec un statut) ;
   les positions sont a peu pres celles des menus. Gauche dans le menu des
   commandes ouvre la fenetre de Row et Defend, droite celle de Run, qui remplace le maintien des
-  boutons (Annuler l'arrete) ; une defaite affiche un ecran GAME OVER noir puis
-  remet le groupe debout avec tous ses PV, faute de titre.
+  boutons (Annuler l'arrete) ; une defaite affiche un ecran GAME OVER noir puis,
+  avec une sauvegarde a recharger, la scene de fin de partie de l'histoire et le
+  retour a cette sauvegarde ; sans sauvegarde, elle remet le groupe debout avec
+  tous ses PV.
   Magie, objets et statuts (`battle/action.cpp`) suivent la table des attaques
   du jeu (cible, element, drapeaux, puissance, taux de touche, statuts) : degats
   de magie `puissance x 4 + niveau x pouvoir magique x puissance / 32` avec
@@ -368,7 +406,7 @@ Limites actuelles :
   suivi d'un vol s'il blesse), GP Rain (niveau x 30 gils, doubles en degats
   et partages entre les cibles) et Possess (6 fois sur 10 ; le monstre et le
   personnage quittent le combat) suivent les formules du jeu.
-  Rencontres aleatoires des cartes (hors carte du monde) : a chaque pas, un
+  Rencontres aleatoires des cartes du champ (celles du monde ont leur propre table) : a chaque pas, un
   compteur grandit du taux de la carte, et un combat de son groupe commence quand
   un nombre de la table du jeu passe sous son octet haut, par l'evenement du jeu
   (commande 0x4E). Les charmes qui changent le taux ne sont pas lus, et le
@@ -510,12 +548,12 @@ genere par `build-pack`, pour leurs tests sur les vraies donnees.
 ## Perimetre restant
 
 - Reconstruction binaire de la ROM via le desassemblage de reference.
-- Cartes du monde, animation de palette et autres textes.
+- Cartes du monde a pied et dirigeable sont portes ; restent le chocobo du monde, le train, la Fosse du Serpent et les textes.
 - Commandes d'evenements restantes (defilements, changements de decor
   anime, eclairs, tremblements, filtres de couleur, mosaique).
 - Portage natif des menus et combats ; soins d'etat,
   tente et sac de couchage, esprits equipes, Lore/Rage/Dance, Rmove/Empty/
-  Optimum, rencontres de la carte du monde, graphismes et animations des
+  Optimum, graphismes et animations des
   combats, commandes de combat autres que Fight, Magic, Item, Steal,
   SwdTech, Blitz, Defend et Row.
 - Audio natif sans emulation du SPC700 : mode mono.

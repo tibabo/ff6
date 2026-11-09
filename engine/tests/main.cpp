@@ -36,6 +36,7 @@ int main() {
     testPpu();
     testCutsceneCore();
     testCutsceneScenes();
+    testWorld();
     testParty();
     testGame();
     if (test::failures != 0) {

@@ -192,6 +192,8 @@ struct FakeHost : ff6::EventHost {
     void changeMap(uint32_t map, int x, int y, int facing, bool startupEvent, bool fadeIn) override {
         mapChanges.push_back({map, x, y, facing, startupEvent, fadeIn});
     }
+    int vehicle = 0;  // what the last map change said that the party is on
+    void setVehicle(int value) override { vehicle = value; }
     bool fading() const override { return fadeBusy; }
     bool startObjectScript(int object, uint32_t offset) override {
         scripts.push_back({object, offset});

@@ -15,6 +15,7 @@ add_library(ff6_core STATIC
   src/data/pack.cpp
   src/data/save.cpp
   src/data/title_data.cpp
+  src/data/world_data.cpp
   src/cutscene/core.cpp
   src/cutscene/opening.cpp
   src/cutscene/ppu.cpp
@@ -44,6 +45,8 @@ add_library(ff6_core STATIC
   src/menu/shop_menu.cpp
   src/menu/window_style.cpp
   src/state/char_stats.cpp
+  src/world/world_screen.cpp
+  src/world/world_flight.cpp
   src/battle/battle.cpp
   src/battle/action.cpp
   src/battle/ai.cpp
@@ -114,7 +117,8 @@ if(BUILD_TESTING)
     tests/cutscene/ppu_tests.cpp
     tests/cutscene/core_tests.cpp
     tests/cutscene/scene_tests.cpp
-    tests/state/party_tests.cpp)
+    tests/state/party_tests.cpp
+    tests/world/world_tests.cpp)
   target_link_libraries(ff6_tests PRIVATE ff6_game ff6_audio)
   add_test(NAME ff6_tests COMMAND ff6_tests)
 endif()

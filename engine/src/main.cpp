@@ -72,7 +72,7 @@ void captureFrame(ff6::Game& game, ff6::SdlRenderer& renderer, const Capture& ca
         const char* found = std::strchr(letters, move);
         if (!found || move == '\0') throw std::runtime_error("--moves only accepts U, R, D and L");
         game.tick({static_cast<int>(found - letters), false});
-        for (int frame = 0; frame < FF6_CAPTURE_MAX_STEP_FRAMES && game.player().moving(); ++frame) {
+        for (int frame = 0; frame < FF6_CAPTURE_MAX_STEP_FRAMES && game.partyMoving(); ++frame) {
             game.tick({FF6_NO_DIRECTION, false});
         }
     }
@@ -118,7 +118,7 @@ void captureFrame(ff6::Game& game, ff6::SdlRenderer& renderer, const Capture& ca
     }
     game.draw();
     renderer.saveFrame(capture.path);
-    std::printf("Saved %s (tile %d,%d)\n", capture.path.c_str(), game.player().tileX(), game.player().tileY());
+    std::printf("Saved %s (tile %d,%d)\n", capture.path.c_str(), game.partyTileX(), game.partyTileY());
 }
 
 // Fixed-step loop: the game advances FF6_FRAMES_PER_SECOND times per second whatever the display rate.

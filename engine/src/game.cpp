@@ -106,6 +106,10 @@ void Game::restore(const SaveState& save) {
     }
     objects_.restoreParty(save.activeParty);
     for (size_t i = 0; i < spritePalette_.size(); ++i) spritePalette_[i] = save.spritePalettes[i];
+    doomGazeCounter_ = save.doomGazeCounter;
+    airshipX_ = save.airshipX;
+    airshipY_ = save.airshipY;
+    flightSaved_ = false;
     hasParent_ = save.hasParent;
     parentMap_ = static_cast<uint32_t>(save.parentMap);
     parentX_ = save.parentX;
@@ -124,10 +128,10 @@ void Game::restore(const SaveState& save) {
 
 SaveState Game::saveState() const {
     SaveState save;
-    save.map = static_cast<int>(map_.id);
-    save.x = player_.tileX();
-    save.y = player_.tileY();
-    save.facing = player_.facing();
+    save.map = world_ ? world_->world() : static_cast<int>(map_.id);
+    save.x = partyTileX();
+    save.y = partyTileY();
+    save.facing = world_ ? world_->facing() : player_.facing();
     save.activeParty = objects_.activeParty();
     for (size_t i = 0; i < save.characters.size(); ++i) {
         const Npc& character = objects_.characters()[i];
@@ -146,6 +150,9 @@ SaveState Game::saveState() const {
     save.eventBits = bits_.setIds();
     save.battleFlags = bits_.battleSetIds();
     for (size_t i = 0; i < spritePalette_.size(); ++i) save.spritePalettes[i] = spritePalette_[i];
+    save.doomGazeCounter = doomGazeCounter_;
+    save.airshipX = world_ ? world_->airshipX() : airshipX_;
+    save.airshipY = world_ ? world_->airshipY() : airshipY_;
     save.hasParent = hasParent_;
     save.parentMap = static_cast<int>(parentMap_);
     save.parentX = parentX_;
@@ -223,11 +230,13 @@ void Game::startEvent(uint32_t offset) {
 }
 
 bool Game::loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEvent, bool fadeIn) {
-    if (mapId < FF6_FIRST_FIELD_MAP || !mapExists(packDir_, mapId)) {
+    if (mapId < FF6_FIRST_FIELD_MAP) return enterWorld(mapId, x, y, facing, fadeIn);
+    if (!mapExists(packDir_, mapId)) {
         std::fprintf(stderr, "map %u is not available in the data pack\n", static_cast<unsigned>(mapId));
         return false;
     }
     MapData next = loadMap(packDir_, mapId);
+    world_.reset();
     const bool inEvent = event_.running();  // an event that loads a map goes on once it is loaded
     map_ = std::move(next);
     showOpenedTreasures();
@@ -327,6 +336,117 @@ void Game::appendItemName(int item) {
 
 void Game::changeMap(uint32_t map, int x, int y, int facing, bool startupEvent, bool fadeIn) {
     loadMapNow(map, x, y, facing, startupEvent, fadeIn);
+    pendingVehicle_ = 0;
+}
+
+// The sprite sheet and the palette of the character that leads the party, for the world map.
+WorldScreen::Lead Game::worldLead() const {
+    const Npc* lead = objects_.lead();
+    if (!lead) return {};
+    return {lead->prop.gfx, spritePalette_[static_cast<size_t>(lead->prop.palette) & (FF6_SPRITE_PALETTE_SLOTS - 1)]};
+}
+
+// LoadWorld: the party is on a world map. The event that was running does not follow it there.
+bool Game::enterWorld(uint32_t mapId, int x, int y, int facing, bool fadeIn) {
+    if (mapId >= FF6_WORLD_COUNT) {
+        std::fprintf(stderr, "map %u is not available in the data pack\n", static_cast<unsigned>(mapId));
+        return false;
+    }
+    if (!worldDataLoaded_) {
+        worldData_ = loadWorldData(packDir_);
+        worldDataLoaded_ = true;
+    }
+    if (!world_) {
+        WorldHooks hooks;
+        hooks.bit = [this](int id) { return bits_.get(id); };
+        hooks.setBit = [this](int id, bool value) { bits_.set(id, value); };
+        hooks.step = [this] { countStep(state_); };
+        hooks.encounter = [this](int world, int tileBackground, int sectorX, int sectorY, int* background) {
+            return encounters_.stepWorld(battleData_, worldData_, world, tileBackground, sectorX, sectorY, background, &state_);
+        };
+        world_ = std::make_unique<WorldScreen>(worldData_, common_, sound_, hooks);
+    }
+    if (x < 0) {  // no place given: the middle of the map
+        x = FF6_WORLD_SIZE / 2;
+        y = FF6_WORLD_SIZE / 2;
+    }
+    event_.stop();
+    dialogue_.open({}, common_.fontWidths, false);
+    screenLocked_ = false;
+    restorePending_ = false;
+    eventWasRunning_ = false;
+    leaving_ = false;
+    const bool flying = pendingVehicle_ == FF6_EVENT_MAP_AIRSHIP || (flightSaved_ && pendingVehicle_ < 0);
+    pendingVehicle_ = 0;
+    world_->setAirship(airshipX_, airshipY_);
+    if (flying) {
+        world_->enterFlying(static_cast<int>(mapId), x, y, facing, worldLead(), flightAngle_, flightAltitude_);
+        world_->setAirship(airshipX_, airshipY_);
+    } else {
+        world_->enter(static_cast<int>(mapId), x, y, facing, worldLead());
+    }
+    flightSaved_ = false;
+    placeDoomGaze();
+    brightness_ = 0;
+    fade_ = 0;
+    fadeInPending_ = false;
+    if (fadeIn) startFade(true, FF6_BRIGHTNESS_STEP);
+    return true;
+}
+
+// InitWorld for the airship: Doom Gaze waits in two squares of 4 x 4 tiles that the table of random numbers gives, which
+// change each time that the map loads.
+void Game::placeDoomGaze() {
+    const std::vector<uint8_t>& rng = battleData_.rngTable;
+    doomGazeCounter_ = (doomGazeCounter_ + FF6_DOOM_GAZE_COUNTER_STEP) & 0xFF;
+    if (rng.size() < 0x100) return;
+    const auto at = [&](int offset) { return rng[static_cast<size_t>((doomGazeCounter_ + offset) & 0xFF)]; };
+    world_->setDoomGaze(!bits_.battle(FF6_BATTLE_FLAG_DOOM_GAZE_DEFEATED), at(0) & 0x3F, at(1) >> 2, at(1) & 0x3F, at(2) >> 2);
+}
+
+// What one frame of the world map does besides the walk: the menu, the entrances and the battles take the screen.
+void Game::tickWorld(const InputState& input) {
+    updateBrightness();
+    if (event_.running()) {  // a story event that began on the world map, which can take the party elsewhere
+        event_.update(*this);
+        if (!world_) return;
+    }
+    if (leaving_) {
+        if (!fading()) {
+            leaving_ = false;
+            leaveThroughEntrance(leaveTarget_);
+        }
+        return;
+    }
+    world_->tick(input);
+    airshipX_ = world_->airshipX();
+    airshipY_ = world_->airshipY();
+    if (world_->takeMenuRequest()) {
+        menuPhase_ = MenuPhase::FadingOut;
+        startFade(false, FF6_BRIGHTNESS_STEP);
+        return;
+    }
+    EntranceTarget target;
+    const bool onDeck = world_->flying() && world_->keepsFlying();
+    if (onDeck) {
+        flightAngle_ = world_->flightAngle();
+        flightAltitude_ = world_->flightAltitude();
+    }
+    if (world_->takeEntrance(&target)) {
+        flightSaved_ = onDeck;
+        airshipX_ = world_->airshipX();
+        airshipY_ = world_->airshipY();
+        leaving_ = true;
+        leaveTarget_ = target;
+        startFade(false, FF6_BRIGHTNESS_STEP);
+        return;
+    }
+    int group = 0, background = 0;
+    if (world_->takeBattle(&group, &background)) launchBattle(group, background);
+    if (world_->takeDoomGaze()) {
+        launchBattle(battleData_.eventBattle(FF6_DOOM_GAZE_BATTLE_GROUP, 0), FF6_BATTLE_BG_AIRSHIP_WOR);
+        doomGazeBattle_ = battleOpen_;
+    }
 }
 
 // FadeIn and FadeOut: a fade in starts from one step of brightness, a fade out from full brightness.
@@ -548,8 +668,12 @@ void Game::changeMapData(const uint8_t* bytes, size_t size) {
 void Game::leaveThroughEntrance(const EntranceTarget& target) {
     if (target.toParent) {
         if (!hasParent_) return;
-        const int facing = (parentFacing_ + 2) % FF6_DIRECTION_COUNT;  // step back out of the door
-        if (loadMapNow(parentMap_, parentX_ + kDeltaX[facing], parentY_ + kDeltaY[facing], facing, true, true)) hasParent_ = false;
+        const bool toWorld = parentMap_ < FF6_FIRST_FIELD_MAP;  // the party comes out on the tile of the world map that it entered from
+        const int facing = toWorld ? parentFacing_ : (parentFacing_ + 2) % FF6_DIRECTION_COUNT;  // step back out of the door
+        const int stepX = toWorld ? 0 : kDeltaX[facing], stepY = toWorld ? 0 : kDeltaY[facing];
+        if (toWorld && flightSaved_) pendingVehicle_ = -1;  // back from the deck: the airship still flies
+        if (loadMapNow(parentMap_, parentX_ + stepX, parentY_ + stepY, facing, true, true)) hasParent_ = false;
+        pendingVehicle_ = 0;
         return;
     }
     const bool hadParent = hasParent_;
@@ -557,10 +681,10 @@ void Game::leaveThroughEntrance(const EntranceTarget& target) {
     const int previousX = parentX_, previousY = parentY_, previousFacing = parentFacing_;
     if (target.setParent) {
         hasParent_ = true;
-        parentMap_ = map_.id;
-        parentX_ = player_.tileX();
-        parentY_ = player_.tileY();
-        parentFacing_ = player_.facing();
+        parentMap_ = world_ ? static_cast<uint32_t>(world_->world()) : map_.id;
+        parentX_ = partyTileX();
+        parentY_ = partyTileY();
+        parentFacing_ = world_ ? world_->facing() : player_.facing();
     }
     if (!loadMapNow(target.map, target.x, target.y, target.facing, true, true) && target.setParent) {
         hasParent_ = hadParent;
@@ -711,6 +835,10 @@ void Game::tick(const InputState& input) {
         tickMenu(input);
         return;
     }
+    if (world_) {
+        tickWorld(input);
+        return;
+    }
     anim_.update(map_, frame_);
     updateBrightness();
     if (leaving_ && !fading()) {
@@ -778,6 +906,10 @@ void Game::tick(const InputState& input) {
 }
 
 void Game::placeParty(int tileX, int tileY) {
+    if (world_) {
+        world_->enter(world_->world(), tileX, tileY, world_->facing(), worldLead());
+        return;
+    }
     player_.place(map_, tileX, tileY, player_.facing());
     objects_.placeParty(tileX, tileY);
     if (Npc* lead = objects_.lead()) copyPlayerToLead(*lead);
@@ -1004,6 +1136,8 @@ void Game::launchBattle(int battle, int background) {
     battleSeed_ = battleSeed_ * FF6_BATTLE_SEED_STEP + frame_ + 1;
     BattleRandom random(battleSeed_);
     if (battle & FF6_BATTLE_RANDOM_FLAG) battle = (battle & ~FF6_BATTLE_RANDOM_FLAG) + random.below(FF6_BATTLE_RANDOM_SPAN);
+    lastBattle_ = battle;
+    bits_.setBattle(FF6_BATTLE_FLAG_DEFEATED, false);
     battleScreen_.start(battleData_, rules_, state_, characters, battle, battleSeed_, config_.battleSpeed(),
                         (config_.battle & FF6_CONFIG_WAIT) != 0, background);
     battleOpen_ = true;
@@ -1020,18 +1154,50 @@ void Game::checkEncounter() {
     startEvent(FF6_EVENT_SCRIPT_RAND_BATTLE);
 }
 
-// A defeated party has no game over screen here: it stands up again with all its hp.
+// The end of a battle: the veldt can bring it back, unless its formation is not made for it.
+void Game::recordVeldtBattle() {
+    if (lastBattle_ < 0 || lastBattle_ >= FF6_VELDT_BATTLE_COUNT) return;
+    const BattleFormation formation = battleData_.formation(lastBattle_);
+    if (formation.aux & FF6_BATTLE_AUX_NOT_ON_VELDT) return;
+    for (const int monster : formation.monsters) {
+        if (monster != FF6_MONSTER_NONE && monster < 0x100) {
+            state_.veldtBattles[static_cast<size_t>(lastBattle_)] = true;
+            return;
+        }
+    }
+}
+
+// A defeated party goes to the game over scene of the story and back to the saved game; without one it stands up again
+// with all its hp.
 void Game::endBattle() {
-    if (battleScreen_.outcome() == BattleOutcome::Lost) {
-        for (const Combatant& c : battleScreen_.battle()->combatants()) {
-            if (c.present && !c.monster) {
-                CharacterState& character = state_.characters[static_cast<size_t>(c.id)];
-                character.hp = calcStats(rules_, character).maxHp;
+    bool gameOver = false;
+    const BattleOutcome outcome = battleScreen_.outcome();
+    if (outcome == BattleOutcome::Lost) {
+        if (loadHandler_ && loadHandler_()) {
+            bits_.setBattle(FF6_BATTLE_FLAG_DEFEATED, true);  // the events of the battles go on with GameOver
+            gameOver = true;
+        } else {
+            for (const Combatant& c : battleScreen_.battle()->combatants()) {
+                if (c.present && !c.monster) {
+                    CharacterState& character = state_.characters[static_cast<size_t>(c.id)];
+                    character.hp = calcStats(rules_, character).maxHp;
+                }
             }
         }
     }
     battleScreen_.close();
     battleOpen_ = false;
+    recordVeldtBattle();
+    if (doomGazeBattle_ && world_ && !gameOver) {
+        if (outcome == BattleOutcome::Won) {  // the story takes the party to the scene of the magicite, on board
+            bits_.setBattle(FF6_BATTLE_FLAG_DOOM_GAZE_DEFEATED, true);
+            world_->startVehicleEvent(FF6_EVENT_SCRIPT_DOOM_GAZE_DEFEATED);
+        }
+        placeDoomGaze();
+    }
+    doomGazeBattle_ = false;
+    if (gameOver && world_) startEvent(FF6_EVENT_SCRIPT_GAME_OVER);  // the battles of the world have no event of their own
+    if (world_ && !gameOver) world_->restartMusic();
 }
 
 void Game::tickMenu(const InputState& input) {
@@ -1078,6 +1244,7 @@ void Game::tickMenu(const InputState& input) {
         shopOpen_ = false;
         if (battleOpen_) endBattle();
         common_.windowTiles = buildWindowTiles(menuData_, config_);  // the dialogues have the windows of the config
+        if (world_) world_->setLead(worldLead());  // the menu may have changed who leads
         startFade(true, FF6_BRIGHTNESS_STEP);
     }
 }
@@ -1191,6 +1358,15 @@ void Game::draw() {
             menu_.draw();
         }
         screenPixels_ = menuScreen_.pixels();
+        renderer_.beginFrame();
+        applyBrightness(screenPixels_);
+        renderer_.updateTexture(screen_, screenPixels_.data());
+        renderer_.draw(screen_, kScreen, kScreen);
+        renderer_.endFrame();
+        return;
+    }
+    if (world_) {
+        world_->draw(screenPixels_.data());
         renderer_.beginFrame();
         applyBrightness(screenPixels_);
         renderer_.updateTexture(screen_, screenPixels_.data());

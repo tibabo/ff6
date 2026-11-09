@@ -24,10 +24,11 @@ public:
 
 private:
     int direction() const;
+    unsigned heldButtons() const;
     bool buttonHeld(const std::initializer_list<SDL_Scancode>& keys, SDL_GameControllerButton button) const;
 
     std::map<SDL_JoystickID, SDL_GameController*> controllers_;
-    bool confirmHeld_ = false, cancelHeld_ = false, menuHeld_ = false;
+    bool confirmHeld_ = false, cancelHeld_ = false, menuHeld_ = false, startHeld_ = false;
 };
 
 }  // namespace ff6

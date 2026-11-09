@@ -390,4 +390,50 @@ void testGame() {
         CHECK(start.map().id == 0x1C);
         CHECK(start.party().gil == 1234 && !start.cutsceneOpen() && !start.loadMenuOpen());
     }
+    {  // the world map: walking, an entrance to a map of the field, and the way back to the tile that it was entered from
+        test::RecordingRenderer worldRenderer;
+        test::RecordingSound worldSound;
+        ff6::Game world(ff6::loadCommonData(pack), pack, 0, worldRenderer, worldSound);
+        CHECK(world.worldOpen() && world.world()->world() == 0);
+        world.placeParty(73, 94);
+        for (int i = 0; i < 40; ++i) world.tick(idle);  // the screen fades in
+        CHECK(world.brightness() == FF6_BRIGHTNESS_FULL && world.partyTileX() == 73 && world.partyTileY() == 94);
+        world.draw();
+        CHECK(worldRenderer.draws.size() == 1 && worldRenderer.draws.front().destination.w == FF6_SCREEN_WIDTH);
+        const ff6::SaveState onTheMap = world.saveState();
+        CHECK(onTheMap.map == 0 && onTheMap.x == 73 && onTheMap.y == 94);
+        world.tick(up);  // the way to a cave: its entrance is on the next tile
+        for (int i = 0; i < FF6_STEP_FRAMES + 1; ++i) world.tick(idle);
+        CHECK(world.worldOpen() && world.partyTileY() == 93 && world.party().steps == 1);
+        for (int i = 0; i < 80 && world.worldOpen(); ++i) world.tick(idle);  // the screen fades out, then the map is loaded
+        CHECK(!world.worldOpen() && world.map().id == 71 && world.player().tileX() == 10 && world.player().tileY() == 54);
+        world.draw();
+        CHECK(worldRenderer.draws.size() == 1);
+        // Back to the world map, on the tile of the entrance, facing the way that the party was going.
+        ff6::Game back(ff6::loadCommonData(pack), pack, onTheMap, worldRenderer, worldSound);
+        CHECK(back.worldOpen() && back.partyTileX() == 73 && back.partyTileY() == 94);
+    }
+    {  // the airship: parked on the map, the party takes off from it, and the deck is a map of the field
+        test::RecordingRenderer airRenderer;
+        test::RecordingSound airSound;
+        ff6::SaveState saved;
+        saved.map = 0;
+        saved.x = 73;
+        saved.y = 94;
+        saved.airshipX = 73;
+        saved.airshipY = 94;
+        saved.eventBits = {FF6_EVENT_BIT_AIRSHIP_VISIBLE};
+        ff6::Game air(ff6::loadCommonData(pack), pack, saved, airRenderer, airSound);
+        for (int i = 0; i < 40; ++i) air.tick(idle);
+        CHECK(air.worldOpen() && !air.world()->flying() && air.saveState().airshipX == 73);
+        air.tick(confirm);
+        for (int i = 0; i < 100; ++i) air.tick(idle);
+        CHECK(air.worldOpen() && air.world()->flying() && air.world()->flightTileX() == 73);
+        air.draw();
+        ff6::InputState menu = idle;
+        menu.menu = true;
+        air.tick(menu);
+        for (int i = 0; i < 100 && air.worldOpen(); ++i) air.tick(idle);  // the deck
+        CHECK(!air.worldOpen() && air.map().id == 0x0B);
+    }
 }

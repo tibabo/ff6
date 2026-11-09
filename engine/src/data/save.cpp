@@ -81,6 +81,7 @@ std::string saveToJson(const SaveState& state) {
     } else {
         out << "null";
     }
+    out << ",\n  \"airship\": {\"x\": " << state.airshipX << ", \"y\": " << state.airshipY << ", \"doomGaze\": " << state.doomGazeCounter << "}";
     out << ",\n  \"config\": ";
     appendList(out, std::vector<int>(state.config.begin(), state.config.end()));
     if (state.hasColors) {
@@ -126,6 +127,13 @@ std::string saveToJson(const SaveState& state) {
         out << ",\n  \"espers\": ";
         appendList(out, espers);
         out << ", \"swordtechs\": " << party.swordtechs << ", \"blitzes\": " << party.blitzes << ", \"lores\": " << party.lores;
+        std::vector<int> veldt;
+        for (size_t i = 0; i < party.veldtBattles.size(); ++i) {
+            if (party.veldtBattles[i]) veldt.push_back(static_cast<int>(i));
+        }
+        out << ",\n  \"veldt\": ";
+        appendList(out, veldt);
+        out << ", \"veldtPointer\": " << party.veldtPointer;
     }
     out << "\n}\n";
     return out.str();
@@ -169,6 +177,12 @@ SaveState saveFromJson(const std::string& text) {
         state.parentX = number(*parent, "x", 0, FF6_MAX_TILE);
         state.parentY = number(*parent, "y", 0, FF6_MAX_TILE);
         state.parentFacing = number(*parent, "facing", 0, FF6_DIRECTION_COUNT - 1);
+    }
+    const Json* airship = root.find("airship");
+    if (airship && airship->type == Json::Type::Object) {
+        state.airshipX = number(*airship, "x", 0, FF6_WORLD_SIZE - 1);
+        state.airshipY = number(*airship, "y", 0, FF6_WORLD_SIZE - 1);
+        state.doomGazeCounter = number(*airship, "doomGaze", 0, 255);
     }
     if (root.find("config")) {
         const std::vector<int> config = ids(root, "config", FF6_BYTE_VALUES);
@@ -221,6 +235,10 @@ SaveState saveFromJson(const std::string& text) {
         }
         if (root.find("treasures")) {
             for (const int id : ids(root, "treasures", FF6_TREASURE_BIT_COUNT)) party.treasures[static_cast<size_t>(id)] = true;
+        }
+        if (root.find("veldt")) {
+            for (const int id : ids(root, "veldt", FF6_VELDT_BATTLE_COUNT)) party.veldtBattles[static_cast<size_t>(id)] = true;
+            party.veldtPointer = number(root, "veldtPointer", 0, FF6_VELDT_BATTLE_COUNT / 8 - 1);
         }
         if (root.find("espers")) {
             for (const int id : ids(root, "espers", FF6_ESPER_COUNT)) party.espers[static_cast<size_t>(id)] = true;
