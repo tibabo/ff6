@@ -27,7 +27,14 @@ void decodeTile(const uint8_t* tile, bool threePlanes, const uint8_t palette[][F
 const BattleImage& BattleGfx::monster(int id) const {
     const auto found = monsters_.find(id);
     if (found != monsters_.end()) return found->second;
-    BattleImage& image = monsters_[id];
+    return monsters_[id] = decodeMonster(id, nullptr);
+}
+
+BattleImage BattleGfx::monsterWith(int id, const std::array<uint16_t, 8>& colors) const { return decodeMonster(id, &colors); }
+
+// `replace` takes the place of the first 8 colors of the palette of the monster.
+BattleImage BattleGfx::decodeMonster(int id, const std::array<uint16_t, 8>* replace) const {
+    BattleImage image;
     if (id < 0 || id >= FF6_MONSTER_GFX_COUNT) return image;
     const uint8_t* prop = &monsterProp[static_cast<size_t>(id) * FF6_MONSTER_GFX_PROP_BYTES];
     const int graphics = prop[0] | (prop[1] << 8), palette = (prop[2] << 8) | prop[3], stencil = prop[4];
@@ -43,6 +50,9 @@ const BattleImage& BattleGfx::monster(int id) const {
         const size_t at = first + i * 2;
         if (at + 1 >= monsterPal.size()) break;
         colorToRgba(static_cast<uint16_t>(monsterPal[at] | (monsterPal[at + 1] << 8)), colors[i]);
+    }
+    if (replace) {
+        for (size_t i = 1; i < replace->size(); ++i) colorToRgba((*replace)[i], colors[i]);
     }
     const int side = cells * FF6_MENU_TILE_SIZE;
     std::vector<uint8_t> grid(static_cast<size_t>(side) * side * FF6_BYTES_PER_PIXEL, 0);
@@ -72,8 +82,8 @@ const BattleImage& BattleGfx::monster(int id) const {
     return image;
 }
 
-const BattleImage& BattleGfx::background(int index, int step) const {
-    const int key = index | (step << 8);
+const BattleImage& BattleGfx::background(int index, int step, const uint8_t* paletteOverride, int variant) const {
+    const int key = index | (step << 8) | (variant << 16);
     const auto found = backgrounds_.find(key);
     if (found != backgrounds_.end()) return found->second;
     BattleImage& image = backgrounds_[key];
@@ -94,7 +104,7 @@ const BattleImage& BattleGfx::background(int index, int step) const {
     load(prop[2], FF6_BG_THIRD_TILE, FF6_BG_THIRD_TRIM);
     if (prop[3] >= FF6_BG_TILES_COUNT) return image;
     const uint8_t* map = &bgTiles[static_cast<size_t>(prop[3]) * FF6_BG_TILES_BYTES];
-    const uint8_t* palette = &bgPal[static_cast<size_t>(prop[5] & FF6_BG_INDEX_MASK) * FF6_BG_PAL_BYTES];
+    const uint8_t* palette = paletteOverride ? paletteOverride : &bgPal[static_cast<size_t>(prop[5] & FF6_BG_INDEX_MASK) * FF6_BG_PAL_BYTES];
     uint8_t colors[FF6_BG_PALETTE_COUNT][FF6_BG_PALETTE_COLORS][FF6_BYTES_PER_PIXEL];
     for (int p = 0; p < FF6_BG_PALETTE_COUNT; ++p) {
         for (int c = 0; c < FF6_BG_PALETTE_COLORS; ++c) {

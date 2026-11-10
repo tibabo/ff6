@@ -32,21 +32,21 @@ Game::Game(CommonData common, std::string packDir, uint32_t startMap, Renderer& 
            const std::vector<int>& party)
     : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
       menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), colosseum_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
-      loadMenu_(menuScreen_, sound_) {
+      loadMenu_(menuScreen_, sound_), partyMenu_(menuScreen_, sound_) {
     initialize(startMap, party, nullptr);
 }
 
 Game::Game(CommonData common, std::string packDir, const SaveState& save, Renderer& renderer, Sound& sound)
     : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
       menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), colosseum_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
-      loadMenu_(menuScreen_, sound_) {
+      loadMenu_(menuScreen_, sound_), partyMenu_(menuScreen_, sound_) {
     initialize(static_cast<uint32_t>(save.map), {}, &save);
 }
 
 Game::Game(CommonData common, std::string packDir, NewGame, Renderer& renderer, Sound& sound)
     : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
       menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), colosseum_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
-      loadMenu_(menuScreen_, sound_) {
+      loadMenu_(menuScreen_, sound_), partyMenu_(menuScreen_, sound_) {
     initialize(FF6_GAME_START_MAP, {}, nullptr, true);
 }
 
@@ -87,6 +87,7 @@ void Game::initialize(uint32_t startMap, const std::vector<int>& party, const Sa
 // The state of the story and of the characters, before the map is loaded.
 void Game::restore(const SaveState& save) {
     bits_.load(save.eventBits, save.battleFlags);
+    bits_.loadVariables(save.variables, save.timers);
     if (save.hasParty) state_ = save.party;
     std::array<Npc, FF6_CHAR_COUNT>& characters = objects_.characters();
     for (size_t i = 0; i < characters.size(); ++i) {
@@ -149,6 +150,8 @@ SaveState Game::saveState() const {
     }
     save.eventBits = bits_.setIds();
     save.battleFlags = bits_.battleSetIds();
+    save.variables = bits_.variableValues();
+    save.timers = bits_.timerValues();
     for (size_t i = 0; i < spritePalette_.size(); ++i) save.spritePalettes[i] = spritePalette_[i];
     save.doomGazeCounter = doomGazeCounter_;
     save.airshipX = world_ ? world_->airshipX() : airshipX_;
@@ -435,6 +438,7 @@ void Game::placeDoomGaze() {
 // What one frame of the world map does besides the walk: the menu, the entrances and the battles take the screen.
 void Game::tickWorld(const InputState& input) {
     updateBrightness();
+    bits_.tickTimers(false);  // they go off back on the field
     if (event_.running() && !worldScript_) {  // a story event that began on the world map, which can take the party elsewhere
         event_.update(*this);
         if (!world_) return;
@@ -547,6 +551,26 @@ void Game::objectCommand(uint8_t op, int object, uint32_t arg) {
     if (op == FF6_EVENT_OBJ_GFX || op == FF6_EVENT_OBJ_PAL) npc->strip = -1;  // the sprite is built again when drawn
 }
 
+// Event commands 0xDE to 0xE4: which characters are where, as bits (the number of the party for 0xE4).
+unsigned Game::characterMask(uint8_t op) const {
+    if (op == FF6_EVENT_GET_PARTY_NUMBER) return 1u << objects_.activeParty();
+    if (op == FF6_EVENT_GET_LEAD_CHAR) {
+        for (const int character : objects_.partySlots()) {
+            if (character >= 0) return 1u << character;
+        }
+        return 1;
+    }
+    unsigned mask = 0;
+    for (size_t i = 0; i < objects_.characters().size(); ++i) {
+        const Npc& character = objects_.characters()[i];
+        const bool match = op == FF6_EVENT_GET_PARTY_CHARS ? character.party == objects_.activeParty()
+                           : op == FF6_EVENT_GET_ENABLED_CHARS ? character.enabled
+                                                               : character.party != 0;
+        if (match) mask |= 1u << i;
+    }
+    return mask;
+}
+
 void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
     const auto byteAt = [&](size_t n) { return n < size ? static_cast<int>(bytes[n]) : 0; };
     switch (op) {
@@ -641,6 +665,9 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
             break;
         case FF6_EVENT_COLOSSEUM_BATTLE:
             startColosseumBattle();
+            break;
+        case FF6_EVENT_PARTY_SELECT:
+            openPartySelect(byteAt(0), static_cast<unsigned>(byteAt(1) | (byteAt(2) << 8)));
             break;
         case FF6_EVENT_BATTLE:
         case FF6_EVENT_BATTLE_COLLISION:
@@ -892,6 +919,7 @@ void Game::tick(const InputState& input) {
         return;
     }
     if (menuPhase_ != MenuPhase::Closed) {
+        bits_.tickTimers(true);
         tickMenu(input);
         return;
     }
@@ -901,6 +929,7 @@ void Game::tick(const InputState& input) {
     }
     anim_.update(map_, frame_);
     updateBrightness();
+    bits_.tickTimers(false);
     if (leaving_ && !fading()) {
         leaving_ = false;
         leaveThroughEntrance(leaveTarget_);
@@ -917,6 +946,10 @@ void Game::tick(const InputState& input) {
     if (fadeInPending_ && !event_.running()) {
         fadeInPending_ = false;
         startFade(true, FF6_BRIGHTNESS_STEP);
+    }
+    uint32_t timerEvent = 0;  // a timer that ran out starts its event once the party stands still and no event runs
+    if (!event_.running() && !dialogue_.active() && !player_.moving() && !leaving_ && bits_.takeTimerEvent(&timerEvent)) {
+        startEvent(timerEvent);
     }
     Npc* lead = objects_.lead();
     const bool eventRunning = event_.running();
@@ -1226,6 +1259,46 @@ void Game::openColosseum() {
     startFade(false, FF6_BRIGHTNESS_STEP);
 }
 
+// Event command 0x99: the characters are put into the parties by the player, then the event goes on. The characters of the
+// game stand in the menu, those named by the command cannot be moved; with the top bit the parties are emptied first.
+void Game::openPartySelect(int parties, unsigned forced) {
+    PartyMenuSetup setup;
+    setup.parties = std::max(parties & FF6_PARTY_SELECT_COUNT_MASK, 1);
+    setup.forced = forced;
+    setup.clear = (parties & FF6_PARTY_SELECT_CLEAR) != 0;
+    for (int i = 0; i < FF6_CHAR_COUNT; ++i) {
+        const Npc& npc = objects_.characters()[static_cast<size_t>(i)];
+        PartyMenuCharacter& character = setup.characters[static_cast<size_t>(i)];
+        character.enabled = npc.enabled;
+        character.party = npc.party;
+        character.gfx = npc.prop.gfx;
+        character.palette = spritePalette_[static_cast<size_t>(npc.prop.palette) & (FF6_SPRITE_PALETTE_SLOTS - 1)];
+        character.info = menuCharacter(i, state_.characters[static_cast<size_t>(i)]);
+        character.status = state_.characters[static_cast<size_t>(i)].status | (character.info.hp == 0 ? FF6_ST_DEAD : 0u);
+        for (int equipped : state_.characters[static_cast<size_t>(i)].equipment) {
+            equipped &= 0xFF;
+            if (equipped != FF6_ITEM_EMPTY && (rules_.item(equipped)[FF6_ITEM_PROP_EQUIP_STATUS_HIGH] & FF6_ITEM_EQUIP_FLOAT)) character.status |= FF6_ST_FLOAT;
+        }
+        if (character.info.equippedEsper >= 0) character.esper = menuData_.esperName(character.info.equippedEsper);
+    }
+    partyMenu_.open(setup);
+    partyOpen_ = true;
+    menuPhase_ = MenuPhase::FadingOut;
+    startFade(false, FF6_BRIGHTNESS_STEP);
+}
+
+// What the player chose goes to the characters: the party of each and its place in it.
+void Game::applyPartySelection() {
+    const std::array<int, FF6_CHAR_COUNT> parties = partyMenu_.assignment(), places = partyMenu_.places();
+    for (size_t i = 0; i < parties.size(); ++i) {
+        Npc& character = objects_.characters()[i];
+        character.party = parties[i];
+        character.partySlot = parties[i] != 0 ? places[i] : 0;
+    }
+    objects_.restoreParty(objects_.activeParty());
+    objects_.updateParty();
+}
+
 // Event command 0xAF: the character fights alone, by itself, against the monster of the item, in the battlefield of the colosseum.
 void Game::startColosseumBattle() {
     if (colosseumFighter_ < 0 || colosseumItem_ == FF6_ITEM_EMPTY) return;
@@ -1396,7 +1469,7 @@ void Game::tickMenu(const InputState& input) {
     updateBrightness();
     if (fading()) return;
     if (menuPhase_ == MenuPhase::FadingOut) {
-        if (!shopOpen_ && !battleOpen_ && !loadMenuOpen_ && !colosseumOpen_) menu_.open(menuStatus(), config_);
+        if (!shopOpen_ && !battleOpen_ && !loadMenuOpen_ && !colosseumOpen_ && !partyOpen_) menu_.open(menuStatus(), config_);
         menuPhase_ = MenuPhase::Open;
         startFade(true, FF6_BRIGHTNESS_STEP);
     } else if (menuPhase_ == MenuPhase::Open && loadMenuOpen_) {
@@ -1416,6 +1489,12 @@ void Game::tickMenu(const InputState& input) {
             }
         }
         if (battleScreen_.finished()) {
+            menuPhase_ = MenuPhase::Leaving;
+            startFade(false, FF6_BRIGHTNESS_STEP);
+        }
+    } else if (menuPhase_ == MenuPhase::Open && partyOpen_) {
+        partyMenu_.update(input);
+        if (partyMenu_.closed()) {
             menuPhase_ = MenuPhase::Leaving;
             startFade(false, FF6_BRIGHTNESS_STEP);
         }
@@ -1448,6 +1527,10 @@ void Game::tickMenu(const InputState& input) {
             return;
         }
         shopOpen_ = false;
+        if (partyOpen_) {
+            partyOpen_ = false;
+            applyPartySelection();
+        }
         if (colosseumOpen_) {
             colosseumOpen_ = false;
             colosseumItem_ = colosseum_.chosen() ? colosseum_.item() : FF6_ITEM_EMPTY;
@@ -1495,6 +1578,34 @@ void Game::composeDialogue() {
                                originY + mark.line * FF6_TEXT_LINE_HEIGHT + FF6_CURSOR_Y_OFFSET + row + offset, color);
                 }
             }
+        }
+    }
+}
+
+// The timer that the story shows: minutes and seconds in a small window at the top right; the game's own place is not known.
+void Game::composeTimer(int frames) {
+    const int seconds = frames / FF6_FRAMES_PER_SECOND;
+    std::vector<int> codes;
+    const std::string text = std::to_string(seconds / 60) + ":" + std::string(seconds % 60 < 10 ? "0" : "") + std::to_string(seconds % 60);
+    for (const char c : text) codes.push_back(c == ':' ? FF6_GLYPH_COLON : FF6_GLYPH_ZERO + (c - '0'));
+    int width = 0;
+    for (const int code : codes) width += common_.fontWidths[static_cast<size_t>(code)];
+    const int x = FF6_SCREEN_WIDTH - FF6_WINDOW_X - FF6_TIMER_COLS * FF6_WINDOW_TILE_SIZE, y = FF6_WINDOW_Y;
+    drawWindow(overlayPixels_, common_.windowTiles, x, y, FF6_TIMER_COLS, FF6_TIMER_ROWS);
+    const uint8_t shadow[FF6_BYTES_PER_PIXEL] = FF6_TEXT_SHADOW_RGBA;
+    const uint8_t ink[FF6_BYTES_PER_PIXEL] = FF6_TEXT_INK_RGBA;
+    for (const uint8_t* color : {shadow, ink}) {
+        const int offset = color == shadow ? FF6_TEXT_SHADOW_OFFSET : 0;
+        int pen = x + (FF6_TIMER_COLS * FF6_WINDOW_TILE_SIZE - width) / 2;
+        for (const int code : codes) {
+            const size_t base = static_cast<size_t>(code - FF6_FIRST_GLYPH_CODE) * FF6_GLYPH_ROWS;
+            for (int row = 0; row < FF6_GLYPH_ROWS; ++row) {
+                const uint16_t bits = common_.fontRows[base + static_cast<size_t>(row)];
+                for (int col = 0; col < FF6_GLYPH_ROW_BITS; ++col) {
+                    if (bits & (FF6_GLYPH_LEFT_BIT >> col)) blendPixel(overlayPixels_, pen + col + offset, y + FF6_TIMER_TEXT_Y + row + offset, color);
+                }
+            }
+            pen += common_.fontWidths[static_cast<size_t>(code)];
         }
     }
 }
@@ -1569,6 +1680,8 @@ void Game::draw() {
             shop_.draw();
         } else if (colosseumOpen_) {
             colosseum_.draw();
+        } else if (partyOpen_) {
+            partyMenu_.draw();
         } else {
             menu_.draw();
         }
@@ -1613,8 +1726,11 @@ void Game::draw() {
     applyBrightness(screenPixels_);
     renderer_.updateTexture(screen_, screenPixels_.data());
     renderer_.draw(screen_, kScreen, kScreen);
-    if (dialogue_.active()) {
-        composeDialogue();
+    const int shownTimer = bits_.shownTimer();
+    if (dialogue_.active() || shownTimer >= 0) {
+        if (dialogue_.active()) composeDialogue();
+        else std::fill(overlayPixels_.begin(), overlayPixels_.end(), 0);
+        if (shownTimer >= 0) composeTimer(shownTimer);
         applyBrightness(overlayPixels_);
         renderer_.updateTexture(overlay_, overlayPixels_.data());
         renderer_.draw(overlay_, kScreen, kScreen);

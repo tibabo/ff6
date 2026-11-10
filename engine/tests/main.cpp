@@ -33,6 +33,7 @@ int main() {
     testEventCmd();
     testMenu();
     testLoadMenu();
+    testPartyMenu();
     testPpu();
     testCutsceneCore();
     testCutsceneScenes();

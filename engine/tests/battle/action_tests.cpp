@@ -305,6 +305,19 @@ void testBattleActions() {
     CHECK((guarded0.status & FF6_ST_SHELL) != 0 && guarded0.elemHalf != 0 && (guarded0.blocked & FF6_ST_PETRIFY) != 0);
     CHECK(!(guardedBattle.combatants()[1].status & FF6_ST_SHELL) && guardedBattle.combatants()[1].elemHalf == 0);
 
+    // The item that floats makes its wearer float, and not dance; the status cannot be set or removed.
+    int floater = -1;
+    for (int item = 0; item < FF6_ITEM_COUNT && floater < 0; ++item) {
+        if (rules.item(item)[FF6_ITEM_PROP_EQUIP_STATUS_HIGH] & FF6_ITEM_EQUIP_FLOAT) floater = item;
+    }
+    CHECK(floater >= 0);
+    ff6::PartyState floating = party;
+    floating.characters[0].equipment[FF6_EQUIP_FIRST_RELIC] = floater;
+    ff6::Battle floatBattle(data, rules, floating, {0, 1}, 5, 24);
+    const ff6::Combatant& floating0 = floatBattle.combatants()[0];
+    CHECK((floating0.status & FF6_ST_FLOAT) && !(floating0.status & FF6_ST_DANCE) && (floating0.blocked & FF6_ST_FLOAT));
+    CHECK(!(floatBattle.combatants()[1].status & FF6_ST_FLOAT));
+
     // A tool is used like an item and is not used up.
     ff6::PartyState tooled = party;
     ff6::giveItem(tooled, 166);

@@ -30,6 +30,18 @@ export function readCursorPalette(rom) {
   return Buffer.from(rom.subarray(CURSOR_PAL, CURSOR_PAL + 8));
 }
 
+export const MENU_SPRITE_BYTES = 0x800;  // ED/5AC0 to ED/62BF: the hand, the arrow under the characters that must stay, the status icons
+const STATUS_ICON_PAL = 0x18e8c0;  // the last of the 8-byte palettes of D8/E800: the sprite colors 12 to 15 of the status icons
+export const MENU_ICON_PALETTE_BYTES = 8;
+
+// The sheet of sprites of the menus (4bpp, 16 tiles per row), then the palette of the status icons.
+export function readMenuSprites(rom) {
+  return Buffer.concat([
+    rom.subarray(MENU_SPRITE_GFX, MENU_SPRITE_GFX + MENU_SPRITE_BYTES),
+    rom.subarray(STATUS_ICON_PAL, STATUS_ICON_PAL + MENU_ICON_PALETTE_BYTES),
+  ]);
+}
+
 export const ITEM_COUNT = 256;
 export const ITEM_NAME_BYTES = 13;  // the symbol of the kind of item, then 12 letters; 0xFF fills it
 const ITEM_NAMES = 0x12b300;  // D2/B300
@@ -107,5 +119,5 @@ export function buildMenuData(rom, version) {
   header.write(MENU_MAGIC, 0, 8, 'ascii');
   header.writeUInt32LE(version, 8);
   return Buffer.concat([header, readMenuFont(rom), readMenuPalette(rom), readCursorTiles(rom), readCursorPalette(rom),
-    readPortraits(rom), readWindows(rom), readItemNames(rom), readItemDescriptions(rom), readSkillNames(rom)]);
+    readPortraits(rom), readWindows(rom), readItemNames(rom), readItemDescriptions(rom), readSkillNames(rom), readMenuSprites(rom)]);
 }

@@ -126,7 +126,7 @@
 #define FF6_PACK_MAGIC_SIZE 8
 #define FF6_COMMON_MAGIC "FF6COMMN"
 #define FF6_MAP_MAGIC "FF6MAP01"
-#define FF6_PACK_VERSION 23
+#define FF6_PACK_VERSION 25
 #define FF6_COMMON_FILE "common.ff6data"
 #define FF6_MAP_DIR "maps"
 #define FF6_MAP_FILE_EXTENSION ".ff6map"
@@ -364,7 +364,41 @@
 #define FF6_EVENT_BATTLE_CLEAR 0xB9
 #define FF6_EVENT_LOOP_UNTIL 0xBC  // loops while an event bit is clear
 #define FF6_EVENT_RANDOM_JUMP 0xBD  // jumps half of the time
-#define FF6_EVENT_CASE 0xBE
+#define FF6_EVENT_CASE 0xBE  // a bit of the character mask and an address, for each case
+#define FF6_EVENT_CASE_BIT_SHIFT 4  // the bit is in the high nibble of the third byte of a case
+#define FF6_EVENT_CASE_ADDRESS_MASK 0x03  // and the bank of the address in the low bits
+#define FF6_EVENT_WAIT_DLG_CLOSE 0x49
+#define FF6_EVENT_PARTY_SELECT 0x99  // the number of parties (bit 7: empty them first), then a mask of the characters that must be in
+#define FF6_PARTY_SELECT_CLEAR 0x80
+#define FF6_PARTY_SELECT_COUNT_MASK 0x7F
+#define FF6_EVENT_TIMER_SET 0xA0  // counter (frames), then the address, and flags and timer number in the last byte
+#define FF6_EVENT_TIMER_RESET 0xA1
+#define FF6_EVENT_TIMER_COUNT 4
+#define FF6_EVENT_TIMER_NUMBER_SHIFT 2
+#define FF6_EVENT_TIMER_PAUSE_FLAG 0x80  // the timer stops while a menu or a battle is open
+#define FF6_EVENT_TIMER_VISIBLE_FLAG 0x40  // timer 0 is shown on the field
+#define FF6_TIMER_COLS 7  // the window of the timer, in window tiles
+#define FF6_TIMER_ROWS 3
+#define FF6_TIMER_TEXT_Y 8  // from the top of the window to the line of text
+#define FF6_GLYPH_ZERO 0x54  // the codes of the dialogue font
+#define FF6_GLYPH_COLON 0x61
+#define FF6_FRAMES_PER_SECOND 60
+#define FF6_EVENT_GET_PARTY_CHARS 0xDE  // the commands from here to 0xE4 leave a mask of characters (or of a comparison) for 0xBE
+#define FF6_EVENT_GET_ENABLED_CHARS 0xDF
+#define FF6_EVENT_GET_INITIALIZED_CHARS 0xE0
+#define FF6_EVENT_GET_AVAILABLE_CHARS 0xE1
+#define FF6_EVENT_GET_LEAD_CHAR 0xE2
+#define FF6_EVENT_GET_ANY_PARTY_CHARS 0xE3
+#define FF6_EVENT_GET_PARTY_NUMBER 0xE4
+#define FF6_EVENT_VAR_SET 0xE8
+#define FF6_EVENT_VAR_ADD 0xE9
+#define FF6_EVENT_VAR_SUB 0xEA
+#define FF6_EVENT_VAR_COMPARE 0xEB  // leaves 4 (less), 1 (equal) or 2 (greater) in the mask
+#define FF6_EVENT_VAR_COUNT 256  // words, at $1fc2 in the game
+#define FF6_EVENT_SCRIPT_LIMIT 0x40000  // the event script spans the banks CA to CD
+#define FF6_EVENT_COMPARE_LESS 4
+#define FF6_EVENT_COMPARE_EQUAL 1
+#define FF6_EVENT_COMPARE_GREATER 2
 #define FF6_BATTLE_FLAG_BYTES 32
 #define FF6_RANDOM_HALF 0x80
 #define FF6_EVENT_DLG_ASYNC 0x48
@@ -530,6 +564,11 @@
 #define FF6_MENU_CURSOR_TILE_BYTES 32  // 4bpp
 #define FF6_MENU_CURSOR_SIZE 16
 #define FF6_MENU_CURSOR_PALETTE_COLORS 4  // the hand uses the sprite colors 12 to 15
+#define FF6_MENU_SPRITE_BYTES 0x800  // the sheet of sprites of the menus: 4bpp tiles, 16 to a row
+#define FF6_MENU_SPRITE_ROW_TILES 16
+#define FF6_MENU_STATUS_ICON_FIRST_TILE 0x20  // the 16x16 icons of the statuses follow every 2 tiles
+#define FF6_MENU_STATUS_ICON_COUNT 7  // float, petrify, imp, vanish, poison, zombie, blind
+#define FF6_MENU_ARROW_TILE 3  // the arrow under a character that has to stay in the party
 #define FF6_MENU_CURSOR_FIRST_COLOR 12
 #define FF6_MENU_PORTRAIT_COLORS 16
 #define FF6_MENU_PORTRAIT_COUNT 19  // the 14 playable characters, a soldier, an imp, Leo, Banon and a ghost
@@ -957,6 +996,7 @@
 #define FF6_ITEM_PROP_IMMUNE 6  // of equipment: a word of the status that it protects from
 #define FF6_ITEM_PROP_EQUIP_STATUS_HIGH 8  // the status that it sets at the start: the third byte of the status here, the second below
 #define FF6_ITEM_PROP_EQUIP_STATUS_LOW 25
+#define FF6_ITEM_EQUIP_FLOAT 0x01  // in the high equipment status byte: what the menu shows as the float status
 #define FF6_ITEM_PROP_ELEM_ABSORB 22  // the elements that it absorbs, nullifies and is weak to
 #define FF6_ITEM_PROP_ELEM_NULL 23
 #define FF6_ITEM_PROP_ELEM_WEAK 24
@@ -1126,6 +1166,9 @@
 #define FF6_ATTACK_WEAPON_PROP_BYTES 8
 #define FF6_ATTACK_MODE7_GFX_BYTES 0x1800  // three sets of tiles of 4 bits
 #define FF6_ATTACK_MODE7_MAP_BYTES 0xC00  // three maps of tile numbers
+#define FF6_ATTACK_RNG_BYTES 256  // the random numbers of the game (RNGTbl)
+#define FF6_ATTACK_ROW_SPEED_BYTES 32  // the steps toward the back row, then toward the front row: 16 each, by battle type * 4 + slot
+#define FF6_ATTACK_LIGHTS_BYTES 192  // the 3 palettes of the field of Chadarnook with its lights on, then off (96 bytes each)
 #define FF6_MODE7_SIDE 256  // the pixels of the plane that hold a picture: 32 x 32 tiles of the 128 x 128 of the plane
 #define FF6_MODE7_TILE_COLUMNS 32
 #define FF6_MODE7_SET_GFX_BYTES 0x800
@@ -1150,6 +1193,12 @@
 #define FF6_ATTACK_INIT_POSSESS 0x77  // this one puts bg3 behind the field too
 #define FF6_PURIFIER_REACH 8  // how far the side figures of the purifier go out to touch the edges
 #define FF6_JUSTICE_BEHIND_Y 0x81  // the combatants whose bottom is above this line stand behind bg1 for Justice
+#define FF6_ANIM_JUMP_HEIGHT 32  // how high a character jumps along a vector ($A0, $A1), at the middle of the way
+#define FF6_ANIM_SCROLL_LINES 151  // the lines of the field that the scroll tables of the animations have
+#define FF6_ANIM_PRIORITY_FRONT 3  // the priority that puts a combatant in front of bg1
+#define FF6_ANIM_BRIGHTNESS_STEPS 16  // the steps of brightness that take the screen to black (the register holds 0 to 15)
+#define FF6_ANIM_TORNADO_LINES 64  // the lines of the sine of the tornado
+#define FF6_ANIM_TORNADO_AMPLITUDE 8  // its amplitude in pixels
 #define FF6_JUSTICE_WINDOW_LINES 128  // the lines where the window of Justice shows bg1 (and the sprites of the animation)
 #define FF6_BATTLE_CHAR_ROW_ANGLE 12  // what the back row adds to the angle of the line of the characters
 #define FF6_BATTLE_VEIL_MIN_WIDTH 240  // the frames of bg3 this wide cover the screen, with the edges of the picture stretched
@@ -1596,6 +1645,7 @@
 #define FF6_EXP_SHIFT 3  // experience is the sum of the steps of the levels, times 8
 #define FF6_STAT_MAX 255
 #define FF6_EVENT_BIT_CHAR_AVAILABLE 0x2F0  // one bit for each character that has joined
+#define FF6_EVENT_BIT_CHAR_INITIALIZED 0x2E0  // one bit for each character whose properties were set
 #define FF6_EVENT_BIT_NOT_ENOUGH_GIL 0x1BE  // set by the command that takes gil when there is not enough
 #define FF6_HP_BOOST_MASK 0xC0
 #define FF6_HP_CHANGES {1, 2, 4, 8, 16, 32, 64, 128}  // what the commands that add or take hp use

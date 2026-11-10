@@ -44,6 +44,7 @@ add_library(ff6_core STATIC
   src/menu/load_menu.cpp
   src/menu/menu_data.cpp
   src/menu/menu_screen.cpp
+  src/menu/party_menu.cpp
   src/menu/shop_menu.cpp
   src/menu/window_style.cpp
   src/state/char_stats.cpp
@@ -119,6 +120,7 @@ if(BUILD_TESTING)
     tests/field/text_tests.cpp
     tests/menu/menu_tests.cpp
     tests/menu/load_menu_tests.cpp
+    tests/menu/party_menu_tests.cpp
     tests/cutscene/ppu_tests.cpp
     tests/cutscene/core_tests.cpp
     tests/cutscene/scene_tests.cpp

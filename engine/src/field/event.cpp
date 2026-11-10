@@ -22,6 +22,9 @@ void playSong(Sound& sound, uint8_t song, uint8_t volume) {
 void EventBits::init(const CommonData& common) {
     bytes_.fill(0);
     battle_.fill(0);
+    variables_.fill(0);
+    timers_.fill(Timer());
+    mask_ = 0;
     const size_t first = FF6_NPC_SWITCH_EVENT_BIT / 8;
     for (size_t i = 0; i < FF6_NPC_SWITCH_BYTES && i < common.npcSwitchDefaults.size() && first + i < bytes_.size(); ++i) {
         bytes_[first + i] = common.npcSwitchDefaults[i];
@@ -71,8 +74,65 @@ std::vector<int> EventBits::battleSetIds() const {
 void EventBits::load(const std::vector<int>& bits, const std::vector<int>& battleFlags) {
     bytes_.fill(0);
     battle_.fill(0);
+    variables_.fill(0);
+    timers_.fill(Timer());
     for (const int id : bits) set(id, true);
     for (const int id : battleFlags) setBattle(id, true);
+}
+
+void EventBits::setTimer(int number, int counter, uint32_t pointer, int flags) {
+    Timer& timer = timers_[static_cast<size_t>(number) % timers_.size()];
+    timer.counter = counter;
+    timer.pointer = pointer;
+    timer.flags = flags;
+}
+
+void EventBits::resetTimer(int number) { timers_[static_cast<size_t>(number) % timers_.size()] = Timer(); }
+
+void EventBits::tickTimers(bool menuOrBattle) {
+    for (Timer& timer : timers_) {
+        if (menuOrBattle && (timer.flags & FF6_EVENT_TIMER_PAUSE_FLAG)) continue;
+        if (timer.counter > 0) --timer.counter;
+    }
+}
+
+int EventBits::shownTimer() const {
+    const Timer& timer = timers_[0];
+    return (timer.flags & FF6_EVENT_TIMER_VISIBLE_FLAG) && timer.counter > 0 ? timer.counter : -1;
+}
+
+bool EventBits::takeTimerEvent(uint32_t* offset) {
+    for (Timer& timer : timers_) {
+        if (timer.counter != 0 || timer.pointer == 0) continue;
+        *offset = timer.pointer;
+        timer.pointer = 0;  // it goes off once
+        return true;
+    }
+    return false;
+}
+
+std::vector<int> EventBits::variableValues() const {
+    if (std::all_of(variables_.begin(), variables_.end(), [](uint16_t value) { return value == 0; })) return {};
+    return std::vector<int>(variables_.begin(), variables_.end());
+}
+
+std::vector<int> EventBits::timerValues() const {
+    std::vector<int> values;
+    bool any = false;
+    for (const Timer& timer : timers_) {
+        values.insert(values.end(), {timer.flags, timer.counter, static_cast<int>(timer.pointer)});
+        any = any || timer.flags != 0 || timer.counter != 0 || timer.pointer != 0;
+    }
+    return any ? values : std::vector<int>();
+}
+
+void EventBits::loadVariables(const std::vector<int>& variables, const std::vector<int>& timers) {
+    for (size_t i = 0; i < variables.size() && i < variables_.size(); ++i) variables_[i] = static_cast<uint16_t>(variables[i]);
+    for (size_t i = 0; i < timers_.size() && i * 3 + 2 < timers.size(); ++i) {
+        timers_[i].flags = timers[i * 3];
+        timers_[i].counter = timers[i * 3 + 1];
+        timers_[i].pointer = static_cast<uint32_t>(timers[i * 3 + 2]);
+    }
 }
 
 EventTrigger decodeEventTrigger(const uint8_t* bytes) {
@@ -312,6 +372,7 @@ bool EventRunner::step(EventHost& host) {
         case FF6_EVENT_SHOP:  // the menu takes the screen, and the event goes on once it is closed
         case FF6_EVENT_COLOSSEUM_MENU:
         case FF6_EVENT_COLOSSEUM_BATTLE:
+        case FF6_EVENT_PARTY_SELECT:
         case FF6_EVENT_BATTLE:  // so does the battle, and the title screen, the opening and the menu of saved games
         case FF6_EVENT_BATTLE_COLLISION:
         case FF6_EVENT_RANDOM_BATTLE:
@@ -431,6 +492,60 @@ bool EventRunner::step(EventHost& host) {
             soundWaited_ = 0;
             return next();
         }
+        case FF6_EVENT_WAIT_DLG_CLOSE:  // the event waits for the dialogue that a 0x48 left open
+            waitDialogue_ = true;
+            next();
+            return false;
+        case FF6_EVENT_CASE: {  // the first case whose bit of the mask is set is called, and the event comes back after the command
+            for (size_t i = 0; i < byteAt(1); ++i) {
+                const size_t entry = pc_ + 2 + i * 3;
+                if (((bits_.characterMask() >> (script[entry + 2] >> FF6_EVENT_CASE_BIT_SHIFT)) & 1) == 0) continue;
+                const uint32_t target = static_cast<uint32_t>(script[entry] | (script[entry + 1] << 8) |
+                                                              ((script[entry + 2] & FF6_EVENT_CASE_ADDRESS_MASK) << 16));
+                if (!pushFrame(pc_ + static_cast<uint32_t>(length), target, 1)) return stop(), true;
+                pc_ = target;
+                return true;
+            }
+            return next();
+        }
+        case FF6_EVENT_GET_INITIALIZED_CHARS:
+        case FF6_EVENT_GET_AVAILABLE_CHARS: {
+            const int first = op == FF6_EVENT_GET_INITIALIZED_CHARS ? FF6_EVENT_BIT_CHAR_INITIALIZED : FF6_EVENT_BIT_CHAR_AVAILABLE;
+            unsigned mask = 0;
+            for (int i = 0; i < FF6_CHAR_COUNT; ++i) mask |= bits_.get(first + i) ? 1u << i : 0;
+            bits_.setCharacterMask(mask);
+            return next();
+        }
+        case FF6_EVENT_GET_PARTY_CHARS:
+        case FF6_EVENT_GET_ENABLED_CHARS:
+        case FF6_EVENT_GET_LEAD_CHAR:
+        case FF6_EVENT_GET_ANY_PARTY_CHARS:
+        case FF6_EVENT_GET_PARTY_NUMBER:
+            bits_.setCharacterMask(host.characterMask(op));
+            return next();
+        case FF6_EVENT_VAR_SET:
+            bits_.setVariable(byteAt(1), byteAt(2) | (byteAt(3) << 8));
+            return next();
+        case FF6_EVENT_VAR_ADD:  // the variable stops at the top and at the bottom
+            bits_.setVariable(byteAt(1), std::min(bits_.variable(byteAt(1)) + (byteAt(2) | (byteAt(3) << 8)), 0xFFFF));
+            return next();
+        case FF6_EVENT_VAR_SUB:
+            bits_.setVariable(byteAt(1), std::max(bits_.variable(byteAt(1)) - (byteAt(2) | (byteAt(3) << 8)), 0));
+            return next();
+        case FF6_EVENT_VAR_COMPARE: {
+            const int value = byteAt(2) | (byteAt(3) << 8), variable = bits_.variable(byteAt(1));
+            bits_.setCharacterMask(variable < value ? FF6_EVENT_COMPARE_LESS : variable == value ? FF6_EVENT_COMPARE_EQUAL : FF6_EVENT_COMPARE_GREATER);
+            return next();
+        }
+        case FF6_EVENT_TIMER_SET: {  // the counter, then the address of the event; the last byte has the flags and the number of the timer
+            const int last = byteAt(5);
+            bits_.setTimer((last >> FF6_EVENT_TIMER_NUMBER_SHIFT) & (FF6_EVENT_TIMER_COUNT - 1), byteAt(1) | (byteAt(2) << 8),
+                           static_cast<uint32_t>(byteAt(3) | (byteAt(4) << 8) | ((last & FF6_EVENT_CASE_ADDRESS_MASK) << 16)), last);
+            return next();
+        }
+        case FF6_EVENT_TIMER_RESET:
+            bits_.resetTimer(byteAt(1));
+            return next();
         default: return next();  // a known command without an effect here
     }
 }

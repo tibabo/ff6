@@ -26,6 +26,8 @@ struct MenuData {
     std::vector<uint8_t> itemDescriptions;  // texts in the codes of the small font: 0x01 starts a line, 0 ends the text
     // The names of the abilities, one after the other, in the codes of the small font.
     std::vector<uint8_t> spellNames, esperNames, bushidoNames, blitzNames;
+    std::vector<uint8_t> spriteGfx;  // FF6_MENU_SPRITE_BYTES: the hand, the arrow and the status icons
+    std::array<uint16_t, FF6_MENU_CURSOR_PALETTE_COLORS> iconPalette{};  // the sprite colors 12 to 15 of the status icons
 
     // The codes of the name of a spell, an esper, a swordtech or a blitz; empty when there is no such thing.
     std::vector<uint8_t> spellName(int index) const;

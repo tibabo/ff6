@@ -72,6 +72,10 @@ std::string saveToJson(const SaveState& state) {
     appendList(out, state.eventBits);
     out << ",\n  \"battleFlags\": ";
     appendList(out, state.battleFlags);
+    out << ",\n  \"variables\": ";
+    appendList(out, state.variables);
+    out << ", \"timers\": ";
+    appendList(out, state.timers);
     out << ",\n  \"spritePalettes\": ";
     appendList(out, std::vector<int>(state.spritePalettes.begin(), state.spritePalettes.end()));
     out << ",\n  \"parent\": ";
@@ -181,6 +185,12 @@ SaveState saveFromJson(const std::string& text) {
     }
     state.eventBits = ids(root, "eventBits", FF6_EVENT_BIT_COUNT);
     state.battleFlags = ids(root, "battleFlags", FF6_BATTLE_FLAG_BYTES * 8);
+    if (root.find("variables")) {  // saves from before the variables and the timers do not have them
+        state.variables = ids(root, "variables", FF6_BYTE_VALUES * FF6_BYTE_VALUES);
+        state.timers = ids(root, "timers", FF6_EVENT_SCRIPT_LIMIT);
+        if (state.variables.size() != 0 && state.variables.size() != FF6_EVENT_VAR_COUNT) throw std::runtime_error("save: there must be 256 variables");
+        if (state.timers.size() != 0 && state.timers.size() != FF6_EVENT_TIMER_COUNT * 3) throw std::runtime_error("save: there must be 4 timers");
+    }
     const std::vector<int> palettes = ids(root, "spritePalettes", FF6_SPRITE_PALETTE_TOTAL);
     if (palettes.size() != state.spritePalettes.size()) throw std::runtime_error("save: there must be 8 sprite palettes");
     std::copy(palettes.begin(), palettes.end(), state.spritePalettes.begin());

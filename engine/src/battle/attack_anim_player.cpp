@@ -61,6 +61,35 @@ constexpr int kMode7Unit = 0x100;  // 1.0 in the matrix
 
 int signedByte(int value) { return value >= 0x80 ? value - 0x100 : value; }
 int wrap16(int value) { return static_cast<int16_t>(static_cast<uint16_t>(value)); }
+// The place of a combatant in the shifts: the characters, then the monsters.
+int bodyIndex(const AnimBody& body) { return (body.monster ? 4 : 0) + (body.slot & 7); }
+// The sine of the game as a whole number of pixels: the amplitude is the multiplier.
+int sine16(int angle, int multiplier) { return static_cast<int>(std::lround(std::sin(2 * 3.14159265358979 * (angle & 0xFF) / 256) * multiplier)); }
+
+// How many lines each step of the vertical scroll of the pearl lasts (_c2d39f).
+constexpr int kPearlRepeat[54] = {1, 1, 1, 1, 1, 2, 1, 2, 1, 2, 2, 3, 2, 3, 3, 3, 4, 3, 4, 4, 4, 5, 4, 5, 5, 5, 5, 5, 5, 5,
+                                  5, 4, 5, 4, 4, 4, 3, 4, 3, 3, 3, 2, 3, 2, 2, 1, 2, 1, 2, 1, 1, 1, 1, 1};
+
+// The vertical scroll of the pearl: it falls by one a line, and by one more at the end of each step; the first 75 lines go forward
+// through the table of steps, and the others back through it.
+void pearlVertical(AnimLineScroll& lines) {
+    lines.active = true;
+    int value = 0, step = 0, line = 0;
+    for (const int direction : {1, -1}) {
+        const int limit = direction > 0 ? 75 : FF6_ANIM_SCROLL_LINES;
+        for (bool done = false; !done;) {
+            for (int count = kPearlRepeat[step]; count > 0 && !done; --count) {
+                lines.v[line++] = value--;
+                if (line == limit) done = true;
+            }
+            --value;
+            if (!done) step = std::clamp(step + direction, 0, 53);
+        }
+    }
+}
+}  // namespace
+static int sine8(int angle, int multiplier);
+namespace {
 
 // The commands of palette: the group of colors, whether they subtract, and whether the value is a change of the last one.
 struct PaletteOp {
@@ -285,6 +314,23 @@ void AttackAnimPlayer::begin(const AnimBody& attacker, bool flipped) {
     veilBg3_ = false;
     for (AnimFixedColor& line : fixed_) line = AnimFixedColor();
     fixedMath_ = gradientLevel_ = gradientCounter_ = 0;
+    triX_ = triY_ = triRadius_ = triAngle_ = 0;
+    steerMargin_ = 8;
+    steerCount_ = 0;
+    mosaic_ = brightness_ = 0;
+    fieldScrollX_ = fieldScrollY_ = 0;
+    for (AnimLineScroll& lines : lines_) lines = AnimLineScroll();
+    quasarStep_ = 1;
+    moonStep_ = 0x80;
+    chadarnook_ = -1;
+    echo_ = AnimEcho();
+    charOnly_ = false;
+    tornadoAngleX_ = tornadoAngleY_ = tornadoAmp_ = tornadoAmpY_ = tornadoX_ = tornadoY_ = 0;
+    tornadoShift_ = 0;
+    tornadoTableOn_ = false;
+    lights_ = -1;
+    std::fill(std::begin(mindFirst_), std::end(mindFirst_), 0);
+    std::fill(std::begin(mindSecond_), std::end(mindSecond_), 0);
     miss_ = false;
     done_ = true;
     for (int layer = 0; layer < 3; ++layer) {
@@ -559,6 +605,110 @@ void AttackAnimPlayer::shiftBody(const AnimBody& body, int dx, int dy) {
 
 void AttackAnimPlayer::hideBody(const AnimBody& body, bool hidden) { shifts_[(body.monster ? 4 : 0) + body.slot].hidden = hidden; }
 
+// A step of a character toward the other row: the table of the game gives its speed by the type of the battle and the place.
+void AttackAnimPlayer::stepRow(const AnimBody& body) {
+    if (body.monster || anim_->rowSpeeds.size() < FF6_ATTACK_ROW_SPEED_BYTES) return;
+    AnimShift& shift = shifts_[bodyIndex(body)];
+    const bool inBack = body.backRow != shift.rowFlip;
+    shift.rowAngle += signedByte(anim_->rowSpeeds[static_cast<size_t>((inBack ? 16 : 0) + std::clamp(battleType_, 0, 3) * 4 + (body.slot & 3))]);
+    ++shift.rowSteps;
+}
+
+// A new palette for the sprites of every thread of the layer 0.
+void AttackAnimPlayer::loadSpritePalette(int palette) {
+    palettes_[0] = palette;
+    palette_ = palette;
+    for (Thread& other : threads_) {
+        if (other.layer == 0) other.palette = palette;
+    }
+}
+
+// The vector of a thread: the way from one point to another, as a unit step and a length, with the position along it back at 0.
+void AttackAnimPlayer::setVector(Thread& thread, double fromX, double fromY, double toX, double toY) {
+    const double dx = toX - fromX, dy = toY - fromY;
+    const double length = std::sqrt(dx * dx + dy * dy);
+    thread.vecLength = static_cast<int>(length);
+    thread.vecX = length > 0 ? dx / length : 0;
+    thread.vecY = length > 0 ? dy / length : 0;
+    thread.vecPos = 0;
+}
+
+// The jump of the attacker along the vector ($A0 forward, $A1 back): the thread and the character stand at the position on the
+// vector, and the character is lifted by an arc as high as 32 pixels at the middle. True when the jump is over, which leaves the
+// character where it landed (forward) or back where it started.
+bool AttackAnimPlayer::jumpAlongVector(Thread& thread, bool forward, int speed) {
+    const int length = std::max(thread.vecLength, 1);
+    AnimShift* shift = &shifts_[bodyIndex(thread.attacker)];
+    const auto place = [&](bool arc) {
+        thread.offsetX = static_cast<int>(std::lround(thread.vecX * thread.vecPos));
+        thread.offsetY = static_cast<int>(std::lround(thread.vecY * thread.vecPos));
+        if (!shift) return;
+        const double fraction = std::clamp(static_cast<double>(thread.vecPos) / length, 0.0, 1.0);
+        shift->vx = thread.offsetX;
+        shift->vy = thread.offsetY - (arc ? static_cast<int>(std::lround(FF6_ANIM_JUMP_HEIGHT * std::sin(3.14159265358979 * fraction))) : 0);
+    };
+    if (forward) {
+        place(true);
+        if (thread.vecPos >= thread.vecLength) {
+            place(false);
+            return true;
+        }
+        thread.vecPos += speed;
+        return false;
+    }
+    place(true);
+    thread.vecPos -= speed;
+    if (thread.vecPos < 0) {
+        thread.offsetX = thread.offsetY = 0;
+        if (shift) shift->vx = shift->vy = 0;
+        return true;
+    }
+    return false;
+}
+
+// The triangle of window 2: three vertices on a circle (the 3D one turns on an ellipse), turned by its angle and centered at its
+// position, then the lines between them are the window.
+void AttackAnimPlayer::updateTriangle(bool threeD) {
+    int xs[3], ys[3];
+    const int base = threeD ? (~triAngle_) & 0xFF : triAngle_;
+    const int xAngles[3] = {base, base + (threeD ? 80 : 85), base + (threeD ? 144 : 170)};
+    const int yAngles[3] = {base + 64, base + (threeD ? 80 + 64 : 85 + 64), base + (threeD ? 74 : 170 + 64)};
+    for (int vertex = 0; vertex < 3; ++vertex) {
+        xs[vertex] = triX_ + sine8(xAngles[vertex], triRadius_);
+        ys[vertex] = triY_ + sine8(yAngles[vertex], triRadius_);
+    }
+    fillTriangle(xs, ys);
+}
+
+// The span of each line that the triangle covers, between the margins of 8 pixels.
+void AttackAnimPlayer::fillTriangle(const int xs[3], const int ys[3]) {
+    for (int line = 0; line < 256; ++line) {
+        spanLeft_[line] = 255;
+        spanRight_[line] = 0;
+    }
+    const int top = std::max(0, std::min({ys[0], ys[1], ys[2]})), bottom = std::min(255, std::max({ys[0], ys[1], ys[2]}));
+    for (int line = top; line <= bottom; ++line) {
+        double left = 1e9, right = -1e9;
+        for (int edge = 0; edge < 3; ++edge) {
+            const int a = edge, b = (edge + 1) % 3;
+            if (ys[a] == ys[b]) {
+                if (line == ys[a]) {
+                    left = std::min<double>(left, std::min(xs[a], xs[b]));
+                    right = std::max<double>(right, std::max(xs[a], xs[b]));
+                }
+                continue;
+            }
+            if (line < std::min(ys[a], ys[b]) || line > std::max(ys[a], ys[b])) continue;
+            const double x = xs[a] + static_cast<double>(xs[b] - xs[a]) * (line - ys[a]) / (ys[b] - ys[a]);
+            left = std::min(left, x);
+            right = std::max(right, x);
+        }
+        if (left > right) continue;
+        spanLeft_[line] = std::clamp(static_cast<int>(std::lround(left)), 8, 0xF7);
+        spanRight_[line] = std::clamp(static_cast<int>(std::lround(right)), 8, 0xF7);
+    }
+}
+
 // The color math of the init functions and of $D4: CGADSUB names the layers (the sprites, bg1 and bg3 here) that are added to
 // what is under them, or taken from it, by half or not.
 void AttackAnimPlayer::setBlends(int cgadsub) {
@@ -828,7 +978,7 @@ void AttackAnimPlayer::special(Thread& thread, const uint8_t* code, size_t at) {
         case 0x2E: thread.posX = code[at + 2], thread.posY = code[at + 3]; break;  // move to a position of the screen
         case 0x86: case 0x87: case 0x8C: sounds_.push_back(code[at + 2] ? code[at + 2] : sfx_); break;  // sound with a pan
         case 0x2D: {  // jump by the type of the battle
-            const int type = std::min(battleType_, 2);
+            const int type = battleType_ == FF6_BATTLE_TYPE_SIDE ? 0 : std::min(battleType_, 2);
             next = static_cast<size_t>(word(code, at + 2 + 2 * static_cast<size_t>(type)));
             break;
         }
@@ -859,7 +1009,315 @@ void AttackAnimPlayer::special(Thread& thread, const uint8_t* code, size_t at) {
             }
             break;
         }
+        case 0x5A: case 0x5B: case 0x5C: {  // the mind blast: two bands of lines of bg1 ripple, the second one slips away after its count
+            AnimLineScroll& lines = lines_[1];
+            lines.active = true;
+            for (int i = 0; i < 32; ++i) {
+                if (sub == 0x5B) {
+                    mindSecond_[i] = rngAt(i * 4) & 0x1F;
+                    mindFirst_[i] = 0;
+                } else if (sub == 0x5A) {
+                    if (mindSecond_[i] != 0) --mindSecond_[i];
+                    else mindFirst_[i] -= 8;
+                } else {
+                    mindFirst_[i] = mindSecond_[i] = 0;
+                }
+                lines.h[32 + i] = mindFirst_[i];
+                lines.h[64 + i] = mindSecond_[i];
+            }
+            break;
+        }
+        case 0x1B: charOnly_ = true; break;  // the thread stays where it is while a character moves along a vector
+        case 0x73: {  // the frame of a die: the face that it shows
+            static constexpr int kFaces[8] = {0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x1F, 0x1F};
+            thread.frameOffset = kFaces[dice_[std::min<int>(code[at + 2], 2)] & 7];
+            break;
+        }
+        case 0x1E: case 0x23:  // the vertical scroll of bg3 (the pearl) or bg1 goes up a line
+            lines_[sub == 0x1E ? 2 : 1].active = true;
+            for (int& scroll : lines_[sub == 0x1E ? 2 : 1].v) --scroll;
+            break;
+        case 0x20: pearlVertical(lines_[2]); break;
+        case 0x22: pearlVertical(lines_[1]); break;
+        case 0x1F: {  // bg3 scrolls sideways by the left edge of a circle of 76 pixels round the middle of the field (the pearl)
+            lines_[2].active = true;
+            for (int line = 0; line < FF6_ANIM_SCROLL_LINES; ++line) {
+                const int dy = line < 0x4C ? 0x4B - line : line - 0x4C;
+                const int width = static_cast<int>(std::lround(std::sqrt(static_cast<double>(std::max(76 * 76 - dy * dy, 0)))));
+                lines_[2].h[line] = std::max(0x80 - width, 8);
+            }
+            break;
+        }
+        case 0x06: {  // the tornado starts: a sine of 8 pixels over 64 lines is laid in the scroll data of bg1 (lines 64 to 127)
+            tornadoAngleX_ = 0x10, tornadoAngleY_ = 0, tornadoAmp_ = tornadoAmpY_ = tornadoX_ = tornadoY_ = 0;
+            tornadoShift_ = 0;
+            tornadoTableOn_ = true;
+            lines_[1] = AnimLineScroll();
+            lines_[1].active = true;
+            for (int line = 0; line < FF6_ANIM_TORNADO_LINES; ++line) {
+                tornadoTable_[line] = sine16(line * 4, FF6_ANIM_TORNADO_AMPLITUDE) - 2;
+                lines_[1].h[FF6_ANIM_TORNADO_LINES + line] = tornadoTable_[line];
+            }
+            break;
+        }
+        case 0x07: tornadoX_ = thread.offsetX, tornadoY_ = thread.offsetY; break;  // where it stands
+        case 0x08:  // the thread goes to its place on the vector
+            thread.offsetX = static_cast<int>(std::lround(thread.vecX * thread.vecPos));
+            thread.offsetY = static_cast<int>(std::lround(thread.vecY * thread.vecPos));
+            break;
+        case 0x09: {  // the combatants whose feet are above the tornado are behind bg1, the others in front
+            for (AnimShift& shift : shifts_) shift.priority = 3;
+            const int limit = thread.posY + thread.offsetY + 0x46;
+            for (const AnimBody* body : {&thread.target, &thread.attacker}) {
+                if (body->bottomY < limit) shifts_[bodyIndex(*body)].priority = 2;
+            }
+            break;
+        }
+        case 0x53: stepRow(thread.target); break;  // a step toward the other row (6 of them make the way)
+        case 0x54: {  // the row of the character is toggled
+            if (thread.target.monster) break;
+            AnimShift& shift = shifts_[bodyIndex(thread.target)];
+            if (shift.rowSteps == 0) {  // no steps taken: the character is placed in the other row at once
+                for (int step = 0; step < 6; ++step) stepRow(thread.target);
+            }
+            shift.rowFlip = !shift.rowFlip;
+            break;
+        }
+        case 0x60:  // statuses of the attacker, toggled for its picture (the four bytes of the game)
+            if (!thread.attacker.monster) {
+                shifts_[bodyIndex(thread.attacker)].statusXor ^= static_cast<uint32_t>(code[at + 2]) | (static_cast<uint32_t>(code[at + 3]) << 8) |
+                                                                  (static_cast<uint32_t>(code[at + 4]) << 16) | (static_cast<uint32_t>(code[at + 5]) << 24);
+            }
+            break;
+        case 0x79: case 0x7A:  // the characters run to the left or to the right along their line, and 7B turns them round
+            for (int slot = 0; slot < 4; ++slot) {
+                shifts_[slot].angle += sub == 0x79 ? -4 : 4;
+                shifts_[slot].action = sub == 0x79 ? 4 : 3;
+                updatePose(slot);
+            }
+            break;
+        case 0x7B:
+            for (int slot = 0; slot < 4; ++slot) {
+                shifts_[slot].turnAround = !shifts_[slot].turnAround;
+                shifts_[slot].action = 0;
+                shifts_[slot].pose = -1;
+            }
+            break;
+        case 0x85:  // the lights of Chadarnook: on (0), off (1), or off one time in eight (2); the game loads the palettes of the field
+            if (code[at + 2] == 0) {
+                lights_ = 0;
+            } else if (code[at + 2] == 1 || (nextRandom() & 7) == 0) {
+                lights_ = 1;
+            }
+            break;
         case 0x58: shape_ = code[at + 2]; break;  // the shape of the circle
+        // The palettes and the registers of the hardware that the game juggles so that its color math and its scrolls work; the
+        // counters and the facing that it saves and puts back: this screen has no use for them.
+        case 0x02: case 0x03: case 0x0E: case 0x18: case 0x19: case 0x34: case 0x35: case 0x36: case 0x4A: case 0x51: case 0x64: case 0x67: case 0x68:
+        case 0x6D: case 0x6F:
+        case 0x70: case 0x71: case 0x89:
+            break;
+        case 0x13:  // the target character turns into an imp, or back
+            if (!thread.target.monster) shifts_[bodyIndex(thread.target)].imp = !shifts_[bodyIndex(thread.target)].imp;
+            break;
+        case 0x14: if (!thread.target.monster) shifts_[bodyIndex(thread.target)].vanish = true; break;
+        case 0x17: case 0x69: {  // the priorities go back to the usual, and the one it names is lowered (the order of drawing is not modeled)
+            for (AnimShift& shift : shifts_) shift.priority = 3;
+            shifts_[bodyIndex(sub == 0x17 ? thread.target : thread.attacker)].priority = 2;
+            break;
+        }
+        case 0x3B: shifts_[bodyIndex(thread.target)].animPalette = true; break;  // the target takes the colors of the animation
+        case 0x3C: shifts_[bodyIndex(thread.target)].animPalette = false; break;
+        case 0x3F: {  // waits, running the frame before again, until the thread of bg1 gets where the attacker stands
+            const int side = battleType_ == FF6_BATTLE_TYPE_PINCER ? 0 : 8;
+            const int attackerX = thread.attackerX & 0xFF;
+            const int reached = ((bg1Cur_[0] - side) & 0xFF) >> 3;
+            const bool arrived = bg1Cur_[0] >= 0 && bg1Cur_[0] < 0x100 && (reached == (attackerX >> 3) || reached == (((-attackerX) & 0xFF) >> 3));
+            if (!arrived && at > 0 && code[at - 1] < 0x80) next = at - 1;
+            break;
+        }
+        case 0x43: case 0x55: {  // the picture of bg1 stretches line by line: the quasar and the moon song
+            AnimLineScroll& lines = lines_[1];
+            const bool start = code[at + 2] != 0;
+            int& step = sub == 0x43 ? moonStep_ : quasarStep_;
+            if (!start) {
+                step = sub == 0x43 ? 0x80 : 1;
+                break;
+            }
+            lines.active = true;
+            for (int line = 0; line < FF6_ANIM_SCROLL_LINES; ++line) {
+                lines.v[line] = sub == 0x43 ? std::max(step - line, 0) : -std::max(line - step, 0);
+            }
+            step += sub == 0x43 ? -1 : 1;
+            break;
+        }
+        case 0x50: case 0x56: {  // each line of bg3 (the winds) or of bg1 slides by its own random amount, faster as the frames go
+            AnimLineScroll& lines = lines_[sub == 0x50 ? 2 : 1];
+            lines.active = true;
+            int fast = frames_ * 8, slow = frames_ * 2;
+            if (sub == 0x56 ? !thread.flipped : false) fast = -fast, slow = -slow;
+            if (sub == 0x50 && !thread.flipped) ++fast, ++slow;
+            for (int line = 0; line < FF6_ANIM_SCROLL_LINES; ++line) {
+                const int noise = rngWord(line);
+                lines.h[line] = (noise - ((noise & 0x8000) ? fast : slow)) & 0xFFFF;
+            }
+            break;
+        }
+        case 0x59: {  // window 2 is open on the lines between the two ends, on all of them when the number is 0
+            const int closed = code[at + 2];
+            for (int line = 0; line < FF6_ANIM_SCROLL_LINES; ++line) {
+                const bool open = closed == 0 || (line >= closed && line <= FF6_ANIM_SCROLL_LINES - 1 - closed);
+                spanLeft_[line] = open ? 8 : 255;
+                spanRight_[line] = open ? 0xF7 : 0;
+            }
+            break;
+        }
+        case 0x61: case 0x62: case 0x75: {  // the thread bounces by a sine: the y offset, the x offset, and the ball that squashes
+            const int bounce = sine8((thread.waveStep & 0xFF) | code[at + 4], code[at + 2]);
+            if (sub == 0x61) thread.offsetY = bounce;
+            if (sub == 0x62) thread.offsetX = bounce;
+            if (sub == 0x75) {
+                const int phase = (thread.waveStep & 0xFF) | 0x80;
+                thread.frameOffset = phase < 0x90 ? 1 : phase < 0xA0 ? 2 : 0;
+                thread.offsetY += bounce;
+            }
+            thread.waveStep = (thread.waveStep + code[at + 3]) & 0xFF;
+            break;
+        }
+        case 0x65:  // the palette of the sprites turns to a color of the rainbow every 8 frames
+            if ((frames_ & 7) == 0) {
+                static constexpr int kRainbow[8] = {0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC1, 0xC3};
+                loadSpritePalette(kRainbow[nextRandom() & 7]);
+            }
+            break;
+        case 0x49: {  // a color at random for the sprites (the ink, the virite)
+            static constexpr int kColors[8] = {0x39, 0x3B, 0x3C, 0x56, 0x78, 0x65, 0x39, 0x3B};
+            loadSpritePalette(kColors[nextRandom() & 7]);
+            break;
+        }
+        case 0x6A: case 0x6B: {  // the thread aligns with the bottom (6A) or the center (6B) of the target
+            const int half = std::max(thread.target.bottomY - thread.target.topY, 0) / 2;
+            const int frame = anim_->gfx(thread.sheet).height * (FF6_ATTACK_CELL / 2);
+            thread.posY += sub == 0x6A ? half - frame : frame - half;
+            break;
+        }
+        case 0x6C:  // the frames of bg1 and bg3 are cleared
+            for (Thread& other : threads_) {
+                if (other.layer > 0) other.spriteFrame = -1;
+            }
+            break;
+        case 0x76: {  // the tentacles stretch toward the seized one: bg1 slides more and more on the lines above the attacker
+            AnimLineScroll& lines = lines_[1];
+            lines.active = true;
+            thread.vecPos += signedByte(code[at + 2]);
+            int accumulator = 0, scroll = 0;
+            for (int step = 0; step < 64; ++step) {
+                accumulator += thread.vecPos;
+                const int increment = (accumulator >> 8) & 0xFF;
+                accumulator &= 0xFF;
+                scroll += thread.flipped ? -increment : increment;
+                const int line = thread.attackerY - step;
+                if (line >= 0 && line < FF6_ANIM_SCROLL_LINES) lines.h[line] = scroll;
+            }
+            break;
+        }
+        case 0x77: case 0x78:  // the seized character is taken up to the attacker, or put back
+            if (!thread.target.monster) {
+                AnimShift& shift = shifts_[bodyIndex(thread.target)];
+                shift.vx = sub == 0x77 ? thread.attackerX - (thread.target.centerX - FF6_CHAR_WIDTH / 2) : 0;
+                shift.vy = sub == 0x77 ? thread.attackerY - 0x30 - (thread.target.topY + 8) : 0;
+            }
+            break;
+        case 0x7C:  // the target and the attacker change places
+            std::swap(thread.attacker, thread.target);
+            std::swap(thread.attackerX, thread.targetX);
+            std::swap(thread.attackerY, thread.targetY);
+            break;
+        case 0x7E: if (!thread.target.monster) shifts_[bodyIndex(thread.target)].flipY = !shifts_[bodyIndex(thread.target)].flipY; break;
+        case 0x7F: for (int slot = 4; slot < 10; ++slot) shifts_[slot].hidden = true; break;  // every monster is hidden
+        case 0x80: {  // the monsters fade: the colors named take a little more away at each use (the boss dying)
+            AnimTint& tint = tints_[kTintMonsters];
+            const int flags = code[at + 2], amount = flags & 0x0F;
+            if (!(flags & 0x10)) break;
+            int* parts[3] = {&tint.r, &tint.g, &tint.b};
+            const bool affected[3] = {(flags & 0x80) != 0, (flags & 0x40) != 0, (flags & 0x20) != 0};
+            for (int part = 0; part < 3; ++part) {
+                if (affected[part]) *parts[part] = std::min(*parts[part] + amount, kTintMax);
+            }
+            tint.subtract = true;
+            tint.active = tint.r || tint.g || tint.b;
+            break;
+        }
+        case 0x82: for (int slot = 4; slot < 10; ++slot) shifts_[slot].x += signedByte(code[at + 2]); break;  // the monsters tremble
+        case 0x83:  // a monster comes in from above the screen
+            if (thread.target.monster) {
+                chadarnook_ = bodyIndex(thread.target);
+                shifts_[chadarnook_].y -= 0x100;
+            }
+            break;
+        case 0x84: if (chadarnook_ >= 0) shifts_[chadarnook_].y += 0x100; break;  // and goes back where it stands
+        case 0x8A: if (thread.target.monster) shifts_[bodyIndex(thread.target)].priority = 0; break;
+        case 0x04: thread.polarAngle = static_cast<int>(nextRandom() & 0xFF), thread.polarRadius = static_cast<int>(nextRandom() & 0xFF); break;
+        case 0x0C:  // the position of the first thread of the target
+            for (const Thread& first : threads_) {
+                if (first.layer != 0 || first.index != 0 || first.target.monster != thread.target.monster || first.target.slot != thread.target.slot) continue;
+                thread.posX = first.posX, thread.posY = first.posY, thread.offsetX = first.offsetX, thread.offsetY = first.offsetY;
+                break;
+            }
+            break;
+        case 0x0F:  // the heading of $ED starts toward the side the thread faces, a little at random, with the small margin
+            steerMargin_ = 8;
+            steerCount_ = 0;
+            thread.steerAngle = (thread.flipped ? 0xFC : 0x7C) + static_cast<int>(nextRandom() & 7);
+            break;
+        case 0x11: thread.polarAngle = static_cast<int>(nextRandom() & 0xFF), thread.polarRadius = 0; break;
+        case 0x12: thread.polarAngle = thread.polarRadius = 0; break;
+        case 0x16: thread.waveStep = thread.waveHigh = 0; break;
+        case 0x1A:  // a monster enters (1) or has not entered yet (0)
+            if (thread.target.monster) shifts_[4 + (thread.target.slot & 7)].hidden = (code[at + 2] & 1) == 0;
+            break;
+        case 0x1C: ++brightness_; break;  // the screen gets a step darker
+        case 0x1D: case 0x52: {  // the thread circles round its position: a radius of 32 or 16, the angle from the frame
+            const int radius = sub == 0x1D ? 0x20 : 0x10, angle = ((sub == 0x1D ? frames_ : frames_ * 4) * 8) & 0xFF;
+            thread.offsetX += sine8(angle, radius);
+            thread.offsetY += sine8(angle + 0x40, radius);
+            break;
+        }
+        case 0x21: thread.back = ((thread.polarAngle + 0x40) & 0x80) != 0; break;  // behind the combatants on the far half of the circle
+        case 0x24: waves_[2] = AnimWave(), lines_[2] = AnimLineScroll(); break;  // the scroll data of bg3 is cleared
+        case 0x25: waves_[1] = AnimWave(), lines_[1] = AnimLineScroll(), tornadoTableOn_ = false; break;  // and the one of bg1
+        case 0x31: case 0x63:  // the y offset follows a sine wave: wide, or narrow
+            thread.offsetY = sine8(thread.waveHigh, sub == 0x31 ? 0x50 : 0x20);
+            thread.waveHigh = (thread.waveHigh + code[at + 2]) & 0xFF;
+            break;
+        case 0x44: {  // the position and the sides of the thread before this one
+            const size_t index = static_cast<size_t>(&thread - threads_.data());
+            if (index == 0) break;
+            const Thread& before = threads_[index - 1];
+            thread.attackerX = before.attackerX, thread.attackerY = before.attackerY, thread.targetX = before.targetX, thread.targetY = before.targetY;
+            thread.flipped = before.flipped;
+            thread.posX = before.posX, thread.posY = before.posY, thread.offsetX = before.offsetX, thread.offsetY = before.offsetY;
+            break;
+        }
+        case 0x45: w12_ = code[at + 2]; break;  // the window register of bg1 and bg2
+        case 0x48: if (thread.target.monster) shifts_[4 + (thread.target.slot & 7)].hidden = true; break;  // the monster is made invisible
+        case 0x4C: triX_ = (thread.posX + thread.offsetX) & 0xFF, triY_ = (thread.posY + thread.offsetY) & 0xFF; break;
+        case 0x4D:  // the vector from the triangle to the target
+            thread.attackerX = triX_;
+            thread.attackerY = triY_;
+            setVector(thread, triX_, triY_, thread.targetX, thread.targetY);
+            break;
+        case 0x4E: thread.frameOffset = 0; break;
+        case 0x28:  // the sprite tile priority of every character
+            for (int slot = 0; slot < 4; ++slot) shifts_[slot].priority = (code[at + 2] >> 4) & 3;
+            break;
+        // These only change where the game keeps its data or what it does with its own cursors and palettes, which this screen does
+        // not have: the places of graphics and tilemaps in video memory, the cursor sprites, the palette updates of the characters.
+        case 0x26: case 0x29: case 0x46: case 0x47: break;
+        case 0x5D:  // the y offset goes by a sine wave
+            thread.offsetY += sine8((thread.waveStep * 4) & 0xFF, 0x18);
+            ++thread.waveStep;
+            break;
         case 0x57: w34_ = code[at + 2]; break;  // the windows of bg3 and bg4
         case 0x37: case 0x39: case 0x3A: case 0x5F: case 0x33: case 0x4B: gradient(sub, sub == 0x37 ? 0 : (sub == 0x3A || sub == 0x33 || sub == 0x4B ? code[at + 2] : signedByte(code[at + 2]))); break;
         default: skip(0x100 | sub); break;
@@ -979,11 +1437,125 @@ void AttackAnimPlayer::command(Thread& thread, const uint8_t* code, size_t at) {
                 move.offX = static_cast<int>(std::lround(thread.vecX * reached));
                 move.offY = static_cast<int>(std::lround(thread.vecY * reached));
                 syncChar(thread.attacker.slot & 3);
+                if (!charOnly_) thread.offsetX = move.offX, thread.offsetY = move.offY;  // the thread goes along, unless $80/$1B said not
             }
             if (thread.vecPos < thread.vecLength && code[at + 2] != 0) next = at + 2 - code[at + 2];
             break;
         }
         case 0xC7: commandScene(thread, code, at); return;
+        case 0x8D: case 0x8F:  // the thread moves when it goes the way the attacker faces
+            if (!thread.attacker.monster && flipped_ == thread.flipped) move(thread, code[at + 1]);
+            break;
+        case 0x9C:  // the thread moves when the target faces left
+            if (!thread.target.monster && !flipped_) move(thread, code[at + 1]);
+            break;
+        case 0x8E:  // the sprites go behind the combatants or in front of them, by the way the attacker faces
+            if (!thread.attacker.monster) {
+                const int arg = code[at + 1];
+                thread.back = (arg & 0x80) != 0 ? true : (arg & 0x40) != 0 ? false : (((flipped_ ? 1 : 0) ^ (thread.flipped ? 1 : 0) ^ (arg & 1)) & 1) != 0;
+            }
+            break;
+        case 0x9B:  // the same, by the way the target faces
+            if (!thread.target.monster) {
+                const int arg = code[at + 1];
+                thread.back = (arg & 0x80) != 0 ? true : (arg & 0x40) != 0 ? false : (((flipped_ ? 1 : 0) ^ (arg & 1)) & 1) != 0;
+            }
+            break;
+        case 0xF4: thread.back = (code[at + 1] & 1) != 0; break;
+        case 0xDB:  // skips the step back of a character that does not need it; a monster never steps back
+            if (thread.attacker.monster) next = at + 2 + code[at + 1];
+            break;
+        case 0xF2: setVector(thread, thread.targetX, thread.targetY, thread.attackerX, thread.attackerY); break;  // from the target to the attacker
+        case 0xA0: case 0xA1: case 0xE2: case 0xE3:  // the attacker (a character, or a monster with $E2 and $E3) jumps along the vector
+            if (!jumpAlongVector(thread, op == 0xA0 || op == 0xE2, code[at + 1])) next = at + 2 - code[at + 2];
+            break;
+        case 0xE4: setVector(thread, thread.attackerX, thread.attackerY, thread.targetX, thread.targetY); break;
+        case 0xED: {  // the thread flies toward the target, turning its heading a little at a time (the margin grows with use)
+            const double fromX = std::min(thread.posX, 255), fromY = std::min(thread.posY, 255);
+            const double dx = thread.targetX - fromX, dy = thread.targetY - fromY;
+            const int wanted = static_cast<int>(std::lround(std::atan2(dy, dx) * 256 / (2 * 3.14159265358979))) & 0xFF;
+            const int gap = (wanted - thread.steerAngle) & 0xFF;
+            const int turn = std::min(gap >= 0x80 ? 0x100 - gap : gap, steerMargin_);
+            if (steerMargin_ < 0x10 && (++steerCount_ & 7) == 0) ++steerMargin_;
+            thread.steerAngle = (thread.steerAngle + (gap >= 0x80 ? -turn : turn)) & 0xFF;
+            const int speed = code[at + 1];
+            if (std::sqrt(dx * dx + dy * dy) < speed + 4) break;
+            const double angle = thread.steerAngle * 2 * 3.14159265358979 / 256;
+            thread.posX += static_cast<int>(std::lround(std::cos(angle) * speed));
+            thread.posY += static_cast<int>(std::lround(std::sin(angle) * speed));
+            next = at + 2 - code[at + 2];
+            break;
+        }
+        case 0xC1: {  // along the vector by steps, then the thread goes where it got to and the vector turns a little, until $F0
+            thread.offsetX = static_cast<int>(std::lround(thread.vecX * thread.vecPos));
+            thread.offsetY = static_cast<int>(std::lround(thread.vecY * thread.vecPos));
+            thread.vecPos += code[at + 1];
+            if (thread.vecPos >= 0xF0) break;
+            if (thread.vecPos >= thread.vecLength) {
+                thread.vecLength = 0xF0;
+                thread.vecPos = 0;
+                thread.posX += thread.offsetX;
+                thread.posY += thread.offsetY;
+                thread.offsetX = thread.offsetY = 0;
+                const double turned = std::atan2(thread.vecY, thread.vecX) + 0x18 * 2 * 3.14159265358979 / 256;
+                thread.vecX = std::cos(turned);
+                thread.vecY = std::sin(turned);
+                break;
+            }
+            next = at + 2 - code[at + 2];
+            break;
+        }
+        case 0xD9: if (!thread.attacker.monster) shifts_[thread.attacker.slot & 3].priority = (code[at + 1] >> 4) & 3; break;
+        case 0xEA: break;  // where in video memory the frames of bg1 and bg3 are loaded: nothing to draw
+        case 0xEE: shifts_[(thread.target.monster ? 4 : 0) + (thread.target.slot & 7)].priority = (code[at + 1] >> 4) & 3; break;
+        case 0xD5:  // the target monster is turned over
+            if (thread.target.monster) {
+                AnimShift& shift = shifts_[4 + (thread.target.slot & 7)];
+                shift.flipX = shift.flipX != ((code[at + 1] & 1) != 0);
+                shift.flipY = shift.flipY != ((code[at + 1] & 2) != 0);
+            }
+            break;
+        case 0xD6: fieldScrollX_ = thread.flipped ? -signedByte(code[at + 1]) : signedByte(code[at + 1]), fieldScrollY_ = signedByte(code[at + 2]); break;  // scroll bg2
+        case 0xD7: {  // the sprites of the fire dance circle round: the heading and the position along it both turn
+            thread.offsetX = sine8(thread.polarAngle, code[at + 1]);
+            thread.offsetY = sine8(thread.polarRadius, code[at + 1]);
+            thread.polarAngle = (thread.polarAngle + 4) & 0xFF;
+            thread.polarRadius = (thread.polarRadius + 6) & 0xFF;
+            break;
+        }
+        case 0xBE: mosaic_ = code[at + 1]; break;
+        case 0xDD: triX_ = code[at + 1], triY_ = code[at + 2], triRadius_ = code[at + 3], triAngle_ = code[at + 4]; break;  // init triangle
+        case 0xDE: triX_ = thread.attackerX & 0xFF, triY_ = thread.attackerY & 0xFF; break;
+        case 0xDF: triX_ = thread.targetX & 0xFF, triY_ = thread.targetY & 0xFF; break;
+        case 0xE0:  // the triangle moves, grows and turns
+            triX_ = (triX_ + (thread.flipped ? -signedByte(code[at + 1]) : signedByte(code[at + 1]))) & 0xFF;
+            triY_ = (triY_ + signedByte(code[at + 2])) & 0xFF;
+            triRadius_ = (triRadius_ + code[at + 3]) & 0xFF;
+            triAngle_ = (triAngle_ + code[at + 4]) & 0xFF;
+            break;
+        case 0xDC: updateTriangle(false); break;
+        case 0xDA: {  // the tornado: the thread circles round the place of the tornado, wider and wider
+            thread.offsetX = sine16(tornadoAngleX_, tornadoAmp_) + tornadoX_;
+            thread.offsetY = sine16(tornadoAngleY_, tornadoAmpY_) + tornadoY_;
+            tornadoAngleX_ = (tornadoAngleX_ + code[at + 1]) & 0xFF;
+            tornadoAngleY_ = (tornadoAngleY_ + code[at + 2]) & 0xFF;
+            tornadoAmp_ = std::min(tornadoAmp_ + 1, 0x40);
+            tornadoAmpY_ = tornadoAmp_ / 2;
+            if (tornadoTableOn_) {  // lines 0 to 63 of bg1 take the table from where it has got to, going round
+                for (int line = 0; line < FF6_ANIM_TORNADO_LINES; ++line) {
+                    lines_[1].h[line] = tornadoTable_[(tornadoShift_ + line) % FF6_ANIM_TORNADO_LINES];
+                }
+                tornadoShift_ = (tornadoShift_ + 2) % FF6_ANIM_TORNADO_LINES;
+            }
+            break;
+        }
+        case 0xCB:  // a character leaves echoes of where it was (the trail of the quadra slam)
+            if (!thread.attacker.monster) echo_ = {(code[at + 1] & 0x80) != 0, thread.attacker.slot & 3, code[at + 1] & 0x7F};
+            break;
+        // The palette that a thread takes for its sprites ($99) is a row of the sprite palettes of the game, which the purifier uses
+        // for the crusader (its sheet has the palette of the esper here); the armor that $F9 poses is not drawn in a battle here.
+        case 0x99: case 0xF9: break;
+        case 0xF6: updateTriangle(true); break;
         case 0x86: case 0x87: {  // the attacker or the target moves
             int dx = 0, dy = 0;
             stepOf(code[at + 1], thread.flipped, dx, dy);
@@ -1171,7 +1743,7 @@ bool AttackAnimPlayer::tick() {
         if (behindLimit_ > 0 && thread.spriteLayer == 0 && thread.priority == 0) continue;
         if (thread.spriteOn && thread.spriteFrame >= 0 && thread.spriteSheet >= 0) {
             sprites_.push_back({thread.spriteSheet, thread.spriteFrame, thread.spriteX, thread.spriteY, thread.spritePalette,
-                                thread.spriteFlipped, thread.spriteLayer, thread.esper, veilBg3_ && thread.spriteLayer > 0});
+                                thread.spriteFlipped, thread.spriteLayer, thread.esper, veilBg3_ && thread.spriteLayer > 0, thread.back});
         }
     }
     done_ = !any || frames_ >= maxFrames_;

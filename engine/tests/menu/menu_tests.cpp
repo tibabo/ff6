@@ -68,6 +68,19 @@ void testMenu() {
         CHECK(green[0] == 0 && green[1] == 255 && green[2] == 0);
     }
 
+    {  // the mosaic gives each block the color of its first pixel
+        ff6::MenuScreen screen(common, menu);
+        screen.clear();
+        screen.plot(0, 0, 10, 20, 30);
+        screen.plot(1, 1, 200, 200, 200);
+        screen.plot(4, 0, 50, 60, 70);
+        screen.mosaic(0, 0, 8, 8, 4);
+        CHECK(pixelAt(screen, 3, 3)[0] == 10 && pixelAt(screen, 1, 1)[1] == 20);
+        CHECK(pixelAt(screen, 7, 3)[2] == 70);
+        screen.mosaic(0, 0, 8, 8, 1);
+        CHECK(pixelAt(screen, 3, 3)[0] == 10);
+    }
+
     {  // a window covers its frame and inside; the hand and the text are over it
         ff6::MenuScreen screen(common, menu);
         screen.clear();

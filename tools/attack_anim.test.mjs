@@ -5,8 +5,9 @@ import {
   ATTACK_ANIM_MAGIC, ATTACK_ANIM_PROP_BYTES, ATTACK_ANIM_PROP_COUNT, ATTACK_ANIM_SCRIPT_BYTES, ATTACK_ANIM_SCRIPT_COUNT,
   ATTACK_FRAME_END, ATTACK_FRAME_FIRST, ATTACK_FRAME_PTR_COUNT, ATTACK_GFX_2BPP_BYTES, ATTACK_GFX_3BPP_BYTES, ATTACK_GFX_PROP_BYTES,
   ATTACK_MODE7_GFX_BYTES, ATTACK_MODE7_MAP_BYTES, ATTACK_PAL_BYTES, ATTACK_TILES_2BPP_BYTES, ATTACK_TILES_3BPP_BYTES,
-  ATTACK_WEAPON_PROP_BYTES, ATTACK_WEAPON_PROP_COUNT, buildAttackAnim, readAttackAnimProp, readAttackFramePtrs, readAttackGfxProp,
-  readAttackMode7Gfx, readAttackMode7Map, readAttackScriptPtrs, readAttackScripts, readWeaponAnimProp,
+  ATTACK_WEAPON_PROP_BYTES, ATTACK_WEAPON_PROP_COUNT, ATTACK_RNG_BYTES, ATTACK_ROW_SPEED_BYTES, ATTACK_LIGHTS_BYTES, buildAttackAnim,
+  readAttackAnimProp, readAttackFramePtrs, readAttackGfxProp, readAttackLights, readAttackMode7Gfx, readAttackMode7Map, readAttackRng,
+  readAttackRowSpeeds, readAttackScriptPtrs, readAttackScripts, readWeaponAnimProp,
 } from './battle/attack_anim.mjs';
 import { requireSupportedRom } from './rom.mjs';
 
@@ -74,7 +75,20 @@ test('attack animations hold the tables one after the other', { skip }, () => {
   assert.equal(data.length, 12 + ATTACK_ANIM_PROP_COUNT * ATTACK_ANIM_PROP_BYTES + ATTACK_ANIM_SCRIPT_COUNT * (ATTACK_GFX_PROP_BYTES + 2)
     + ATTACK_ANIM_SCRIPT_BYTES + ATTACK_FRAME_PTR_COUNT * 2 + ATTACK_FRAME_END - ATTACK_FRAME_FIRST + ATTACK_TILES_3BPP_BYTES
     + ATTACK_PAL_BYTES + ATTACK_TILES_2BPP_BYTES + ATTACK_GFX_3BPP_BYTES + ATTACK_GFX_2BPP_BYTES
-    + ATTACK_WEAPON_PROP_COUNT * ATTACK_WEAPON_PROP_BYTES + ATTACK_MODE7_GFX_BYTES + ATTACK_MODE7_MAP_BYTES);
+    + ATTACK_WEAPON_PROP_COUNT * ATTACK_WEAPON_PROP_BYTES + ATTACK_MODE7_GFX_BYTES + ATTACK_MODE7_MAP_BYTES
+    + ATTACK_RNG_BYTES + ATTACK_ROW_SPEED_BYTES + ATTACK_LIGHTS_BYTES);
+});
+
+test('the random numbers, the row speeds and the palettes of the lights are those of the game', { skip }, () => {
+  const rom = loadRom();
+  const rng = readAttackRng(rom);
+  assert.deepEqual([...rng.subarray(0, 4)], [0x07, 0xb6, 0xf0, 0x1f]);
+  const speeds = readAttackRowSpeeds(rom);
+  assert.deepEqual([...speeds.subarray(0, 4)].map(v => (v << 24) >> 24), [2, 2, 2, 2]);  // toward the back row on a normal battle
+  assert.deepEqual([...speeds.subarray(16, 20)].map(v => (v << 24) >> 24), [-2, -2, -2, -2]);  // and toward the front row
+  const lights = readAttackLights(rom);
+  assert.deepEqual([...lights.subarray(0, 6)], [0x00, 0x00, 0xad, 0x31, 0x0a, 0x19]);  // on
+  assert.deepEqual([...lights.subarray(96, 102)], [0x00, 0x00, 0x84, 0x0c, 0x44, 0x0c]);  // off
 });
 
 test('the mode 7 pictures are three sets of tiles and three maps of 32 x 32 tiles', { skip }, () => {

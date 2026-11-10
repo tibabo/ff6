@@ -1,4 +1,8 @@
 #include <cstdlib>
+#include <cstdio>
+#include <map>
+#include <set>
+#include <vector>
 
 #include "../check.hpp"
 #include "../tests.hpp"
@@ -97,6 +101,121 @@ void testAttackAnimPlayer() {
         }
     }
     CHECK(tinted && shifted);
+
+    {
+        // The mosaic, the brightness, the vertical flip and the priorities that scripts set are noted for the screen to draw.
+        ff6::AnimBody ally;
+        ally.slot = 0, ally.centerX = 200, ally.centerY = 100, ally.topY = 88, ally.bottomY = 112;
+        bool mosaic = false, dim = false, flipped = false, front = false, back = false;
+        for (int attack = 0; attack < FF6_ATTACK_PROP_COUNT; ++attack) {
+            player.start(attack, attacker, {attack == 95 ? ally : monster(0, 70, 84)}, false, 0);
+            for (int frame = 0; frame < 900 && player.tick(); ++frame) {
+                mosaic = mosaic || (player.mosaic() >> 4) > 0;
+                dim = dim || player.dimmed() > 0;
+                flipped = flipped || player.shift(false, 0).flipY;
+                for (int slot = 0; slot < 4; ++slot) front = front || player.shift(false, slot).priority == FF6_ANIM_PRIORITY_FRONT;
+                for (const ff6::AnimSprite& sprite : player.sprites()) back = back || sprite.back;
+            }
+        }
+        CHECK(mosaic && dim && flipped && front && back);
+    }
+    if (std::getenv("FF6_SKIP_PROBE")) {  // set it to list the commands that no animation gets past, with some of the attacks
+        std::map<int, std::vector<int>> found;
+        for (int attack = 0; attack < FF6_ATTACK_PROP_COUNT; ++attack) {
+            player.start(attack, attacker, {monster(0, 70, 84)}, false);
+            for (int frame = 0; frame < 900 && player.tick(); ++frame) {}
+            for (const auto& entry : player.skipped()) found[entry.first].push_back(attack);
+        }
+        for (const auto& entry : found) {
+            std::printf("skipped %03X in %zu attacks:", entry.first, entry.second.size());
+            for (size_t i = 0; i < entry.second.size() && i < 24; ++i) std::printf(" %d", entry.second[i]);
+            std::printf("\n");
+        }
+    }
+    {
+        // No command is skipped by any of the 406 animations (a code over 0xFF is a command of $80).
+        std::set<int> skipped;
+        for (int attack = 0; attack < FF6_ATTACK_PROP_COUNT; ++attack) {
+            player.start(attack, attacker, {monster(0, 70, 84)}, false);
+            for (int frame = 0; frame < 900 && player.tick(); ++frame) {}
+            for (const auto& entry : player.skipped()) skipped.insert(entry.first);
+        }
+        CHECK(skipped.empty());
+    }
+    {
+        // The pearl scrolls bg3 line by line, the characters run along their line, and the echoes of a character are asked for.
+        const auto seen = [&](std::initializer_list<int> attacks, const auto& test) {
+            bool found = false;
+            for (const int attack : attacks) {
+                player.start(attack, attacker, {monster(0, 70, 84)}, false);
+                for (int frame = 0; frame < 600 && player.tick(); ++frame) found = found || test();
+            }
+            return found;
+        };
+        CHECK(seen({14, 147}, [&] { return player.lineScroll(2).active; }));
+        CHECK(seen({388, 389}, [&] { return player.shift(false, 0).angle != 0; }));
+        CHECK(seen({85, 241}, [&] { return player.echo().on; }));
+        CHECK(seen({196}, [&] { return player.lineScroll(1).active; }));
+    }
+    {
+        // A die shows the face that it was given.
+        player.setDice(3, 5, 1);
+        player.start(380, attacker, {monster(0, 70, 84)}, false);
+        bool ticked = false;
+        for (int frame = 0; frame < 300 && player.tick(); ++frame) ticked = true;
+        CHECK(ticked && player.skipped().empty());
+    }
+    {
+        // The triangle is the shape of window 2 for some attacks, as the circle is for others.
+        bool inside = false, outside = false;
+        for (const int attack : {12, 161, 175, 191, 210, 287}) {
+            player.start(attack, attacker, {monster(0, 70, 84)}, false);
+            for (int frame = 0; frame < 300 && player.tick(); ++frame) {
+                for (int y = 0; y < 160; y += 8) {
+                    for (int x = 8; x < 248; x += 8) {
+                        for (const int layer : {1, 2}) {
+                            if (!player.layerWindowed(layer)) continue;
+                            (player.layerVisible(layer, x, y) ? inside : outside) = true;
+                        }
+                    }
+                }
+            }
+        }
+        CHECK(inside && outside);
+        // The jumps along a vector carry the attacker to its target and back: sonic dive style attacks move the character.
+        bool jumped = false;
+        for (const int attack : {63, 95, 243, 301}) {
+            player.start(attack, attacker, {monster(0, 70, 84)}, false);
+            for (int frame = 0; frame < 300 && player.tick(); ++frame) {
+                jumped = jumped || player.shift(false, 0).vx != 0 || player.shift(false, 0).vy != 0;
+            }
+        }
+        CHECK(jumped);
+    }
+    {
+        // The game's tables: the lights of Chadarnook load a palette of the field, the tornado lays its sine in the scroll data of
+        // bg1, and r.polarity moves a character to the other row by the steps of the table (2 by 6 for the front row of a normal
+        // battle going back).
+        ff6::AnimBody ally;
+        ally.slot = 0;
+        ally.centerX = 200;
+        ally.centerY = 100;
+        ally.topY = 88;
+        ally.bottomY = 112;
+        bool lights = false, tornado = false, row = false, noise = false;
+        for (int attack = 0; attack < FF6_ATTACK_PROP_COUNT; ++attack) {
+            for (const bool character : {false, true}) {
+                player.start(attack, attacker, {character ? ally : monster(0, 70, 84)}, false, 0);
+                for (int frame = 0; frame < 600 && player.tick(); ++frame) {
+                    lights = lights || player.lightsPalette() != nullptr;
+                    tornado = tornado || (player.lineScroll(1).active && player.lineScroll(1).h[64 + 16] != 0 && player.lineScroll(1).h[3] != 0);
+                    row = row || player.shift(false, 0).rowAngle == 12;
+                    noise = noise || (player.lineScroll(1).active && player.lineScroll(1).h[150] != 0);
+                }
+            }
+        }
+        CHECK(lights && tornado && row && noise);
+    }
 
     player.start(-1, attacker, {monster(0, 70, 84)}, false);
     CHECK(player.done() && !player.tick());  // no attack, no animation

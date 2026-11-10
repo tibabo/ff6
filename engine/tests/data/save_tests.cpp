@@ -118,6 +118,15 @@ void testSave() {
     CHECK(character.enabled && character.visible && character.party == 2 && character.slot == 1 && character.map == 0x1C);
     CHECK(character.gfx == 164 && character.palette == 7 && character.x == 8 && character.y == 45 && character.facing == 3);
     CHECK(!back.characters[1].enabled);
+    {  // the event variables and the timers are kept too
+        ff6::SaveState withVariables;
+        withVariables.variables.assign(FF6_EVENT_VAR_COUNT, 0);
+        withVariables.variables[7] = 65535;
+        withVariables.timers = {0x10, 90, 0x1234, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+        const ff6::SaveState kept = ff6::saveFromJson(ff6::saveToJson(withVariables));
+        CHECK(kept.variables == withVariables.variables && kept.timers == withVariables.timers);
+        CHECK(back.variables.empty() && back.timers.empty());
+    }
     CHECK(back.config == state.config);
     CHECK(back.hasColors && back.fontColor == 0x1234 && back.windowColors == state.windowColors);
     CHECK(back.hasParty && back.party.gil == 1234567 && back.party.steps == 4321);

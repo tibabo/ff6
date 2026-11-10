@@ -25,6 +25,8 @@ struct SaveState {
     std::array<SaveCharacter, FF6_CHAR_COUNT> characters;
     std::vector<int> eventBits;  // the event bits that are set
     std::vector<int> battleFlags;  // the battle flags that are set
+    std::vector<int> variables;  // the 256 event variables, empty when they are all 0
+    std::vector<int> timers;  // flags, counter and event address of each of the 4 timers, empty when they are all 0
     std::array<int, FF6_SPRITE_PALETTE_SLOTS> spritePalettes{0, 1, 2, 3, 4, 5, 6, 7};  // palette of each slot
     bool hasParent = false;  // the map that the party goes back to from a house
     int parentMap = 0, parentX = 0, parentY = 0, parentFacing = 0;

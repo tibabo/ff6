@@ -224,8 +224,7 @@ void BattleScreen::startAnimation(const Message& message) {
     if (targets.empty()) return;
     const int type = battle_->battleType();
     const bool flipped = attacker.monster != (type == FF6_BATTLE_TYPE_BACK);
-    player_->start(message.attack, attacker, targets, flipped,
-                   type == FF6_BATTLE_TYPE_BACK ? 1 : type == FF6_BATTLE_TYPE_PINCER ? 2 : 0);
+    player_->start(message.attack, attacker, targets, flipped, type);
     player_->presetHidden(keptHidden_);
     plane_ = BattleImage();
     planeCycle_ = -1;
@@ -281,6 +280,7 @@ bool BattleScreen::body(int combatant, AnimBody& out) const {
     if (combatant < FF6_BATTLE_PARTY_SLOTS) {
         out.monster = false;
         out.slot = combatant;
+        out.backRow = battle_->combatants()[static_cast<size_t>(combatant)].backRow;
         x = characterX(combatant);
         y = characterTop(combatant);
     } else {
@@ -394,22 +394,41 @@ void BattleScreen::drawAnimation() {
     // bg1 and the sprites, and it goes on the screen last, with the low one it is behind the field and does not show.
     const bool justice = player_->behindBg1Limit() > 0;  // its sprites stop where its window does, and the picture is a little wider
     static constexpr int kPasses[4] = {2, 1, 0, 2}, kPassesUnder[4] = {2, 0, 1, 2};
+    std::vector<const AnimSprite*> drawOrder;  // the sprites that go behind the combatants come first
+    for (const AnimSprite& sprite : player_->sprites()) {
+        if (sprite.back) drawOrder.push_back(&sprite);
+    }
+    const size_t backCount = drawOrder.size();
+    for (const AnimSprite& sprite : player_->sprites()) {
+        if (!sprite.back) drawOrder.push_back(&sprite);
+    }
     for (int pass = 0; pass < 4; ++pass) {
         const int layer = justice ? kPassesUnder[pass] : kPasses[pass];
         const bool last = pass == 3;
         if (mode7 && layer > 0) continue;  // bg1 is the plane of mode 7, and there is no bg3
+        if (!justice && pass == 2 && !mode7 && frontShown_) {  // the combatants that a script put in front of bg1
+            screen_.image(0, 0, FF6_SCREEN_WIDTH, FF6_BATTLE_FIELD_HEIGHT, frontPixels_.data());
+        }
         if (justice && pass == 3 && !mode7) {  // what is in front of bg1 goes over it again
             screen_.image(0, 0, FF6_SCREEN_WIDTH, FF6_BATTLE_FIELD_HEIGHT, objectPixels_.data());
         }
         const AnimTint& tint = player_->tint(layer == 0 ? kTintSprites : layer == 1 ? kTintBg1 : kTintBg3);
         const AnimBlend blend = player_->blend(layer);
+        const int mosaicLayers = layer == 1 ? 0x01 : layer == 2 ? 0x04 : 0;  // the mosaic register names bg1 and bg3 by these bits
+        const int mosaicSize = (player_->mosaic() & mosaicLayers) ? (player_->mosaic() >> 4) + 1 : 1;
         // A layer of background is first drawn apart. If it adds the subscreen, where it has a pixel the pixel replaces the one
         // of the scene, plus what the subscreen (its layers, in priority) shows there; a half addition halves only where the
         // subscreen has a pixel, as the hardware does.
         const bool added = layer > 0 && layerPixels_[layer].size() == bgPixels_.size();
         if (added && !last) std::fill(layerPixels_[layer].begin(), layerPixels_[layer].end(), 0);
-        for (const AnimSprite& sprite : player_->sprites()) {
+        bool objectsOver = false;  // the combatants have been put back over the sprites that go behind them
+        for (const AnimSprite* ordered : drawOrder) {
+            const AnimSprite& sprite = *ordered;
             if (last || sprite.layer != layer) continue;
+            if (layer == 0 && !sprite.back && backCount > 0 && !objectsOver) {
+                screen_.image(0, 0, FF6_SCREEN_WIDTH, FF6_BATTLE_FIELD_HEIGHT, objectPixels_.data());
+                objectsOver = true;
+            }
             const AnimEsperSheet& sheet = player_->esperSheet();
             const int order = sprite.esper >= 0 ? sprite.esper : sheet.esper;
             const BattleImage* esper = gfx_ && (sprite.esper >= 0 || sheet.layer == sprite.layer) ? &gfx_->monster(FF6_ESPER_GFX_FIRST + order) : nullptr;
@@ -419,9 +438,24 @@ void BattleScreen::drawAnimation() {
             const std::vector<uint8_t> pixels = tint.active ? colored(frame.image.rgba, tint) : std::vector<uint8_t>();
             const uint8_t* source = tint.active ? pixels.data() : frame.image.rgba.data();
             const AnimWave wave = layer > 0 ? player_->wave(layer) : AnimWave();
+            static const AnimLineScroll noLines;
+            const AnimLineScroll& lines = layer > 0 ? player_->lineScroll(layer) : noLines;
             const auto paint = [&](int x, int y, int w, int h, const uint8_t* rgba) {
                 if (layer == 0 && justice) h = std::min(h, FF6_JUSTICE_WINDOW_LINES - y);
                 if (h <= 0) return;
+                std::vector<uint8_t> blocky;  // the mosaic: each block of the screen takes the color of its first pixel
+                if (mosaicSize > 1) {
+                    blocky.resize(static_cast<size_t>(w) * h * FF6_BYTES_PER_PIXEL);
+                    for (int row = 0; row < h; ++row) {
+                        for (int column = 0; column < w; ++column) {
+                            const int fromColumn = std::max(column - (((x + column) % mosaicSize) + mosaicSize) % mosaicSize, 0);
+                            const int fromRow = std::max(row - (((y + row) % mosaicSize) + mosaicSize) % mosaicSize, 0);
+                            const uint8_t* from = rgba + (static_cast<size_t>(fromRow) * w + fromColumn) * FF6_BYTES_PER_PIXEL;
+                            std::copy(from, from + FF6_BYTES_PER_PIXEL, &blocky[(static_cast<size_t>(row) * w + column) * FF6_BYTES_PER_PIXEL]);
+                        }
+                    }
+                    rgba = blocky.data();
+                }
                 // The sprites of Justice are under bg1, and the dark pocket of the picture where the mouth sits lets them through.
                 std::vector<uint8_t> pocket;
                 if (layer == 1 && justice) {
@@ -510,7 +544,7 @@ void BattleScreen::drawAnimation() {
             }
             const bool windowed = player_->layerWindowed(layer);
             for (const int top : tops) {
-            if (!wave.active && !windowed) {
+            if (!wave.active && !windowed && !lines.active && mosaicSize == 1) {
                 for (const int origin : origins) paint(origin, top, width, height, source);
                 continue;
             }
@@ -522,9 +556,11 @@ void BattleScreen::drawAnimation() {
             std::vector<uint8_t> clipped;
             for (const int origin : origins) {
                 for (int row = 0; row < height; ++row) {
-                    const int line = std::clamp(top + row, 0, FF6_BATTLE_FIELD_HEIGHT - 1) * 32 / FF6_BATTLE_FIELD_HEIGHT;
-                    const int shiftX = wave.horizontal ? swing(wave.hAmplitude, wave.hShown, line) : 0;
-                    const int from = std::clamp(row + (wave.vertical ? swing(wave.vAmplitude, wave.vShown, line) : 0), 0, height - 1);
+                    const int blockRow = mosaicSize > 1 ? row - (((top + row) % mosaicSize) + mosaicSize) % mosaicSize : row;  // the first line of its block
+                    const int line = std::clamp(top + blockRow, 0, FF6_BATTLE_FIELD_HEIGHT - 1) * 32 / FF6_BATTLE_FIELD_HEIGHT;
+                    const int scrollLine = std::clamp(top + blockRow, 0, FF6_ANIM_SCROLL_LINES - 1);
+                    const int shiftX = (wave.horizontal ? swing(wave.hAmplitude, wave.hShown, line) : 0) - (lines.active ? lines.h[scrollLine] % width : 0);
+                    const int from = std::clamp(blockRow + (wave.vertical ? swing(wave.vAmplitude, wave.vShown, line) : 0) + (lines.active ? lines.v[scrollLine] : 0), 0, height - 1);
                     const uint8_t* rowPixels = source + static_cast<size_t>(from) * width * FF6_BYTES_PER_PIXEL;
                     if (windowed) {  // the pixels outside the window of the layer are cut
                         clipped.assign(rowPixels, rowPixels + static_cast<size_t>(width) * FF6_BYTES_PER_PIXEL);
@@ -538,6 +574,7 @@ void BattleScreen::drawAnimation() {
             }
             }
         }
+        if (layer == 0 && backCount > 0 && !objectsOver && !last) screen_.image(0, 0, FF6_SCREEN_WIDTH, FF6_BATTLE_FIELD_HEIGHT, objectPixels_.data());
         if (!added || (layer == 2 && pass == 0) || (last && !player_->bg3High())) continue;
         const std::vector<uint8_t>& own = layerPixels_[layer];
         if (!blend.math) {
@@ -837,7 +874,7 @@ void BattleScreen::startScene(const Message& message) {
         }
         if (!attack.targets.empty()) attacks.push_back(attack);
     }
-    player_->startScene(threads, attacks, type == FF6_BATTLE_TYPE_BACK, type == FF6_BATTLE_TYPE_BACK ? 1 : type == FF6_BATTLE_TYPE_PINCER ? 2 : 0);
+    player_->startScene(threads, attacks, type == FF6_BATTLE_TYPE_BACK, type);
     player_->presetHidden(keptHidden_);
     plane_ = BattleImage();
     planeCycle_ = -1;
@@ -1861,6 +1898,17 @@ BattleImage turned(const BattleImage& image) {
     return result;
 }
 
+// The picture upside down.
+BattleImage upended(const BattleImage& image) {
+    BattleImage result = image;
+    const size_t stride = static_cast<size_t>(image.width) * FF6_BYTES_PER_PIXEL;
+    for (int y = 0; y < image.height; ++y) {
+        std::copy(&image.rgba[static_cast<size_t>(y) * stride], &image.rgba[static_cast<size_t>(y) * stride] + stride,
+                  &result.rgba[static_cast<size_t>(image.height - 1 - y) * stride]);
+    }
+    return result;
+}
+
 // A monster that falls melts away: the pixels go one by one, in an order of their own.
 BattleImage dissolved(const BattleImage& image, int percent) {
     BattleImage result = image;
@@ -1931,13 +1979,15 @@ const BattleImage& BattleScreen::monsterImage(size_t slot) const {
 void BattleScreen::drawField() {
     if (!gfx_) return;
     const bool scripted = player_ && !player_->done();  // an animation that moves, hides and colors what it reaches
+    const int fieldScrollX = scripted ? player_->fieldScrollX() : 0, fieldScrollY = scripted ? player_->fieldScrollY() : 0;
     const auto shiftOf = [&](bool monster, int slot) {
         AnimShift shift = scripted ? player_->shift(monster, slot) : AnimShift();
         if (!monster && !scripted) shift.hidden = keptHidden_[slot];  // a scene took the character off the field
         return shift;
     };
     const auto tintOf = [&](int group) { return scripted ? player_->tint(group) : AnimTint(); };
-    const BattleImage& field = gfx_->background(background_, BattleGfx::backgroundStep(background_, animation_));
+    const uint8_t* lights = scripted ? player_->lightsPalette() : nullptr;  // the palettes that Chadarnook's lights loaded
+    const BattleImage& field = gfx_->background(background_, BattleGfx::backgroundStep(background_, animation_), lights, lights ? 1 + player_->lights() : 0);
     const AnimTint fieldTint = tintOf(kTintField);
     const BattleImage lit = fieldTint.active && !field.rgba.empty() ? BattleImage{field.width, field.height, colored(field.rgba, fieldTint)} : BattleImage();
     const BattleImage& shownField = lit.rgba.empty() ? field : lit;
@@ -1955,10 +2005,10 @@ void BattleScreen::drawField() {
             screen_.image(shiftX, y, field.width, 1, row);
             if (shiftX != 0) screen_.image(shiftX + (shiftX > 0 ? -field.width : field.width), y, field.width, 1, row);
         }
-    } else if (showField && (scrollX_ != 0 || scrollY_ != 0 || bgShake_ != 0)) {  // the field wraps around as it scrolls
+    } else if (showField && (scrollX_ != 0 || scrollY_ != 0 || bgShake_ != 0 || fieldScrollX != 0 || fieldScrollY != 0)) {  // the field wraps around as it scrolls
         static constexpr int kShake[17] = {-1, -3, -2, -3, -4, -2, -1, -3, -4, -2, -3, -1, -3, -2, -1, -2, -1};  // ScreenShakeTbl
-        const int scrollX = scrollX_ + (bgShake_ ? kShake[animation_ & 15] : 0);
-        const int scrollY = scrollY_ + (bgShake_ && bgShake_ != 0x80 ? kShake[(animation_ & 15) + 1] : 0);
+        const int scrollX = scrollX_ + fieldScrollX + (bgShake_ ? kShake[animation_ & 15] : 0);
+        const int scrollY = scrollY_ + fieldScrollY + (bgShake_ && bgShake_ != 0x80 ? kShake[(animation_ & 15) + 1] : 0);
         const int width = field.width, height = field.height;
         const int column = ((scrollX % width) + width) % width;
         for (int y = 0; y < height && y < FF6_BATTLE_FIELD_HEIGHT; ++y) {
@@ -1969,6 +2019,9 @@ void BattleScreen::drawField() {
         }
     } else if (showField) {
         screen_.image(0, 0, field.width, field.height, shownField.rgba.data());
+    }
+    if (scripted && showField && (player_->mosaic() & 0x02) && (player_->mosaic() >> 4) > 0) {  // the mosaic of bg2: the field
+        screen_.mosaic(0, 0, FF6_SCREEN_WIDTH, FF6_BATTLE_FIELD_HEIGHT, (player_->mosaic() >> 4) + 1);
     }
     // The fixed color of each line is added to the backdrop (all of it in mode 7) and to bg2 (the field), or taken away.
     const int fixedMath = scripted ? player_->fixedMath() : 0;
@@ -1993,6 +2046,9 @@ void BattleScreen::drawField() {
     objectPixels_.assign(fieldBytes, 0);
     behindPixels_.assign(fieldBytes, 0);
     for (std::vector<uint8_t>& layer : layerPixels_) layer.assign(fieldBytes, 0);
+    frontPixels_.assign(fieldBytes, 0);
+    frontShown_ = false;
+    bool frontDraw = false;  // the combatant being drawn is in front of bg1 (a script gave it the top priority)
     const int behindLimit = scripted ? player_->behindBg1Limit() : 0;
     const auto place = [&](int x, int y, int w, int h, const uint8_t* rgba, bool behind) {
     std::vector<uint8_t>& target = behind ? behindPixels_ : objectPixels_;
@@ -2002,7 +2058,12 @@ void BattleScreen::drawField() {
                 if (x + column < 0 || x + column >= FF6_SCREEN_WIDTH) continue;
                 const uint8_t* from = rgba + (static_cast<size_t>(row) * w + column) * FF6_BYTES_PER_PIXEL;
                 if (from[FF6_ALPHA_OFFSET] == 0) continue;
-                std::copy(from, from + FF6_BYTES_PER_PIXEL, &target[(static_cast<size_t>(y + row) * FF6_SCREEN_WIDTH + x + column) * FF6_BYTES_PER_PIXEL]);
+                const size_t at = (static_cast<size_t>(y + row) * FF6_SCREEN_WIDTH + x + column) * FF6_BYTES_PER_PIXEL;
+                std::copy(from, from + FF6_BYTES_PER_PIXEL, &target[at]);
+                if (frontDraw && !behind) {
+                    std::copy(from, from + FF6_BYTES_PER_PIXEL, &frontPixels_[at]);
+                    frontShown_ = true;
+                }
             }
         }
     };
@@ -2011,30 +2072,42 @@ void BattleScreen::drawField() {
         const size_t slot = FF6_BATTLE_PARTY_SLOTS + i;
         const Combatant& monster = battle_->combatants()[slot];
         const AnimShift shift = shiftOf(true, static_cast<int>(i));
+        frontDraw = scripted && shift.priority == FF6_ANIM_PRIORITY_FRONT;
         const bool blinkOff = blinkTimer_[slot] > 0 && (blinkTimer_[slot] / FF6_BATTLE_BLINK_PERIOD) % 2 == 0;
         bool shown = monster.alive() && !(monster.status & FF6_ST_HIDE) && !blinkOff;
         if (dying_[slot]) shown = true;
         if (!shown || shift.hidden) continue;
-        const BattleImage& image = monsterImage(i);
-        if (image.rgba.empty()) continue;
-        const BattleImage flipped = mirrored(i) ? turned(image) : BattleImage();
-        const BattleImage& whole = mirrored(i) ? flipped : image;
+        const BattleImage& stock = monsterImage(i);
+        if (stock.rgba.empty()) continue;
+        BattleImage swapped;  // a script gave the monster the colors of the animation
+        if (shift.animPalette && anim_ && i < formation_.monsters.size()) {
+            swapped = gfx_->monsterWith(formation_.monsters[i], anim_->paletteWords(player_->palette()));
+        }
+        const BattleImage& image = swapped.rgba.empty() || swapped.width != stock.width || swapped.height != stock.height ? stock : swapped;
+        const BattleImage flipped = mirrored(i) != shift.flipX ? turned(image) : BattleImage();
+        const BattleImage& sideways = mirrored(i) != shift.flipX ? flipped : image;
+        const BattleImage overturned = shift.flipY ? upended(sideways) : BattleImage();
+        const BattleImage& whole = shift.flipY ? overturned : sideways;
         const BattleImage melting = dying_[slot] && fadeTimer_[slot] > 0
                                         ? dissolved(whole, 100 - fadeTimer_[slot] * 100 / FF6_BATTLE_BLINK_FRAMES)
                                         : BattleImage();
         const BattleImage& drawn = melting.rgba.empty() ? whole : melting;
         const std::vector<uint8_t> lit = monsterTint.active ? colored(drawn.rgba, monsterTint) : std::vector<uint8_t>();
         const int monsterTop = this->monsterTop(i);
-        place(monsterX(i, image.width) + shift.x, monsterTop + shift.y, image.width, image.height,
+        place(monsterX(i, image.width) + shift.x + shift.vx, monsterTop + shift.y + shift.vy, image.width, image.height,
               monsterTint.active ? lit.data() : drawn.rgba.data(), behindLimit > 0 && monsterTop + image.height - 8 < behindLimit);
     }
     // The characters stand along a line that leans to the right, one below the other.
+    if (!(scripted && player_->echo().on)) {
+        for (EchoFrame& echo : echoHistory_) echo = EchoFrame();
+    }
     for (int i = 0; i < FF6_BATTLE_PARTY_SLOTS; ++i) {
         const Combatant& c = battle_->combatants()[static_cast<size_t>(i)];
         if (!c.present || (c.offstage && !sceneControlled_[i]) || (c.escaped && escapeTimer_[static_cast<size_t>(i)] == 0)) continue;
         int pose = FF6_CHAR_POSE_FIGHT;
         bool poseFlip = false;
         const AnimShift shift = shiftOf(false, i);
+        frontDraw = scripted && shift.priority == FF6_ANIM_PRIORITY_FRONT;
         if (c.escaped) {
             pose = FF6_CHAR_POSE_RUN;
         } else if (c.hp == 0) {
@@ -2055,35 +2128,57 @@ void BattleScreen::drawField() {
         }
         int actor = c.gfx >= 0 ? c.gfx : characterSprite(c.id);
         if (gfxOverride_[i] >= 0) actor = gfxOverride_[i];
+        const uint32_t status = c.status ^ shift.statusXor;  // the statuses, and the ones that a script toggled for the picture
         if (c.status & FF6_ST_MORPH) actor = FF6_CHAR_GFX_ESPER_TERRA;
-        else if (c.status & FF6_ST_IMP) actor = FF6_CHAR_GFX_IMP;
+        else if (((status & FF6_ST_IMP) != 0) != shift.imp) actor = FF6_CHAR_GFX_IMP;  // the status, or a script that toggles it
         const bool posed = c.hp > 0 && !c.escaped && shift.pose >= 0;
         const int drawnPose = posed ? shift.pose : pose;
         if (posed) poseFlip = shift.flip;
         std::array<uint16_t, 16> colors = gfx_->characterPalette(actor);
-        const std::array<uint16_t, 16> original = colors;
-        if (c.hp > 0) statusColors(colors, c.status, animation_);
-        const bool vanished = c.hp > 0 && (c.status & FF6_ST_VANISH) != 0;  // only the outline is left
+        if (shift.animPalette && anim_) {  // the colors of the animation, in place of the first 8
+            const std::array<uint16_t, 8> words = anim_->paletteWords(player_->palette());
+            for (size_t k = 1; k < words.size(); ++k) colors[k] = words[k];
+        }
+        const std::array<uint16_t, 16> original = gfx_->characterPalette(actor);
+        if (c.hp > 0) statusColors(colors, status, animation_);
+        const bool vanished = c.hp > 0 && ((status & FF6_ST_VANISH) != 0 || shift.vanish);  // only the outline is left
         const BattleImage recolored = colors != original || vanished ? gfx_->characterWith(actor, drawnPose, colors, vanished) : BattleImage();
         const BattleImage& image = recolored.rgba.empty() ? gfx_->character(actor, drawnPose) : recolored;
         if (image.rgba.empty()) continue;
         if (shift.hidden) continue;
         const int step = stepTimer_[static_cast<size_t>(i)] > 0 ? FF6_BATTLE_STEP_PIXELS : 0;
         const bool back = battle_->battleType() == FF6_BATTLE_TYPE_BACK;
-        const bool turnedPose = back != poseFlip;  // the pose faces the other way, or the whole battle does
+        const bool turnedPose = (back != poseFlip) != shift.turnAround;  // the pose faces the other way, or the whole battle does
         const BattleImage flipped = turnedPose ? turned(image) : BattleImage();
         const int run = c.escaped ? (FF6_BATTLE_ESCAPE_FRAMES - escapeTimer_[static_cast<size_t>(i)]) * FF6_BATTLE_ESCAPE_SPEED : 0;
         static constexpr int kFloat[8] = FF6_FLOAT_OFFSETS;
-        const int lift = (c.status & FF6_ST_FLOAT) && !(c.status & FF6_ST_MAGITEK) && shift.pose < 0 && poseTimer_[static_cast<size_t>(i)] == 0
+        const int lift = (status & FF6_ST_FLOAT) && !(status & FF6_ST_MAGITEK) && shift.pose < 0 && poseTimer_[static_cast<size_t>(i)] == 0
                              ? kFloat[(animation_ & 0x38) >> 3] : 0;
-        const int x = characterX(i) + (back ? step - run : run - step) + shift.x;
-        const std::vector<uint8_t> lit = characterTint.active ? colored((turnedPose ? flipped : image).rgba, characterTint) : std::vector<uint8_t>();
+        // A character that runs along the line of the party, or goes to the other row, turns on the angle that the line leans by.
+        static constexpr int kCharRowY[FF6_BATTLE_PARTY_SLOTS] = FF6_BATTLE_CHAR_Y;
+        const int rowAngle = shift.rowAngle;
+        const int walked = (shift.angle + rowAngle) * (kCharRowY[i] + FF6_BATTLE_CHAR_APEX) / 256;
+        const int x = characterX(i) + (back ? step - run - walked : run - step + walked) + shift.x + shift.vx;
+        const BattleImage upside = shift.flipY ? upended(turnedPose ? flipped : image) : BattleImage();  // turned over by a script
+        const BattleImage& faced = shift.flipY ? upside : (turnedPose ? flipped : image);
+        const std::vector<uint8_t> lit = characterTint.active ? colored(faced.rgba, characterTint) : std::vector<uint8_t>();
         const bool behindBg1 = behindLimit > 0 && characterTop(i) + FF6_CHAR_HEIGHT < behindLimit;
         const BattleImage& shadow = gfx_->statusSprite(FF6_STATUS_SPRITE_SHADOW, 0);  // under the feet, behind the character
         if (!shadow.rgba.empty()) place(x, characterTop(i) + FF6_CHAR_HEIGHT + shift.y, shadow.width, shadow.height, shadow.rgba.data(), behindBg1);
-        place(x, characterTop(i) + shift.y - lift, image.width, image.height,
-              characterTint.active ? lit.data() : (turnedPose ? flipped : image).rgba.data(), behindBg1);
-        const int kind = c.hp > 0 ? statusSpriteKind(c.status) : 0;  // a sprite over the head: the bubbles, the dots, the zzz
+        const std::vector<uint8_t>& drawnPixels = characterTint.active ? lit : faced.rgba;
+        const int drawnTop = characterTop(i) + shift.y + shift.vy - lift;
+        if (scripted && player_->echo().on && player_->echo().slot == i) {  // the echoes come first, behind the character
+            if ((animation_ & player_->echo().mask) == 0) {
+                for (size_t k = echoHistory_.size() - 1; k > 0; --k) echoHistory_[k] = echoHistory_[k - 1];
+                echoHistory_[0] = {x, drawnTop, image.width, image.height, drawnPixels};
+            }
+            for (size_t k = static_cast<size_t>(animation_ & 1); k < echoHistory_.size(); k += 2) {
+                const EchoFrame& echo = echoHistory_[k];
+                if (!echo.rgba.empty()) place(echo.x, echo.y, echo.width, echo.height, echo.rgba.data(), behindBg1);
+            }
+        }
+        place(x, drawnTop, image.width, image.height, drawnPixels.data(), behindBg1);
+        const int kind = c.hp > 0 ? statusSpriteKind(status) : 0;  // a sprite over the head: the bubbles, the dots, the zzz
         if (kind) {
             static constexpr int kX[7] = {0, 0, 0, -1, 0, -8, -16}, kY[7] = {0, -8, -8, -6, -8, -8, -8}, kKneelY[7] = {0, -3, -3, -1, -3, -3, -3};
             static constexpr int kFlipX[7] = {0, 0, 0, 2, 0, 16, 32};  // the sprite goes to the other side of a character that faces left
@@ -2273,6 +2368,9 @@ void BattleScreen::draw() {
     drawHands();
     if (mode_ == BattleMode::Slot) drawSlot();
     if (mode_ == BattleMode::Result) drawResult();
+    if (player_ && !player_->done() && player_->dimmed() > 0) {  // the brightness of the whole screen, a sixteenth less at each step
+        screen_.tint(0, 0, FF6_SCREEN_WIDTH, FF6_SCREEN_HEIGHT, 0, 0, 0, std::min(player_->dimmed(), FF6_ANIM_BRIGHTNESS_STEPS) * 100 / FF6_ANIM_BRIGHTNESS_STEPS);
+    }
 }
 
 }  // namespace ff6

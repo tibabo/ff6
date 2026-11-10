@@ -189,6 +189,8 @@ private:
     BattleImage plane_;
     int planeCycle_ = -1;
     std::vector<uint8_t> bgPixels_, objectPixels_, behindPixels_;  // the field, what stands on it, and what bg1 covers; RGBA, field size
+    std::vector<uint8_t> frontPixels_;  // the combatants that a script put in front of bg1
+    bool frontShown_ = false;
     std::array<std::vector<uint8_t>, 3> layerPixels_;  // the layers of background of the animation, apart (1 and 2)
     void tickEffects();
     std::array<int, FF6_BATTLE_COMBATANTS> poseTimer_{}, poseValue_{}, stepTimer_{}, blinkTimer_{}, fadeTimer_{}, escapeTimer_{};
@@ -197,6 +199,12 @@ private:
     int animation_ = 0;  // frames, for what moves by itself
     int scrollX_ = 0, scrollY_ = 0;  // where the field has scrolled to: the clouds, the waterfall and the trains move
     AnimShift keptShift_[FF6_BATTLE_COMBATANTS];  // how far the animations of the scripts moved a monster for good
+    // The echoes of a character (the trail of the quadra slam): where and how it was at the last 8 times that a script asked to keep it.
+    struct EchoFrame {
+        int x = 0, y = 0, width = 0, height = 0;
+        std::vector<uint8_t> rgba;
+    };
+    std::array<EchoFrame, 8> echoHistory_;
     int persistSlot_ = -1;  // the monster whose animation is playing and moves it for good
     AnimShift persistLast_;
     void flushPersist();

@@ -30,6 +30,7 @@ void testEvent();
 void testEventCmd();
 void testMenu();
 void testLoadMenu();
+void testPartyMenu();
 void testPpu();
 void testCutsceneCore();
 void testCutsceneScenes();

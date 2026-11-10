@@ -48,6 +48,16 @@ AttackAnimProp AttackAnim::prop(int attack) const {
     return result;
 }
 
+std::array<uint16_t, 8> AttackAnim::paletteWords(int palette) const {
+    std::array<uint16_t, 8> colors{};
+    const size_t first = static_cast<size_t>(std::max(palette, 0)) * FF6_ATTACK_PAL_BYTES_EACH;
+    for (size_t i = 0; i < colors.size(); ++i) {
+        const size_t at = first + i * 2;
+        if (at + 1 < pal.size()) colors[i] = static_cast<uint16_t>(pal[at] | (pal[at + 1] << 8));
+    }
+    return colors;
+}
+
 WeaponAnimProp AttackAnim::weapon(int index) const {
     WeaponAnimProp result;
     if (index < 0 || index >= FF6_ATTACK_WEAPON_PROP_COUNT) return result;
@@ -236,6 +246,9 @@ AttackAnim loadAttackAnim(const std::string& packDir) {
     anim.weapons = reader.bytes(static_cast<size_t>(FF6_ATTACK_WEAPON_PROP_COUNT) * FF6_ATTACK_WEAPON_PROP_BYTES);
     anim.mode7Gfx = reader.bytes(FF6_ATTACK_MODE7_GFX_BYTES);
     anim.mode7Map = reader.bytes(FF6_ATTACK_MODE7_MAP_BYTES);
+    anim.rng = reader.bytes(FF6_ATTACK_RNG_BYTES);
+    anim.rowSpeeds = reader.bytes(FF6_ATTACK_ROW_SPEED_BYTES);
+    anim.lights = reader.bytes(FF6_ATTACK_LIGHTS_BYTES);
     if (reader.remaining() != 0) throw std::runtime_error("attack animations have trailing bytes");
     return anim;
 }

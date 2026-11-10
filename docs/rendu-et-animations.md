@@ -121,9 +121,41 @@ d'initialisation :
 | `$EC` | le fil passe dans une autre couche |
 | `$D0` | priorité des combattants (octet >> 4) face à bg1 en mode 7 |
 | `$90`,`$D1`,`$F7`,`$C2` | reconnus, sans effet dans ce rendu (ordre des sprites, priorité des tuiles, attente de ligne) |
+| `$8D`,`$8F`,`$9C` | déplace le fil si l'attaquant (ou la cible) regarde dans tel sens |
+| `$8E`,`$9B`,`$F4` | le fil passe derrière ou devant les combattants (`AnimSprite::back`, noté mais pas encore dessiné) |
+| `$DB` | saute le pas en arrière d'un personnage ; un monstre ne le fait jamais |
+| `$F2` | vecteur de la cible à l'attaquant |
+| `$A0`,`$A1` | saut de l'attaquant le long du vecteur, aller ou retour, avec un arc de 32 pixels (`AnimShift::vx`, `vy`) |
+| `$ED` | vol vers la cible en tournant le cap petit à petit (la marge grandit à l'usage) ; `$80/$0F` en fixe le cap de départ |
+| `$C1` | avance par pas le long du vecteur, puis le fil se pose là et le vecteur tourne de `0x18` |
+| `$D5` | retourne le monstre ciblé (`AnimShift::flipX` et `flipY`, dessinés) |
+| `$D6` | défile le champ (bg2) ; `$D7` : sprites de la danse du feu ; `$BE` : mosaïque (`mosaic()` : taille en quartet haut, bg1 = bit 0, bg2 = bit 1, bg3 = bit 2 ; chaque bloc prend la couleur de son premier pixel, `MenuScreen::mosaic` pour le champ) |
+| `$D9`,`$EE`, `$80/$28` | priorité de tuile des combattants (`AnimShift::priority` ; 3 = devant bg1, redessiné après bg1) |
+| `$DD`,`$DC`,`$F6`,`$DE`,`$DF`,`$E0`, `$80/$4C`,`$4D` | le triangle : le jeu en fait la forme de la fenêtre 2 (même mécanisme que le cercle) avec trois sommets sur un cercle (une ellipse pour la 3D) |
+| `$EA`, `$80/$26`,`$29`,`$46`,`$47` | n'agissent que sur la mémoire vidéo, les curseurs et les palettes propres du jeu : rien à dessiner |
+| `$80/$04`,`$0C`,`$11`,`$12`,`$16`,`$1D`,`$52`,`$21`,`$31`,`$63`,`$5D`,`$44`,`$45`,`$4E`,`$1A`,`$48`,`$1C`,`$24`,`$25` | mouvements du fil (angle et position polaires au hasard, première position du groupe, orbites de rayon 32 et 16, ondes sinusoïdales, copie du fil précédent), registre de fenêtre, montre ou cache un monstre, assombrit l'écran (`dimmed()` : un seizième de noir par pas, tout l'écran), efface les ondes de bg3 et de bg1 |
+| `$E2`,`$E3`,`$E4` | comme `$A0`, `$A1` et `$E7` pour un monstre attaquant |
+| `$80/$3B`,`$3C` | la cible prend les couleurs de l'animation (palette 3 du jeu), puis les rend : un monstre est redécodé avec les 8 premières couleurs de la palette de l'animation (`BattleGfx::monsterWith`), un personnage avec `characterWith` |
+| `$80/$43`,`$55`,`$50`,`$56`,`$76`,`$5A`..`$5C` | défilement par ligne de bg1 ou de bg3 (`AnimLineScroll`, 151 lignes) : chanson de la lune, quasar, vents au hasard, tentacules qui saisissent, souffle mental ; le jeu lit sa table de nombres au hasard (`RNGTbl`, `C0/FD00`, dans `attackanim.ff6data`) : un mot par ligne pour `$50`/`$56`, un octet sur quatre pour `$5B` |
+| `$80/$59` | fenêtre 2 ouverte entre deux bords (flare star, goner) |
+| `$80/$61`,`$62`,`$75` | rebonds sinusoïdaux du fil (pluie de chats, balle super) ; `$80/$65`, `$49` : palette de sprites au hasard (arc-en-ciel, encre) |
+| `$80/$6A`,`$6B`,`$6C` | aligne le fil sur le bas ou le centre de la cible ; vide les cadres de bg1 et bg3 |
+| `$80/$13`,`$14`,`$77`,`$78`,`$7C`,`$7E`,`$7F`,`$80`,`$82`,`$83`,`$84`,`$8A` | personnage en diablotin ou invisible, personnage saisi emmené chez l'attaquant, échange cible et attaquant, tous les monstres cachés, fondu des monstres, tremblement, entrée de Chadarnook, priorité d'un monstre |
+| `$80/$1E`,`$1F`,`$20`,`$22`,`$23` | la perle : défilement vertical de bg3 ou de bg1 par pas de la table `_c2d39f` (54 durées, d'abord vers l'avant, puis à rebours), et défilement horizontal de bg3 par le bord gauche d'un cercle de 76 pixels |
+| `$DA`, `$80/$06`..`$09` | la tornade : le fil tourne autour de sa place, de plus en plus large (angles `$10` et `0`, amplitude jusqu'à `$40`) ; `$06` pose dans le tableau de défilement de bg1 une sinusoïde de 8 pixels sur 64 lignes (`_c10d8b`), `$DA` en recopie une fenêtre (décalée de 2 lignes par image) sur les lignes 0 à 63 |
+| `$80/$79`,`$7A`,`$7B`,`$53`,`$54`,`$60` | les personnages courent le long de leur ligne (angle de 4 en 4, `AnimShift::angle`) puis se retournent, passent à l'autre rangée (pas signés de la table `C2/A86F` (vers l'arrière) et `C2/A87F` (vers l'avant), indexée par type de combat × 4 + place, 6 pas ; `AnimShift::rowAngle`), états de l'attaquant ajoutés ou retirés pour le dessin (`statusXor`) |
+| `$CB` | échos d'un personnage : jusqu'à huit positions passées gardées tous les `masque + 1` images, quatre dessinées à chaque image, une sur deux (`AnimEcho`, `BattleScreen::echoHistory_`) |
+| `$80/$73`,`$1B` | la face d'un dé (`setDice`) ; un personnage qui suit un vecteur n'emporte plus le fil |
+| `$80/$85` | lumières de Chadarnook : le champ prend la palette du jeu, allumée ou éteinte (`attackanim.ff6data`, 2 × 96 octets en `C2/E288`) |
+| `$99`, `$F9` | la rangée de palette d'un fil (le Crusader l'a déjà par sa feuille d'esprit) et la pose de l'armure Magitek (le combat ne dessine pas l'armure) : sans effet ici |
+| `$80/$3F` | attend, en rejouant le cadre d'avant, que le fil de bg1 arrive à la hauteur de l'attaquant (saut de Sonic Dive) |
+| `$80/$02`,`$03`,`$0E`,`$18`,`$19`,`$34`..`$36`,`$4A`,`$51`,`$64`,`$67`,`$68`,`$6D`,`$6F`,`$70`,`$71`,`$89` | registres, palettes et compteurs du matériel, sans équivalent ici |
 
 `AttackAnimPlayer::skipped()` donne les commandes sautées et leur nombre : c'est
-l'outil pour trouver ce qu'il reste à faire.
+l'outil pour trouver ce qu'il reste à faire. Le test du lecteur
+(`attack_anim_player_tests.cpp`) joue les 406 animations et vérifie qu'aucune
+commande de la liste ci-dessus n'est sautée ; `FF6_SKIP_PROBE=1 FF6_PACK=... ff6_tests`
+affiche la liste de celles qui le sont encore, avec quelques attaques.
 
 ## 4. Fonctions d'initialisation
 
@@ -397,18 +429,26 @@ La vitesse de la montée du blanc à la couleur est devinée.
 
 ## 10. Ce qu'il reste
 
-Compter les commandes sautées sur les 406 animations avec `skipped()` donne la
-liste exacte. Aujourd'hui :
+Plus aucune commande n'est sautée : le test du lecteur joue les 406 animations et
+exige que `skipped()` reste vide. Cela ne veut pas dire que chaque effet est dessiné
+comme le jeu (le test ne compare aucune image). Ce qui est approché, noté sans être
+dessiné, ou sans équivalent :
 
-- triangles (`$DD`) ;
-- mode « couleur fixe » des maths de couleur pour les calques (sprites, bg1) : seuls le
-  fond et bg2 le reçoivent ;
-- formes de cercle : Bio Blast et blobs sont faits d'après le code mais pas
-  comparés au jeu ;
-- pose secondaire (`$C8`), déplacement d'un personnage le long d'un vecteur
-  (`$E5`, `$E6`) ;
-- priorités entre couches (le moteur dessine toujours dans le même ordre) ;
-- la plupart des sous-commandes de `$80` propres à une attaque (tornade, perle,
-  arc-en-ciel, dégradés bleus…) ;
-- les animations des objets consommables (table `ItemAnimPtrs`) sont jouées :
-  l'objet `$E7` donne l'animation 402, `$E8` à `$FE` les animations 337 à 359.
+- **noté sans être dessiné** : la priorité des combattants plus fine que « devant bg1 »
+  (0 à 2 reste sous bg1, comme sans priorité), la priorité des fils (`$90`).
+  Les sprites `back` (`$8E`, `$9B`, `$F4`, `$80/$21`) passent sous les combattants, les
+  combattants de priorité 3 par-dessus bg1, mais pas d'ordre par hauteur (`$80/$17`, `$69`) ;
+- **sans effet ici** : les registres et palettes du matériel (liste du §3), la rangée de
+  palette `$99`, l'armure Magitek `$F9` (le combat ne dessine pas l'armure) ;
+- **approché** : la position verticale du triangle (centrée sur ses coordonnées,
+  d'après `UpdateTriangle`) ; le saut de `$E2` et `$E3` d'un monstre (même arc que pour
+  un personnage) ; l'ordre des échos de `$CB` ; le tableau de la tornade est posé tel que
+  le code du jeu le lit (lignes 0 à 63 : la sinusoïde qui glisse de 2 lignes par image,
+  lignes 64 à 127 : la sinusoïde fixe), sans comparaison à une capture ;
+- **à comparer à des captures** : tout ce qui a été ajouté depuis la comparaison
+  d'Alexandre, y compris les défilements par ligne, l'échange de palette de la cible
+  (`$80/$3B`) et la perle ; formes de cercle (Bio Blast et blobs) ; mode « couleur fixe »
+  des maths de couleur pour les calques (sprites, bg1 : seuls le fond et bg2 le
+  reçoivent) ;
+- les animations des objets consommables sont jouées d'après la table `ItemAnimPtrs`
+  (l'objet `$E7` donne l'animation 402, `$E8` à `$FE` les animations 337 à 359).

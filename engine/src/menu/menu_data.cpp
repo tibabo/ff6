@@ -53,6 +53,8 @@ MenuData loadMenuData(const std::string& packDir) {
     menu.esperNames = reader.bytes(static_cast<size_t>(FF6_ESPER_COUNT) * FF6_ESPER_NAME_BYTES);
     menu.bushidoNames = reader.bytes(static_cast<size_t>(FF6_TECH_COUNT) * FF6_TECH_NAME_BYTES);
     menu.blitzNames = reader.bytes(static_cast<size_t>(FF6_TECH_COUNT) * FF6_TECH_NAME_BYTES);
+    menu.spriteGfx = reader.bytes(FF6_MENU_SPRITE_BYTES);
+    for (uint16_t& color : menu.iconPalette) color = reader.u16();
     if (reader.remaining() != 0) throw std::runtime_error("menu data has trailing bytes");
     return menu;
 }

@@ -28,9 +28,12 @@ struct BattleGfx {
 
     // The picture of a monster from the top left tile of its stencil; empty for a number that has none. Decoded once.
     const BattleImage& monster(int id) const;
+    // The same with the first 8 colors of its palette replaced (BGR555, the first one stays transparent); not kept.
+    BattleImage monsterWith(int id, const std::array<uint16_t, 8>& colors) const;
     // The battlefield behind the monsters, FF6_SCREEN_WIDTH wide, one with no pixel for a background that has none. `step` is
-    // the turn of the palette of the fields whose colors run (see backgroundStep).
-    const BattleImage& background(int index, int step = 0) const;
+    // the turn of the palette of the fields whose colors run (see backgroundStep). `palette` (3 of 16 BGR555 words) replaces the
+    // colors of the field, `variant` (1 and up) telling the replacements apart.
+    const BattleImage& background(int index, int step = 0, const uint8_t* palette = nullptr, int variant = 0) const;
     // The turn of the colors of a field at a frame: 0 for a field whose colors stay (UpdateBattleBG: the raft, the waterfall,
     // Cyan's dream).
     static int backgroundStep(int index, int frame);
@@ -47,6 +50,7 @@ struct BattleGfx {
     const BattleImage& statusSprite(int kind, int frame) const;
 
 private:
+    BattleImage decodeMonster(int id, const std::array<uint16_t, 8>* replace) const;
     mutable std::map<int, BattleImage> monsters_, backgrounds_, characters_, statuses_;
     mutable std::map<int, std::vector<uint8_t>> characterColors_;  // the numbers of the colors of each pixel, 0 for none
 };

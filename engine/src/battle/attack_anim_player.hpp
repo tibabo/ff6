@@ -14,6 +14,7 @@ struct AnimBody {
     int slot = 0;  // the character (0-3) or the monster (0-5)
     int centerX = 0, centerY = 0, topY = 0, bottomY = 0;
     int width = 16;
+    bool backRow = false;  // a character in the back row
 };
 
 // A sprite of the animation on the screen: the frame of the sheet, its corner and whether it is mirrored.
@@ -23,6 +24,7 @@ struct AnimSprite {
     int layer = 0;  // 0 sprites, 1 bg1, 2 bg3: the graphics are those of the script of that layer
     int esper = -1;  // the order of the esper whose picture is the sheet of this sprite, when the thread has one of its own
     bool veil = false;  // a frame of bg1 or bg3 of Justice: the game shows it a little wider than its cells
+    bool back = false;  // the sprite goes behind the combatants (the game's IsBackSprite)
 };
 
 // What the palette commands do to a group of colors: a value for each component, added to the colors or taken from them.
@@ -38,6 +40,30 @@ struct AnimShift {
     int pose = -1;  // the pose of a character that the script chose
     bool flip = false;  // the pose is turned the other way round
     int action = 0;  // the animated action of a character (CHAR_ACTION), which makes its pose go on changing
+    int vx = 0, vy = 0;  // where a jump along a vector put the combatant (set, not added to x and y)
+    int priority = -1;  // the sprite tile priority a script gave it (0 to 3), -1 for none
+    bool animPalette = false;  // it is drawn with the palette of the animation (the game's palette 3), not its own
+    bool imp = false, vanish = false;  // a script turned it into an imp (the status toggled) or made it vanish
+    int angle = 0;  // how far a character ran along the line of the party, in 256ths of a turn (it runs by 4 at a time)
+    int rowAngle = 0;  // how far a character has moved toward the other row (angle units, by the speeds of the game's table)
+    int rowSteps = 0;  // the steps it took
+    bool rowFlip = false;  // a script toggled the row of the character: the next steps go back the other way
+    bool turnAround = false;  // the character faces the other way
+    uint32_t statusXor = 0;  // statuses (the bits of the game's four status bytes) that a script toggled for the picture
+    bool flipX = false, flipY = false;  // a monster turned over by a script
+};
+
+// A character that leaves echoes of its last positions (the trail of the quadra slam): which, and how many frames apart.
+struct AnimEcho {
+    bool on = false;
+    int slot = -1, mask = 0;  // the echo takes a new position when the frame counter and the mask are 0
+};
+
+// The scroll of a layer of background, line by line (the HDMA tables of the game): added to the position of the layer on each of the
+// 151 lines of the field, horizontally and vertically.
+struct AnimLineScroll {
+    bool active = false;
+    int h[FF6_ANIM_SCROLL_LINES] = {}, v[FF6_ANIM_SCROLL_LINES] = {};
 };
 
 // A thread of a scene of a battle event: the script (an address of bank D0) of a character, and who it moves.
@@ -154,6 +180,17 @@ public:
     // The waves of a layer of background (1 or 2).
     const AnimWave& wave(int layer) const { return waves_[layer]; }
     const AnimBlend& blend(int layer) const { return blends_[layer]; }
+    // The scroll line by line of a layer of background (1 or 2), which the random scrolls, the quasar, the moon song and the
+    // seizing tentacles set.
+    const AnimLineScroll& lineScroll(int layer) const { return lines_[layer]; }
+    // The palettes of the field that Chadarnook's lights loaded (3 of 16 colors, BGR555 words), or null when no script loaded them.
+    const uint8_t* lightsPalette() const {
+        return lights_ < 0 || anim_->lights.size() < FF6_ATTACK_LIGHTS_BYTES ? nullptr : &anim_->lights[static_cast<size_t>(lights_) * (FF6_ATTACK_LIGHTS_BYTES / 2)];
+    }
+    int lights() const { return lights_; }
+    const AnimEcho& echo() const { return echo_; }
+    // The faces that the three dice show, which the animations of the dice read ($80/$73).
+    void setDice(int first, int second, int third) { dice_[0] = first, dice_[1] = second, dice_[2] = third; }
     // The layers of the subscreen that the color math adds to a layer: 0x10 sprites (monsters and characters), 0x02 the field.
     int subscreen() const { return subscreen_; }
     // Whether the pixel of a layer of background shows through the windows of the animation (the circle).
@@ -179,6 +216,13 @@ public:
     bool bg3High() const { return bg3High_; }
     // The line under which a combatant is in front of bg1; the ones above it are behind it. 0 when the order is not set.
     int behindBg1Limit() const { return behindLimit_; }
+    // The screen mosaic register that a script set ($2106: the size in the high nibble, the layers in the low one), and how many
+    // steps of brightness the scripts took away.
+    int mosaic() const { return mosaic_; }
+    int dimmed() const { return brightness_; }
+    // How far a script scrolled the field (bg2), in pixels.
+    int fieldScrollX() const { return fieldScrollX_; }
+    int fieldScrollY() const { return fieldScrollY_; }
     // The color math with the fixed color of each scanline (the gradients): the CGADSUB bits of the layers it reaches (0x20 the
     // backdrop, 0x02 bg2, 0x80 takes it away, 0x40 halves), or 0.
     int fixedMath() const { return fixedMath_; }
@@ -207,6 +251,9 @@ private:
         int spriteFrame = 0, spriteX = 0, spriteY = 0, spriteLayer = 0, spriteSheet = -1, spritePalette = 0;
         int priority = 3;  // of the sprites of the thread, from $90
         bool spriteFlipped = false;
+        bool back = false;  // the sprites of the thread go behind the combatants
+        int waveStep = 0, waveHigh = 0;  // the counters of the sine waves: $80/$5D, and $80/$31 and $63
+        int steerAngle = 0;  // the heading of the commands that steer toward the target ($ED), of 256 to the turn
         AnimBody attacker;  // who the commands that name the attacker move
     };
 
@@ -234,12 +281,18 @@ private:
     bool palette(Thread& thread, int op, int argument);
     void shiftBody(const AnimBody& body, int dx, int dy);
     void hideBody(const AnimBody& body, bool hidden);
-    uint32_t nextRandom() {
-        seed_ = seed_ * 1664525u + 1013904223u;
-        return seed_ >> 8;
-    }
+    void stepRow(const AnimBody& body);
+    void loadSpritePalette(int palette);
+    void setVector(Thread& thread, double fromX, double fromY, double toX, double toY);
+    bool jumpAlongVector(Thread& thread, bool forward, int speed);
+    void updateTriangle(bool threeD);
+    void fillTriangle(const int xs[3], const int ys[3]);
+    // Rand: the next number of the table of random numbers of the game (0 to 255), and the numbers at a place of the table.
+    uint32_t nextRandom() { return anim_->rng.empty() ? 0 : anim_->rng[randomAt_++ & 0xFF]; }
+    int rngAt(int index) const { return anim_->rng.empty() ? 0 : anim_->rng[static_cast<size_t>(index) & 0xFF]; }
+    int rngWord(int index) const { return rngAt(index) | (rngAt(index + 1) << 8); }
 
-    uint32_t seed_ = 12345;
+    uint32_t randomAt_ = 0;
 
     const AttackAnim* anim_;
     int attack_ = -1, sprite_ = -1, palette_ = 0, sfx_ = 0, battleType_ = 0, frames_ = 0;
@@ -257,6 +310,21 @@ private:
     } circle_;
     int w12_ = -1, w34_ = -1, shape_ = 0, subscreen_ = 0, circleAngle_ = 0;
     int spanLeft_[256], spanRight_[256];
+    int triX_ = 0, triY_ = 0, triRadius_ = 0, triAngle_ = 0;  // the triangle that window 2 takes the shape of
+    int steerMargin_ = 8, steerCount_ = 0;  // how far the heading of $ED may turn at once, and the counter that makes it grow
+    int mosaic_ = 0, brightness_ = 0;  // the screen mosaic register and the brightness that scripts lowered
+    int fieldScrollX_ = 0, fieldScrollY_ = 0;  // where $D6 scrolled the field (bg2)
+    AnimLineScroll lines_[3];
+    int quasarStep_ = 1, moonStep_ = 0x80, chadarnook_ = -1;  // the counters of the quasar and the moon song, the monster that came in
+    int mindFirst_[32] = {}, mindSecond_[32] = {};  // the two bands of 32 lines of bg1 that the mind blast ripples
+    AnimEcho echo_;
+    int dice_[3] = {0, 0, 0};
+    bool charOnly_ = false;  // a character that moves along a vector does not take the thread with it ($80/$1B)
+    int tornadoAngleX_ = 0, tornadoAngleY_ = 0, tornadoAmp_ = 0, tornadoAmpY_ = 0, tornadoX_ = 0, tornadoY_ = 0;
+    int tornadoTable_[FF6_ANIM_TORNADO_LINES] = {};  // the sine that bg1 scrolls by, round and round
+    int tornadoShift_ = 0;  // where the lines at the top of the field are in it
+    bool tornadoTableOn_ = false;
+    int lights_ = -1;  // the palette of the field of Chadarnook that a script loaded: 0 lights on, 1 lights off, -1 none
     AnimShift shifts_[4 + 6];  // the characters, then the monsters
     // Where the characters of a scene stand: the position, the offset that the vectors add, the one that Save keeps, and where
     // the scene found them (what shifts_ is counted from).

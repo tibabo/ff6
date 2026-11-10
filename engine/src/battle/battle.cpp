@@ -104,7 +104,8 @@ void Battle::fillCharacter(Combatant& c, int index) {
         const uint8_t* item = rules_.item(id);
         const bool weapon = (item[FF6_ITEM_PROP_TYPE] & FF6_ITEM_PROP_TYPE_MASK) == FF6_ITEM_TYPE_WEAPON;
         c.blocked |= static_cast<uint32_t>(item[FF6_ITEM_PROP_IMMUNE] | (item[FF6_ITEM_PROP_IMMUNE + 1] << 8));
-        c.status |= static_cast<uint32_t>((item[FF6_ITEM_PROP_EQUIP_STATUS_LOW] << 8) | (item[FF6_ITEM_PROP_EQUIP_STATUS_HIGH] << 16));
+        c.status |= static_cast<uint32_t>((item[FF6_ITEM_PROP_EQUIP_STATUS_LOW] << 8) | ((item[FF6_ITEM_PROP_EQUIP_STATUS_HIGH] & ~FF6_ITEM_EQUIP_FLOAT) << 16));
+        if (item[FF6_ITEM_PROP_EQUIP_STATUS_HIGH] & FF6_ITEM_EQUIP_FLOAT) c.status |= FF6_ST_FLOAT, c.blocked |= FF6_ST_FLOAT;  // not dance: a floating item
         c.elemAbsorb |= item[FF6_ITEM_PROP_ELEM_ABSORB];
         c.elemNull |= item[FF6_ITEM_PROP_ELEM_NULL];
         c.elemWeak |= item[FF6_ITEM_PROP_ELEM_WEAK];

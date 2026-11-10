@@ -31,6 +31,7 @@
 #include "menu/field_menu.hpp"
 #include "menu/colosseum_menu.hpp"
 #include "menu/load_menu.hpp"
+#include "menu/party_menu.hpp"
 #include "menu/shop_menu.hpp"
 #include "renderer.hpp"
 #include "sound.hpp"
@@ -121,6 +122,7 @@ private:
     void objectCommand(uint8_t op, int object, uint32_t arg) override;
     void fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) override;
     Sound& sound() override { return sound_; }
+    unsigned characterMask(uint8_t op) const override;
 
     bool loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEvent, bool fadeIn);
     bool enterWorld(uint32_t mapId, int x, int y, int facing, bool fadeIn);
@@ -152,6 +154,8 @@ private:
     void tickMenu(const InputState& input);
     void openShop(int shop);
     void openColosseum();
+    void openPartySelect(int parties, unsigned forced);
+    void applyPartySelection();
     void startColosseumBattle();
     void startCutscene(bool opening);
     void endCutscene();
@@ -170,6 +174,7 @@ private:
     CharacterMask availableCharacters() const;
     void leaveThroughEntrance(const EntranceTarget& target);
     void composeDialogue();
+    void composeTimer(int frames);
     void drawSprites(bool above);
 
     CommonData common_;
@@ -232,6 +237,8 @@ private:
     uint32_t resumeOffset_ = 0;
     bool doomGazeBattle_ = false;  // the battle that is open is Doom Gaze
     LoadMenu loadMenu_;
+    PartyMenu partyMenu_;
+    bool partyOpen_ = false;  // the menu that is open is the party selection
     bool loadMenuOpen_ = false;
     bool restoreRequested_ = false;  // the event asked for the saved game: it is loaded once the event is out of the way
     uint32_t frame_ = 0;

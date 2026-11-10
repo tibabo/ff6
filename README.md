@@ -294,7 +294,20 @@ Limites actuelles :
   argent, avec l'interrupteur « pas assez » ; 0x8B et 0x8C : PV et PM ; 0x8D :
   retrait de l'equipement ; 0x86 et 0x87 : esprits ; 0x8F et 0x90 : techniques
   de sabre et Bum Rush ; 0x9B : boutique, qui prend l'ecran comme le menu et
-  rend la main a l'evenement quand elle est fermee). Les autres commandes connues sont ignorees et une
+  rend la main a l'evenement quand elle est fermee). Les variables d'evenement (0xE8 a 0xEB), le masque
+  de personnages (0xDE a 0xE4) et les choix de 0xBE, l'attente de la fin d'un dialogue (0x49) et les minuteries
+  (0xA0, 0xA1 ; l'evenement part une fois le compte fini et le groupe arrete ; le chrono du timer 0 est dans une
+  fenetre en haut a droite, a une place qui n'est pas celle du jeu ; compte aussi sur la carte du monde et pendant les
+  menus et combats, sauf drapeau de pause ; sauvegardees)
+  sont executes. La selection des groupes (0x99) suit la mise en page du jeu (`src/menu/party.asm`) : les personnages
+  hors groupe dans un bloc de deux rangees de huit, une fenetre de quatre places par groupe, le portrait, le niveau, les
+  PV et les PM du personnage sous la main, les icones d'etat (ou « Wounded » en gris pour un personnage a terre) et la
+  fleche des personnages imposes ; A choisit une place puis une autre et elles s'echangent (les personnages
+  imposes ne bougent pas), A deux fois sur la meme place ouvre l'ecran d'etat du personnage (place vide : refus), Start ou B
+  termine quand chaque groupe a quelqu'un (sinon le message du jeu). L'icone de levitation vient de l'equipement (bit 0
+  de l'octet d'etat haut de l'objet, comme dans le menu d'equipement du jeu). Pas de defilement au-dela de trois groupes :
+  le code du jeu n'en a pas (fenetres et curseurs pour 1 a 3 groupes seulement). Non porte : le rechargement de la
+  carte qui suit (le jeu la recharge sur place ; ici l'evenement continue sans la recharger). Les autres commandes connues sont ignorees et une
   commande inconnue termine l'evenement avec un message sur la sortie d'erreur.
 - Personnages : le chef du groupe est un objet comme les autres, pilote par
   le joueur hors evenement et par script pendant un evenement ; il retrouve
@@ -352,11 +365,12 @@ Limites actuelles :
   et blobs) qui coupe les couches bg1 et bg3, le mode 7 (Odin, Raiden,
   Crusader, H-Bomb, S. Cross et Overcast : plan transforme par la matrice du
   script, sans fond ni fenetres, avec les degrades de couleur fixe) et les sons) ;
-  restent sautes : les triangles, la couleur fixe sur les calques,
-  la pose secondaire (C8),
-  le deplacement d'un personnage le long d'un vecteur (E5 et E6) et la plupart
-  des sous-commandes de `$80` propres a une attaque (tornade, perle,
-  arc-en-ciel, etc.) ; un trait blanc, un anneau ou des etincelles dessines a la main
+  plus aucune commande n'est sautee (le test joue les 406 animations ; `docs/rendu-et-animations.md` § 10 dit
+  ce qui est approche ou seulement note) ; sont faits, entre autres :
+  les triangles (fenetre 2), les sauts de l'attaquant ou d'un monstre le long d'un vecteur (A0, A1, E2, E3),
+  le vol vers la cible (ED), le retournement d'un monstre (D5), le defilement du champ (D6), les defilements
+  par ligne de bg1 et de bg3 (lune, quasar, vents, tentacules, souffle mental), l'echange de palette de la
+  cible et les mouvements polaires et sinusoidaux de `$80`, la perle, la tornade, la course des personnages et les echos. Un trait blanc, un anneau ou des etincelles dessines a la main
   remplacent l'animation d'une attaque qui n'en a pas. `--anim n --capture`
   ecrit la planche des images d'une attaque.
   Les noms des poses ne sont pas dans le jeu : elles sont choisies sur la planche
@@ -652,8 +666,7 @@ genere par `build-pack`, pour leurs tests sur les vraies donnees.
   anime, eclairs, tremblements, filtres de couleur, mosaique).
 - Menus : soins d'etat, tente et sac de couchage, Rmove/Empty/Optimum, Order.
 - Combat : la course des personnages des monstres (FA 5 et 6), le decalage qui reste des monstres (FA), les commandes de
-  scene pour les monstres, le fond de Kefka et les commandes d'animation encore sautees (triangles, priorites, la plupart des
-  sous-commandes de `$80` propres a une attaque) ; les objets utilisables jouent leur animation (table `ItemAnimPtrs`).
+  scene pour les monstres, le fond de Kefka et les effets d'animation encore approches (§ 10 de `docs/rendu-et-animations.md`) ; les objets utilisables jouent leur animation (table `ItemAnimPtrs`).
 - Audio natif sans emulation du SPC700 : mode mono.
 - Interface adaptable aux ecrans larges et remappage des commandes.
 - Gestion des graphismes HD.

@@ -46,6 +46,42 @@ void testEvent() {
         runner.update(host);
         CHECK(!runner.running());
     }
+    {  // the variables add and subtract, 0xEB compares, and 0xBE calls the case whose bit of the mask is set
+        const std::vector<uint8_t> script = {0xE8, 0x03, 0x0A, 0x00, 0xE9, 0x03, 0x05, 0x00, 0xEA, 0x03, 0x02, 0x00, 0xEB, 0x03, 0x0D, 0x00,
+                                             0xBE, 0x02, 28, 0, 0x10, 32, 0, 0x00, 0x4B, 0x01, 0x00, 0xFE,
+                                             0x4B, 0x02, 0x00, 0xFE, 0x4B, 0x03, 0x00, 0xFE};
+        ff6::EventBits bits = freshBits();
+        test::FakeHost host;
+        CHECK(play(script, host, bits) == std::vector<uint32_t>({3, 1}));  // equal: the second case, then on after the command
+        CHECK(bits.variable(3) == 13 && bits.characterMask() == FF6_EVENT_COMPARE_EQUAL);
+        // The variables stop at 0 and at 0xFFFF.
+        const std::vector<uint8_t> limits = {0xE8, 0x01, 0xFF, 0xFF, 0xE9, 0x01, 0x05, 0x00, 0xE8, 0x02, 0x01, 0x00, 0xEA, 0x02, 0x09, 0x00, 0xFE};
+        test::FakeHost other;
+        play(limits, other, bits);
+        CHECK(bits.variable(1) == 0xFFFF && bits.variable(2) == 0);
+    }
+    {  // a timer goes off once when its frames are over, with the event that the command gave it
+        ff6::EventBits bits = freshBits();
+        test::FakeHost host;
+        play({0xA0, 0x02, 0x00, 0x34, 0x12, 0x04, 0xFE}, host, bits);  // timer 1: 2 frames, event at 0x1234
+        uint32_t offset = 0;
+        bits.tickTimers(false);
+        CHECK(!bits.takeTimerEvent(&offset));
+        bits.tickTimers(false);
+        CHECK(bits.takeTimerEvent(&offset) && offset == 0x1234);
+        CHECK(!bits.takeTimerEvent(&offset));
+        play({0xA0, 0x01, 0x00, 0x34, 0x12, 0x00, 0xA1, 0x00, 0xFE}, host, bits);  // reset at once
+        bits.tickTimers(false);
+        CHECK(!bits.takeTimerEvent(&offset));
+        // A timer with the pause flag does not count in a menu or a battle, one without it does; timer 0 is shown with its flag.
+        play({0xA0, 0x0A, 0x00, 0x34, 0x12, 0xC0, 0xA0, 0x0A, 0x00, 0x34, 0x12, 0x04, 0xFE}, host, bits);
+        for (int i = 0; i < 3; ++i) bits.tickTimers(true);
+        CHECK(bits.shownTimer() == 10);
+        bits.tickTimers(false);
+        CHECK(bits.shownTimer() == 9);
+        for (int i = 0; i < 9; ++i) bits.tickTimers(false);
+        CHECK(bits.shownTimer() == -1);
+    }
     {  // switches and conditional jumps: set switch 5, then jump if it is set
         const std::vector<uint8_t> script = {0xD0, 0x05, 0xC0, 0x05, 0x80, 0x0F, 0x00, 0x00, 0x4B, 0x01, 0x00, 0xFE, 0xFF, 0xFF, 0xFF,
                                              0x4B, 0x02, 0x00, 0xFE};

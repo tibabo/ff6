@@ -23,7 +23,31 @@ public:
     std::vector<int> battleSetIds() const;
     void load(const std::vector<int>& bits, const std::vector<int>& battleFlags);
 
+    // The event variables (words), the mask of characters or of a comparison that 0xBE chooses by, and the timers.
+    int variable(int id) const { return variables_[static_cast<size_t>(id) % variables_.size()]; }
+    void setVariable(int id, int value) { variables_[static_cast<size_t>(id) % variables_.size()] = static_cast<uint16_t>(value); }
+    unsigned characterMask() const { return mask_; }
+    void setCharacterMask(unsigned mask) { mask_ = static_cast<uint16_t>(mask); }
+    // A timer counts frames down; when it is at 0 its event is due, once.
+    void setTimer(int number, int counter, uint32_t pointer, int flags);
+    void resetTimer(int number);
+    void tickTimers(bool menuOrBattle);  // the timers that pause in a menu or a battle stay as they are then
+    bool takeTimerEvent(uint32_t* offset);
+    // The frames left on the timer that is shown on the field, or -1 when there is none.
+    int shownTimer() const;
+    // For a saved game: every variable, and the flags, counter and event of each timer; empty when all are 0.
+    std::vector<int> variableValues() const;
+    std::vector<int> timerValues() const;
+    void loadVariables(const std::vector<int>& variables, const std::vector<int>& timers);
+
 private:
+    struct Timer {
+        int flags = 0, counter = 0;
+        uint32_t pointer = 0;  // into the event script, 0 for none
+    };
+    std::array<uint16_t, FF6_EVENT_VAR_COUNT> variables_{};
+    uint16_t mask_ = 0;
+    std::array<Timer, FF6_EVENT_TIMER_COUNT> timers_{};
     std::array<uint8_t, (FF6_EVENT_BIT_COUNT + 7) / 8> bytes_{};
     std::array<uint8_t, FF6_BATTLE_FLAG_BYTES> battle_{};
 };
@@ -49,6 +73,9 @@ public:
     // `bytes` are the command bytes after the opcode.
     virtual void fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) = 0;
     virtual Sound& sound() = 0;
+    // Event commands 0xDE, 0xDF, 0xE2, 0xE3 and 0xE4: a bit for each character that is in the active party, is an enabled
+    // object, leads the party, is in any party; or the bit of the active party number.
+    virtual unsigned characterMask(uint8_t /*op*/) const { return 0; }
     virtual bool fading() const = 0;  // the screen fades in or out
 };
 

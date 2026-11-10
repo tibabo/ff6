@@ -3,6 +3,8 @@
 #include <algorithm>
 
 #include "field/window.hpp"
+#include "field/map.hpp"
+#include "field/sprite_data.hpp"
 #include "menu/window_style.hpp"
 
 namespace ff6 {
@@ -106,6 +108,33 @@ void MenuScreen::swatch(int x, int y, uint16_t color) {
     }
 }
 
+void MenuScreen::mapSprite(int x, int y, int gfx, int palette) {
+    auto found = strips_.find({gfx, palette});
+    if (found == strips_.end()) found = strips_.emplace(std::make_pair(gfx, palette), buildSpriteStrip(common_, gfx, palette)).first;
+    drawSpriteRows(pixels_.data(), found->second, stopFrame(Down), 0, FF6_FRAME_HEIGHT, x, y);
+}
+
+void MenuScreen::menuSprite(int x, int y, int tile, bool icon) {
+    const auto& palette = icon ? menu_.iconPalette : menu_.cursorPalette;
+    uint8_t colors[FF6_MENU_CURSOR_PALETTE_COLORS][FF6_BYTES_PER_PIXEL];
+    for (size_t i = 0; i < FF6_MENU_CURSOR_PALETTE_COLORS; ++i) colorToRgba(palette[i], colors[i]);
+    for (int part = 0; part < 4; ++part) {
+        const size_t first = (static_cast<size_t>(tile) + static_cast<size_t>(part % 2) + static_cast<size_t>(part / 2) * FF6_MENU_SPRITE_ROW_TILES) * FF6_MENU_CURSOR_TILE_BYTES;
+        if (first + FF6_MENU_CURSOR_TILE_BYTES > menu_.spriteGfx.size()) continue;
+        const uint8_t* data = &menu_.spriteGfx[first];
+        for (int row = 0; row < FF6_MENU_TILE_SIZE; ++row) {
+            for (int column = 0; column < FF6_MENU_TILE_SIZE; ++column) {
+                const int shift = FF6_MENU_TILE_SIZE - 1 - column;
+                const int value = ((data[row * 2] >> shift) & 1) | (((data[row * 2 + 1] >> shift) & 1) << 1) |
+                                  (((data[row * 2 + 16] >> shift) & 1) << 2) | (((data[row * 2 + 17] >> shift) & 1) << 3);
+                if (value < FF6_MENU_CURSOR_FIRST_COLOR) continue;
+                blendPixel(pixels_, x + (part % 2) * FF6_MENU_TILE_SIZE + column, y + 1 + (part / 2) * FF6_MENU_TILE_SIZE + row,
+                           colors[value - FF6_MENU_CURSOR_FIRST_COLOR]);
+            }
+        }
+    }
+}
+
 void MenuScreen::portrait(int x, int y, int portrait) {
     if (portrait < 0 || portrait >= FF6_MENU_PORTRAIT_COUNT) return;
     static constexpr int kOrder[FF6_MENU_PORTRAIT_TILES] = FF6_MENU_PORTRAIT_TILE_ORDER;
@@ -164,6 +193,17 @@ void MenuScreen::tint(int x, int y, int w, int h, int red, int green, int blue, 
         for (int column = std::max(x, 0); column < std::min(x + w, FF6_SCREEN_WIDTH); ++column) {
             uint8_t* pixel = &pixels_[(static_cast<size_t>(row) * FF6_SCREEN_WIDTH + column) * FF6_BYTES_PER_PIXEL];
             for (int channel = 0; channel < 3; ++channel) pixel[channel] = static_cast<uint8_t>((pixel[channel] * (100 - percent) + color[channel] * percent) / 100);
+        }
+    }
+}
+
+void MenuScreen::mosaic(int x, int y, int w, int h, int size) {
+    if (size <= 1) return;
+    for (int row = std::max(y, 0); row < std::min(y + h, FF6_SCREEN_HEIGHT); ++row) {
+        for (int column = std::max(x, 0); column < std::min(x + w, FF6_SCREEN_WIDTH); ++column) {
+            const int fromRow = std::max(row - row % size, y), fromColumn = std::max(column - column % size, x);
+            const uint8_t* from = &pixels_[(static_cast<size_t>(fromRow) * FF6_SCREEN_WIDTH + fromColumn) * FF6_BYTES_PER_PIXEL];
+            std::copy(from, from + FF6_BYTES_PER_PIXEL, &pixels_[(static_cast<size_t>(row) * FF6_SCREEN_WIDTH + column) * FF6_BYTES_PER_PIXEL]);
         }
     }
 }
