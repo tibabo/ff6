@@ -30,6 +30,15 @@ struct WorldMapData {
     std::vector<uint8_t> eventTriggers;  // x, y, offset of the event in the event script
 };
 
+// The magitek train ride (src/world/train_*.asm): the pictures of its tiles at 12 sizes, where each one starts once they are
+// laid out in memory, the tables that set the pitch, the turn and the walls of each stretch of the way, and the way.
+struct TrainData {
+    std::vector<uint8_t> gfx;  // for each tile and size: a byte of palette, then the pixels two to a byte
+    std::vector<uint16_t> tilePointers;
+    std::vector<uint16_t> palette;
+    std::vector<uint8_t> pitch1, pitch2, reduce, yawMultiplier, yaw, background, tiles, course;
+};
+
 struct WorldData {
     std::array<WorldMapData, FF6_WORLD_COUNT> worlds;
     std::vector<uint8_t> miscSprites;  // 4 bits per pixel: the position mark of the mini-map and the other sprites
@@ -40,6 +49,9 @@ struct WorldData {
     std::vector<uint8_t> animGfx;  // 4 bits per pixel: the sprites that move by themselves
     std::array<std::vector<uint8_t>, FF6_WORLD_COUNT> airshipGfx;  // the airship, the falcon
     std::vector<uint8_t> backdropGfx, backdropTiles;  // the sky of the flights
+    std::array<std::vector<uint8_t>, 2> chocoboGfx;  // the chocobo, then the other sprites that go with it
+    TrainData train;
+    WorldMapData trench;  // the serpent trench: 128 x 128 tiles, no entrances; the sprite palette is the second half of its palette
 };
 
 WorldData loadWorldData(const std::string& packDir);

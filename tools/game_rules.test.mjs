@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
   CHAR_PROP_BYTES, CHAR_PROP_COUNT, ITEM_PROP_BYTES, ITEM_PROP_COUNT, LEVEL_COUNT, RULES_MAGIC, SHOP_COUNT, SHOP_PROP_BYTES,
   NATURAL_MAGIC_BYTES, MAGIC_PROP_BYTES, MAGIC_PROP_COUNT, buildRulesData, readAbilityLevels, readMagicProp, readCharProp, readItemProp, readLevelUp, readShopProp,
+  GENJU_COUNT, GENJU_PROP_BYTES, readGenjuProp,
 } from './data/game_rules.mjs';
 import { requireSupportedRom } from './rom.mjs';
 
@@ -51,7 +52,13 @@ test('game data holds the tables one after the other', { skip }, () => {
   assert.equal(data.subarray(0, 8).toString('ascii'), RULES_MAGIC);
   assert.equal(data.readUInt32LE(8), 4);
   assert.equal(data.length, 12 + CHAR_PROP_COUNT * CHAR_PROP_BYTES + ITEM_PROP_COUNT * ITEM_PROP_BYTES + LEVEL_COUNT * 4
-    + SHOP_COUNT * SHOP_PROP_BYTES + NATURAL_MAGIC_BYTES + 16 + MAGIC_PROP_COUNT * MAGIC_PROP_BYTES);
+    + SHOP_COUNT * SHOP_PROP_BYTES + NATURAL_MAGIC_BYTES + 16 + MAGIC_PROP_COUNT * MAGIC_PROP_BYTES
+    + GENJU_COUNT * GENJU_PROP_BYTES);
+});
+
+test('Ramuh teaches three spells and raises the stamina', { skip }, () => {
+  const ramuh = readGenjuProp(loadRom()).subarray(0, GENJU_PROP_BYTES);
+  assert.deepEqual([...ramuh], [10, 2, 2, 7, 5, 3, 0, 0xff, 0, 0xff, 13]);
 });
 
 test('magic properties: fire costs 4 mp, cure 5', { skip }, () => {

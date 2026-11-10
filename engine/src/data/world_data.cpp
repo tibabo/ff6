@@ -42,6 +42,26 @@ WorldData loadWorldData(const std::string& packDir) {
     for (auto& gfx : data.airshipGfx) gfx = reader.bytes(FF6_WORLD_AIRSHIP_GFX_BYTES);
     data.backdropGfx = reader.bytes(FF6_WORLD_BACKDROP_GFX_BYTES);
     data.backdropTiles = reader.bytes(FF6_WORLD_BACKDROP_TILES_BYTES);
+    for (auto& gfx : data.chocoboGfx) gfx = reader.bytes(FF6_WORLD_CHOCOBO_GFX_BYTES);
+    data.trench.tilemap = reader.bytes(FF6_TRENCH_TILEMAP_BYTES);
+    data.trench.formation = reader.bytes(FF6_WORLD_FORMATION_BYTES);
+    data.trench.chr = reader.bytes(FF6_WORLD_CHR_BYTES);
+    data.trench.palette = reader.words(FF6_WORLD_PALETTE_COLORS);
+    data.trench.spritePalette = reader.words(FF6_WORLD_PALETTE_COLORS);
+    data.trench.tileProps.assign(FF6_WORLD_TILE_PROPS, 0);
+    data.trench.minimap.assign(FF6_WORLD_MINIMAP_BYTES, 0);
+    TrainData& train = data.train;
+    train.gfx = reader.bytes(FF6_TRAIN_GFX_BYTES);
+    train.tilePointers = reader.words(FF6_TRAIN_TILE_POINTERS);
+    train.palette = reader.words(FF6_TRAIN_PALETTE_COLORS);
+    train.pitch1 = reader.bytes(0x1A0);
+    train.pitch2 = reader.bytes(0x1A0);
+    train.reduce = reader.bytes(0x40);
+    train.yawMultiplier = reader.bytes(0x20);
+    train.yaw = reader.bytes(0x60);
+    train.background = reader.bytes(0xA0);
+    train.tiles = reader.bytes(0x3C0);
+    train.course = reader.bytes(FF6_TRAIN_COURSE_RECORDS * FF6_TRAIN_COURSE_RECORD_BYTES);
     if (reader.remaining() != 0) throw std::runtime_error("world data has trailing bytes");
     return data;
 }

@@ -16,9 +16,11 @@ struct CharacterStats {
     int maxHp = 0, maxMp = 0;  // with the boost of the relics
     bool genjiGlove = false;  // two weapons at once
     bool equipAnything = false;
-    // The effects of the relics, as the items keep them (RELIC_EFFECT1, 3 and 4), and the weapons that reach from the back row.
-    int relic1 = 0, relic3 = 0, relic4 = 0;
+    // The effects of the relics, as the items keep them (RELIC_EFFECT1 to 5), and the weapons that reach from the back row.
+    int relic1 = 0, relic2 = 0, relic3 = 0, relic4 = 0, relic5 = 0;
     bool handLongRange[2] = {false, false};
+    // What the weapon in each hand does besides hurting (the special effect of the weapon), and the spell that it sometimes casts.
+    int handSpecial[2] = {0, 0}, handSpell[2] = {-1, -1};
 };
 
 CharacterStats calcStats(const GameRules& rules, const CharacterState& character);

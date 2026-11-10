@@ -33,10 +33,24 @@ struct BattleData {
     std::vector<uint8_t> aiScript;  // FF6_AI_SCRIPT_BYTES of commands
     std::vector<uint8_t> genjuAttackNames, attackNames;  // of 10 codes each
     std::vector<uint8_t> sketch, control;  // of each monster, FF6_SKETCH_BYTES and FF6_CONTROL_BYTES attacks
+    std::vector<uint8_t> magicPoints;  // FF6_MAGIC_POINT_BYTES: what each battle gives to learn spells
+    std::vector<uint8_t> monsterRage;  // of the first FF6_RAGE_MONSTERS monsters, the two attacks of their rage
+    std::vector<uint8_t> danceProp;  // FF6_DANCE_COUNT dances of FF6_DANCE_ATTACKS attacks
+    std::vector<uint8_t> battleBgDance;  // FF6_BG_DANCE_BYTES: the dance that Mog learns on each background of battle
+    std::vector<uint8_t> danceBg;  // FF6_DANCE_BG_BYTES: the background that each dance shows
+    std::vector<uint8_t> monsterDlgPtrs, monsterDlg;  // the dialogs of the monsters: pointers (words) and texts, ended by 0
+    std::vector<uint8_t> battleDlgPtrs, battleDlg;  // the same for the scenes of the battles, where the characters talk
+    std::vector<uint8_t> metamorph;  // FF6_METAMORPH_BYTES: the items that Metamorph draws from a monster
+    std::vector<uint8_t> charAi;  // FF6_CHAR_AI_COUNT scenes of FF6_CHAR_AI_BYTES: the characters that act by a script
+    std::vector<uint8_t> colosseum;  // FF6_COLOSSEUM_BYTES: the opponent and the prize of each item that is wagered
 
     const uint8_t* monster(int id) const { return &monsterProp[static_cast<size_t>(id) * FF6_MONSTER_PROP_BYTES]; }
     const uint8_t* items(int id) const { return &monsterItems[static_cast<size_t>(id) * FF6_MONSTER_ITEM_BYTES]; }
     std::vector<uint8_t> name(int id) const;
+    // What a monster says (an F3 command of its script) as the bytes of the game's text, without the end; empty for none.
+    std::vector<uint8_t> monsterDialog(int id) const;
+    // A dialog of a scene of a battle (an F7 command), in the same way.
+    std::vector<uint8_t> battleDialog(int id) const;
     // The name of an attack of the table from 54 up (an esper's attack, a special attack); empty for a spell.
     std::vector<uint8_t> attackName(int attack) const;
     // The attacks of a monster that Sketch and Control give; FF6_AI_ATTACK_NOTHING for none.

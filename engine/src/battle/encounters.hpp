@@ -22,6 +22,9 @@ public:
     int stepWorld(const BattleData& data, const WorldData& world, int worldIndex, int tileBackground, int sectorX,
                   int sectorY, int* background, PartyState* party = nullptr);
 
+    // Whether the last battle that stepWorld gave comes from the veldt, where Gau can leap.
+    bool lastOnVeldt() const { return onVeldt_; }
+
 private:
     // GetVeldtBattle: the next of the battles that the party has fought and that the veldt can bring back.
     int veldtBattle(const BattleData& data, PartyState* party);
@@ -29,6 +32,7 @@ private:
     int number(const BattleData& data);  // UpdateBattleRng
     int groupNumber(const BattleData& data);  // UpdateBattleGrpRng
 
+    bool onVeldt_ = false;
     uint16_t counter_ = 0;
     uint8_t pointer_ = 0, increment_ = 0;
     uint8_t groupPointer_ = 0, groupIncrement_ = 0;

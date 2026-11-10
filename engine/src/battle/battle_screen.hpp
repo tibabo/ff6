@@ -17,7 +17,7 @@
 
 namespace ff6 {
 
-enum class BattleMode { Fighting, Command, Magic, Item, Tech, Target, Result, Done };
+enum class BattleMode { Fighting, Command, Magic, Item, Tech, Target, Result, Done, Slot };
 
 // The battle as text in windows: the monsters by name, the party with its hp and gauges, the command of the character
 // that is ready, its spells and items, and the messages of what happens.
@@ -28,7 +28,8 @@ public:
     // `battleSpeed` is the raw value of the config; `wait` stops the gauges while a command is chosen; `background` is
     // the number of the battlefield behind the monsters, -1 for none.
     void start(const BattleData& data, const GameRules& rules, PartyState& party, const std::vector<int>& characters,
-        int battle, uint32_t seed, int battleSpeed, bool wait, int background = -1);
+        int battle, uint32_t seed, int battleSpeed, bool wait, int background = -1, bool veldt = false,
+        const Battle::Colosseum& colosseum = Battle::Colosseum());
     // One frame of the game.
     void update(const InputState& input);
     void draw();
@@ -44,12 +45,19 @@ public:
     bool animating() const { return (player_ && !player_->done()) || esperGfx_ >= 0; }
     // Plays the animation of an attack from the first monster to the characters, for looking at it.
     void playAnimation(int attack);
+    // Plays a battle event (F7) of the scenes of the game, for captures.
+    void playScene(int event) {
+        if (battle_) battle_->triggerScene(event);
+    }
 
     bool active() const { return battle_.has_value(); }
     bool finished() const { return mode_ == BattleMode::Done; }
     BattleMode mode() const { return mode_; }
     BattleOutcome outcome() const { return battle_ ? battle_->outcome() : BattleOutcome::Fighting; }
     const Battle* battle() const { return battle_ ? &*battle_ : nullptr; }
+    void setStory(const Battle::Story& story) {
+        if (battle_) battle_->setStory(story);
+    }
     int command() const { return command_; }
     int target() const { return target_; }
     // The combatants that the cursor of the target covers.
@@ -94,6 +102,11 @@ private:
     void openSummon();
     void openMagitek();
     void openControl(int monster);
+    bool knowsRage() const;
+    void openRage();
+    void openDance();
+    void updateSlot(const InputState& input);
+    void drawSlot();
     void addAttack(const Combatant& c, int attack);
     bool hasWeapons() const;
     void beginTarget(Pending pending, int value, const Attack& attack);
@@ -116,6 +129,11 @@ private:
     // Where a monster and a character stand: the battle types that surprise the party turn the sides round.
     bool mirrored(size_t monster) const;
     int monsterX(size_t monster, int width) const;
+    // The picture of a monster of the formation; Gau, who jumps in after a battle of the veldt, is a character facing the party.
+    const BattleImage& monsterImage(size_t slot) const;
+    mutable BattleImage sceneImage_;
+    int monsterTop(size_t monster) const;
+    int characterTop(int slot) const;
     int characterX(int slot) const;
     Codes statusName(uint32_t status) const;
 
@@ -129,6 +147,9 @@ private:
     bool throwList_ = false;  // the list of items is the one of Throw
     int xMagic_ = 0;  // 1 while the first spell of X Magic is chosen, 2 for the second
     bool controlList_ = false;  // the list is the attacks of the monster that is controlled
+    bool rageList_ = false, danceList_ = false;  // the list is the rages that Gau knows, or the dances that Mog knows
+    std::array<int, 3> reels_{}, reelSpeed_{};  // the icons that the slot shows, and how fast each one turns
+    int slotStopped_ = 0, slotFrame_ = 0;  // the reels that were stopped, and a counter of frames
     int esperGfx_ = -1, esperAge_ = 0, esperShown_ = 0;  // the picture of the esper that is summoned, and how much of it shows
     int esperX_ = 0, esperY_ = 0;
     bool esperPlaced_ = false;  // the esper stands at (esperX_, esperY_) instead of the middle
@@ -145,12 +166,16 @@ private:
         Codes text;
         int target = -1, damage = -1;  // a number shown over the combatant that the message is about
         // What the picture does when the message comes: a character takes a pose, a combatant is hit, the field flashes.
-        enum class Effect { None, Cast, Strike, Defend, Hurt, Fade, Heal, Escape } effect = Effect::None;
+        enum class Effect { None, Cast, Strike, Defend, Hurt, Fade, Heal, Escape, Animate, Scene, Visible } effect = Effect::None;
         int actor = -1, subject = -1, element = 0;
         bool flash = false;
         int attack = -1;  // the attack whose animation plays when the message comes, on these combatants
+        int sfx = -1;  // a sound effect that plays when the message comes
         std::vector<int> animTargets{};
+        std::vector<SceneThread> sceneThreads{};  // the scripts of the characters of a scene of a battle event, and its attacks
+        std::vector<SceneAttack> sceneAttacks{};
         bool leftHand = false;  // a blow: the weapon is the one in the left hand; `attack` is its animation
+        bool instant = false;  // it has no text and takes no time: the next message comes at once
     };
     void trigger(const Message& message);
     void startAnimation(const Message& message);
@@ -170,6 +195,23 @@ private:
     std::array<bool, FF6_BATTLE_COMBATANTS> dying_{};  // a monster that fell stays until its message fades it
     int flashTimer_ = 0, flashColor_[3] = {255, 255, 255};
     int animation_ = 0;  // frames, for what moves by itself
+    int scrollX_ = 0, scrollY_ = 0;  // where the field has scrolled to: the clouds, the waterfall and the trains move
+    AnimShift keptShift_[FF6_BATTLE_COMBATANTS];  // how far the animations of the scripts moved a monster for good
+    int persistSlot_ = -1;  // the monster whose animation is playing and moves it for good
+    AnimShift persistLast_;
+    void flushPersist();
+    // The scenes of the battle events (F7): the dialogs are messages, the animations of the characters play between them.
+    void queueScene(int event);
+    void queueDialog(int dialog, std::string& speaker);
+    void startScene(const Message& message);
+    void flushScene();
+    bool sceneActive_ = false;  // an animation of a scene is playing: the characters it moves stay where it leaves them
+    int keptPose_[FF6_BATTLE_PARTY_SLOTS] = {-1, -1, -1, -1};  // the pose that a scene left a character in
+    bool keptFlip_[FF6_BATTLE_PARTY_SLOTS] = {false, false, false, false};
+    int gfxOverride_[FF6_BATTLE_PARTY_SLOTS] = {-1, -1, -1, -1};  // the picture that a scene gave to a character
+    int bgShake_ = 0;  // the field shakes (a scene asked, 0x80 for the horizontal shake only)
+    bool keptHidden_[FF6_BATTLE_PARTY_SLOTS] = {false, false, false, false};  // the characters that a scene took off the field
+    bool sceneControlled_[FF6_BATTLE_PARTY_SLOTS] = {false, false, false, false};  // a scene decides whether they are seen
     // The drawn effects over the targets: a slash, a ring of the element, sparkles that rise.
     struct Fx {
         enum class Kind { Slash, Ring, Sparkle } kind = Kind::Slash;

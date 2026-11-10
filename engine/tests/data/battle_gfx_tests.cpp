@@ -33,6 +33,34 @@ void testBattleGfx() {
         CHECK(lit > 0);
     }
     CHECK(gfx.background(-1).rgba.empty() && gfx.background(FF6_BG_COUNT).rgba.empty());
+    // The colors of the raft, the waterfall and Cyan's dream run: each turn of the palette is another picture, and it comes back.
+    for (const int bg : {FF6_BG_RAFT, FF6_BG_WATERFALL, FF6_BG_CYANS_DREAM}) CHECK(gfx.background(bg, 0).rgba != gfx.background(bg, 1).rgba);
+    CHECK(ff6::BattleGfx::backgroundStep(FF6_BG_WATERFALL, 4) == 1 && ff6::BattleGfx::backgroundStep(FF6_BG_RAFT, 0) == 3 &&
+          ff6::BattleGfx::backgroundStep(0, 99) == 0);
+
+    // The statuses: a sprite for each at four frames, the shadow of the characters, and a palette that the statuses can change.
+    for (int kind = 1; kind <= FF6_STATUS_SPRITE_SHADOW; ++kind) {
+        for (int frame = 0; frame < 4; ++frame) {
+            const ff6::BattleImage& sprite = gfx.statusSprite(kind, frame);
+            size_t visible = 0;
+            for (size_t i = FF6_ALPHA_OFFSET; i < sprite.rgba.size(); i += FF6_BYTES_PER_PIXEL) visible += sprite.rgba[i] != 0;
+            CHECK(sprite.width == 16 && sprite.height == 16 && visible > 4);
+        }
+    }
+    CHECK(gfx.statusSprite(0, 0).rgba.empty() && gfx.statusSprite(1, 4).rgba.empty());
+    std::array<uint16_t, 16> stone = gfx.characterPalette(0);
+    CHECK(stone[1] != 0 || stone[2] != 0);
+    const ff6::BattleImage plain = gfx.characterWith(0, FF6_CHAR_POSE_FIGHT, stone);
+    CHECK(plain.rgba == gfx.character(0, FF6_CHAR_POSE_FIGHT).rgba);
+    stone[6] = 0x7C00;
+    CHECK(gfx.characterWith(0, FF6_CHAR_POSE_FIGHT, stone).rgba != plain.rgba);
+    const ff6::BattleImage outline = gfx.characterWith(0, FF6_CHAR_POSE_FIGHT, gfx.characterPalette(0), true);
+    size_t outlined = 0, whole = 0;
+    for (size_t i = FF6_ALPHA_OFFSET; i < plain.rgba.size(); i += FF6_BYTES_PER_PIXEL) {
+        outlined += outline.rgba[i] != 0;
+        whole += plain.rgba[i] != 0;
+    }
+    CHECK(outlined > 0 && outlined < whole);
 
     // The characters: every one of them has a picture in each pose that the screen uses.
     for (int actor = 0; actor < 14; ++actor) {

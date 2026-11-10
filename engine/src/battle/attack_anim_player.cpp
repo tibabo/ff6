@@ -123,7 +123,75 @@ int specialLength(int sub) {
     }
 }
 
+// The length of the commands of events ($C7): the first byte after it says which.
+int eventCommandLength(int sub) {
+    static constexpr int kLengths[18] = {3, 2, 2, 2, 2, 3, 4, 2, 4, 2, 3, 5, 4, 3, 3, 2, 3, 2};
+    return sub >= 0 && sub < 18 ? kLengths[sub] : 2;
+}
+
+constexpr int kFlipped = 0x30;  // added to the frame of a character that faces the other way
+constexpr int kSceneFrames = 3600;
+
+// The frames of each action of a character (_c2c6a9), up to four of them, which a counter goes through.
+struct ActionFrames {
+    int count;
+    int frames[4];
+};
+constexpr ActionFrames kActionFrames[39] = {
+    {0, {0, 0, 0, 0}},
+    {1, {0, 0, 0, 0}},
+    {4, {1, 2, 3, 2}},
+    {4, {4 + kFlipped, 5 + kFlipped, 6 + kFlipped, 5 + kFlipped}},
+    {4, {4, 5, 6, 5}},
+    {4, {14, 15, 16, 15}},
+    {1, {17, 0, 0, 0}},
+    {2, {18, 4, 0, 0}},
+    {2, {19, 6, 0, 0}},
+    {2, {8, 9, 0, 0}},
+    {1, {20, 0, 0, 0}},
+    {1, {21, 0, 0, 0}},
+    {1, {22, 0, 0, 0}},
+    {1, {10, 0, 0, 0}},
+    {2, {2, 11, 0, 0}},
+    {2, {5 + kFlipped, 13 + kFlipped, 0, 0}},
+    {2, {5, 13, 0, 0}},
+    {2, {2 + kFlipped, 12 + kFlipped, 0, 0}},
+    {2, {2, 12, 0, 0}},
+    {4, {2, 2, 23, 23}},
+    {4, {5 + kFlipped, 5 + kFlipped, 7 + kFlipped, 7 + kFlipped}},
+    {4, {5, 5, 7, 7}},
+    {4, {15, 15, 24, 24}},
+    {1, {25, 0, 0, 0}},
+    {1, {23, 0, 0, 0}},
+    {1, {7 + kFlipped, 0, 0, 0}},
+    {1, {7, 0, 0, 0}},
+    {1, {24, 0, 0, 0}},
+    {1, {0, 0, 0, 0}},
+    {1, {0, 0, 0, 0}},
+    {1, {0, 0, 0, 0}},
+    {1, {0, 0, 0, 0}},
+    {2, {30, 31, 0, 0}},
+    {2, {30 + kFlipped, 31 + kFlipped, 0, 0}},
+    {4, {29, 2, 29 + kFlipped, 2}},
+    {2, {26, 27, 0, 0}},
+    {1, {0, 0, 0, 0}},
+    {4, {23, 7 + kFlipped, 24, 7}},
+    {4, {26 + kFlipped, 26 + kFlipped, 7, 27 + kFlipped}},
+};
+
 }  // namespace
+
+std::vector<std::array<int, 3>> AttackAnimPlayer::takeSoundCommands() {
+    std::vector<std::array<int, 3>> commands;
+    commands.swap(soundCommands_);
+    return commands;
+}
+
+std::vector<std::pair<int, int>> AttackAnimPlayer::takeGfxChanges() {
+    std::vector<std::pair<int, int>> changes;
+    changes.swap(gfxChanges_);
+    return changes;
+}
 
 std::vector<int> AttackAnimPlayer::takeSounds() {
     std::vector<int> sounds;
@@ -199,6 +267,11 @@ void AttackAnimPlayer::begin(const AnimBody& attacker, bool flipped) {
         spanRight_[line] = 0;
     }
     for (AnimShift& shift : shifts_) shift = AnimShift();
+    for (CharMove& move : charMove_) move = CharMove();
+    soundCommands_.clear();
+    gfxChanges_.clear();
+    shake_ = -1;
+    maxFrames_ = kMaxFrames;
     mode7_ = AnimMode7();
     plane_ = AnimPlane();
     esperSheet_ = AnimEsperSheet();
@@ -239,6 +312,7 @@ void AttackAnimPlayer::addThread(int layer, int script, int palette, const AnimB
     thread.rate = (code[0] >> 4) + 1;
     thread.counter = counter;
     thread.flipped = flipped_;
+    thread.attacker = attacker_;
     const int align = code[1] & 0xE0;
     const int halfHeight = anim_->gfx(script).height * FF6_ATTACK_CELL / 2;
     place(target, true, align, halfHeight, flipped_, thread.posX, thread.posY);
@@ -254,8 +328,47 @@ void AttackAnimPlayer::addThread(int layer, int script, int palette, const AnimB
 
 void AttackAnimPlayer::start(int attack, const AnimBody& attacker, const std::vector<AnimBody>& targets, bool flipped, int battleType) {
     begin(attacker, flipped);
-    attack_ = attack;
     battleType_ = battleType;
+    addAttack(attack, attacker, targets);
+}
+
+// The scene of a battle event: the threads of the characters, then the attacks that play over them.
+void AttackAnimPlayer::startScene(const std::vector<SceneThread>& threads, const std::vector<SceneAttack>& attacks, bool flipped, int battleType) {
+    begin(AnimBody(), flipped);
+    battleType_ = battleType;
+    maxFrames_ = kSceneFrames;
+    for (const SceneThread& thread : threads) addSceneThread(thread.script, thread.body);
+    for (const SceneAttack& attack : attacks) addAttack(attack.attack, attack.attacker, attack.targets);
+    done_ = threads_.empty();
+}
+
+// A script of a character in bank D0: it has no graphics, only the commands that move and pose the character.
+void AttackAnimPlayer::addSceneThread(int address, const AnimBody& body) {
+    const uint8_t* code = anim_->scripts.data();
+    if (body.monster || body.slot < 0 || body.slot > 3 || address < 0 || static_cast<size_t>(address) + kHeaderBytes + 12 >= anim_->scripts.size()) return;
+    CharMove& move = charMove_[body.slot];
+    if (!move.known) {  // PosX and PosY: the left of the sprite, and 8 pixels under its top
+        move.known = true;
+        move.posX = move.savedX = move.startX = body.centerX - FF6_CHAR_WIDTH / 2;
+        move.posY = move.savedY = move.startY = body.topY + 8;
+    }
+    Thread thread;
+    thread.active = true;
+    thread.layer = 0;
+    thread.sheet = -1;
+    thread.target = thread.attacker = body;
+    thread.ptr = static_cast<size_t>(address) + kHeaderBytes;
+    thread.rate = (code[address] >> 4) + 1;
+    thread.counter = 1;
+    thread.flipped = flipped_;
+    thread.posX = thread.targetX = thread.attackerX = move.posX + move.offX;
+    thread.posY = thread.targetY = thread.attackerY = move.posY + move.offY;
+    threads_.push_back(thread);
+}
+
+void AttackAnimPlayer::addAttack(int attack, const AnimBody& attacker, const std::vector<AnimBody>& targets) {
+    attacker_ = attacker;
+    attack_ = attack;
     const AttackAnimProp prop = anim_->prop(attack);
     sfx_ = prop.sfx;
     for (const AnimInit& entry : kAnimInits) {  // what the init function of the animation sets
@@ -622,6 +735,89 @@ void AttackAnimPlayer::gradient(int sub, int argument) {
     }
 }
 
+// What a character of a scene has moved since the scene began: its position and the offset of the vector, less where it was.
+void AttackAnimPlayer::syncChar(int slot) {
+    const CharMove& move = charMove_[slot];
+    shifts_[slot].x = move.posX + move.offX - move.startX;
+    shifts_[slot].y = move.posY + move.offY - move.startY;
+}
+
+// The pose of an action goes through the frames of the action as the counter goes.
+void AttackAnimPlayer::updatePose(int slot) {
+    AnimShift& shift = shifts_[slot];
+    if (shift.action <= 0) return;
+    const ActionFrames& action = kActionFrames[shift.action];
+    const int frame = action.frames[(frames_ >> 3) % std::max(action.count, 1)];
+    shift.flip = frame >= kFlipped;
+    shift.pose = shift.flip ? frame - kFlipped : frame;
+}
+
+void AttackAnimPlayer::pickAction(const Thread& thread, bool arms) {
+    static constexpr int kWalk[16] = {3, 2, 2, 4, 4, 5, 5, 3, 4, 2, 2, 3, 3, 5, 5, 4};
+    static constexpr int kArms[16] = {25, 24, 24, 26, 26, 27, 27, 25, 26, 24, 24, 25, 25, 27, 27, 26};
+    if (thread.attacker.monster) return;
+    const int slot = thread.attacker.slot & 3;
+    const double turns = std::atan2(static_cast<double>(thread.targetY - thread.attackerY), static_cast<double>(thread.targetX - thread.attackerX)) / (2 * 3.14159265358979);
+    const int angle = static_cast<int>(std::lround(turns * 256)) & 0xFF;
+    shifts_[slot].action = (arms ? kArms : kWalk)[(angle >> 5) + (thread.flipped ? 8 : 0)];
+    updatePose(slot);
+}
+
+// The commands of the events ($C7): what a script of a battle event does to the characters, the sound and the field.
+void AttackAnimPlayer::commandScene(Thread& thread, const uint8_t* code, size_t at) {
+    const int sub = code[at + 1];
+    const size_t next = at + static_cast<size_t>(eventCommandLength(sub));
+    const int slot = thread.attacker.monster ? -1 : thread.attacker.slot & 3;
+    CharMove* move = slot >= 0 && charMove_[slot].known ? &charMove_[slot] : nullptr;
+    switch (sub) {
+        case 1:  // the offsets of the vectors become part of the position
+            if (move) {
+                move->posX += move->offX;
+                move->posY += move->offY;
+                move->offX = move->offY = 0;
+                thread.attackerX = move->posX;
+                thread.attackerY = move->posY;
+            }
+            break;
+        case 2:
+            if (move) move->savedX = move->posX, move->savedY = move->posY;
+            break;
+        case 3:  // back to the position that was saved
+            if (move) {
+                move->posX = move->savedX;
+                move->posY = move->savedY;
+                move->offX = move->offY = 0;
+                syncChar(slot);
+            }
+            break;
+        case 4:
+            if (move) thread.targetX = move->savedX, thread.targetY = move->savedY;
+            break;
+        case 6:  // the character goes to a position of the screen at once
+            if (move) {
+                move->posX = code[at + 2];
+                move->posY = code[at + 3];
+                move->offX = move->offY = 0;
+                syncChar(slot);
+            }
+            break;
+        case 7: pickAction(thread, false); break;
+        case 8:  // the target of the vector, from where it is
+            thread.targetX += thread.flipped ? -signedByte(code[at + 2]) : signedByte(code[at + 2]);
+            thread.targetY += signedByte(code[at + 3]);
+            break;
+        case 9: pickAction(thread, true); break;
+        case 11:  // a command of the sound program: the effects play at once, the other ones go to the screen
+            if (code[at + 2] == FF6_SOUND_GAME_SFX) sounds_.push_back(code[at + 3]);
+            else soundCommands_.push_back({code[at + 2], code[at + 3], code[at + 4]});
+            break;
+        case 12: gfxChanges_.push_back({code[at + 2], code[at + 3]}); break;
+        case 14: shake_ = code[at + 2]; break;
+        default: break;  // the facing, the unused ones, the sparkles of Tritoch, who is shown and the running
+    }
+    thread.ptr = next;
+}
+
 void AttackAnimPlayer::special(Thread& thread, const uint8_t* code, size_t at) {
     const int sub = code[at + 1];
     size_t next = at + static_cast<size_t>(specialLength(sub));
@@ -673,7 +869,7 @@ void AttackAnimPlayer::special(Thread& thread, const uint8_t* code, size_t at) {
 
 void AttackAnimPlayer::command(Thread& thread, const uint8_t* code, size_t at) {
     const int op = code[at];
-    size_t next = at + static_cast<size_t>(commandLength(op));
+    size_t next = at + static_cast<size_t>(op == 0xC7 ? eventCommandLength(code[at + 1]) : commandLength(op));
     switch (op) {
         case 0xA5:  // the circle: where it starts, its size, and where and how big it ends
             circle_.x = code[at + 1];
@@ -757,18 +953,45 @@ void AttackAnimPlayer::command(Thread& thread, const uint8_t* code, size_t at) {
         }
         case 0x83: move(thread, code[at + 1]); break;
         case 0x81: case 0x82: {  // the pose of the attacker or of the target, by the way it faces
-            const AnimBody& body = op == 0x81 ? attacker_ : thread.target;
-            if (!body.monster) shifts_[body.slot].pose = code[at + 1 + (thread.flipped ? 1 : 0)];
+            const AnimBody& body = op == 0x81 ? thread.attacker : thread.target;
+            if (!body.monster) {
+                AnimShift& shift = shifts_[body.slot & 3];
+                int pose = code[at + 1 + (thread.flipped ? 1 : 0)];
+                shift.flip = pose >= kFlipped;
+                shift.pose = shift.flip ? pose - kFlipped : pose;
+                shift.action = 0;
+            }
             break;
         }
+        case 0xC8: {  // the action of the attacker: its pose changes by itself, by the frames of the action
+            if (!thread.attacker.monster) {
+                AnimShift& shift = shifts_[thread.attacker.slot & 3];
+                shift.action = code[at + 1] < 39 ? code[at + 1] : 0;
+                updatePose(thread.attacker.slot & 3);
+            }
+            break;
+        }
+        case 0xE5: case 0xE6: {  // the attacker walks along the vector, a step each time, until it gets where the vector ends
+            thread.vecPos += code[at + 1];
+            if (!thread.attacker.monster) {
+                CharMove& move = charMove_[thread.attacker.slot & 3];
+                const double reached = std::min<double>(thread.vecPos, thread.vecLength);
+                move.offX = static_cast<int>(std::lround(thread.vecX * reached));
+                move.offY = static_cast<int>(std::lround(thread.vecY * reached));
+                syncChar(thread.attacker.slot & 3);
+            }
+            if (thread.vecPos < thread.vecLength && code[at + 2] != 0) next = at + 2 - code[at + 2];
+            break;
+        }
+        case 0xC7: commandScene(thread, code, at); return;
         case 0x86: case 0x87: {  // the attacker or the target moves
             int dx = 0, dy = 0;
             stepOf(code[at + 1], thread.flipped, dx, dy);
-            shiftBody(op == 0x86 ? attacker_ : thread.target, dx, dy);
+            shiftBody(op == 0x86 ? thread.attacker : thread.target, dx, dy);
             break;
         }
         case 0xE1: case 0xF1: {  // the attacker or the target is shown or hidden, if it is of the kind that the command names
-            const AnimBody& body = op == 0xE1 ? attacker_ : thread.target;
+            const AnimBody& body = op == 0xE1 ? thread.attacker : thread.target;
             if (body.monster == ((code[at + 1] & 0x80) != 0)) hideBody(body, (code[at + 1] & 1) == 0);
             break;
         }
@@ -804,7 +1027,7 @@ void AttackAnimPlayer::command(Thread& thread, const uint8_t* code, size_t at) {
                 if (++thread.frameOffset == last) thread.frameOffset = code[at + 2] >> 4;
             }
             break;
-        case 0x9A: thread.flipped = thread.target.monster != (flipped_ != attacker_.monster); break;  // faces as the target does
+        case 0x9A: thread.flipped = thread.target.monster != (flipped_ != thread.attacker.monster); break;  // faces as the target does
         case 0xA2: if (code[at + 1] & 0x40) thread.flipped = !thread.flipped; break;
         case 0xBF: thread.returnPtr = next; next = static_cast<size_t>(word(code, at + 1)); break;
         case 0x94: case 0x95: case 0xE7: {  // the vector from the attacker to the target, or to a random place on it
@@ -889,11 +1112,10 @@ void AttackAnimPlayer::command(Thread& thread, const uint8_t* code, size_t at) {
         case 0xE9: break;  // moves at random; the offset stays
         case 0xEB: next = static_cast<size_t>(word(code, at + 1 + 2 * static_cast<size_t>(std::min(thread.index, 7)))); break;
         case 0xF0: next = static_cast<size_t>(word(code, at + 1 + 2 * static_cast<size_t>(thread.target.monster ? 4 : thread.target.slot & 3))); break;
-        case 0xF3: next = static_cast<size_t>(word(code, at + 1 + 2 * static_cast<size_t>(attacker_.monster ? 4 : attacker_.slot & 3))); break;
+        case 0xF3: next = static_cast<size_t>(word(code, at + 1 + 2 * static_cast<size_t>(thread.attacker.monster ? 4 : thread.attacker.slot & 3))); break;
         case 0xF8: next = static_cast<size_t>(word(code, at + 1)); break;  // the normal one
         case 0xFA: next = static_cast<size_t>(word(code, at + 1)); break;
         case 0x80: special(thread, code, at); return;
-        case 0xC7: thread.active = false; thread.spriteOn = false; return;  // the commands of events are not part of an attack
         default:
             if (!palette(thread, op, code[at + 1])) skip(op);
             break;
@@ -932,6 +1154,7 @@ void AttackAnimPlayer::run(Thread& thread) {
 bool AttackAnimPlayer::tick() {
     if (done_) return false;
     ++frames_;
+    for (int slot = 0; slot < 4; ++slot) updatePose(slot);  // a character that walks takes its next step
     for (Thread& thread : threads_) {
         if (!thread.active) continue;
         thread.counter = (thread.counter - 1) & 0xFF;  // a byte, as in the game: zero rolls over to 255
@@ -951,7 +1174,7 @@ bool AttackAnimPlayer::tick() {
                                 thread.spriteFlipped, thread.spriteLayer, thread.esper, veilBg3_ && thread.spriteLayer > 0});
         }
     }
-    done_ = !any || frames_ >= kMaxFrames;
+    done_ = !any || frames_ >= maxFrames_;
     if (done_) sprites_.clear();
     return !done_;
 }

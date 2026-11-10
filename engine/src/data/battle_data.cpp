@@ -12,6 +12,24 @@ std::vector<uint8_t> BattleData::name(int id) const {
     return std::vector<uint8_t>(first, first + FF6_MONSTER_NAME_BYTES);
 }
 
+std::vector<uint8_t> BattleData::monsterDialog(int id) const {
+    if (id < 0 || id >= FF6_MONSTER_DLG_COUNT) return {};
+    const size_t pointer = static_cast<size_t>(monsterDlgPtrs[static_cast<size_t>(id) * 2] | (monsterDlgPtrs[static_cast<size_t>(id) * 2 + 1] << 8));
+    if (pointer < FF6_MONSTER_DLG_BASE) return {};
+    std::vector<uint8_t> text;
+    for (size_t at = pointer - FF6_MONSTER_DLG_BASE; at < monsterDlg.size() && monsterDlg[at] != 0; ++at) text.push_back(monsterDlg[at]);
+    return text;
+}
+
+std::vector<uint8_t> BattleData::battleDialog(int id) const {
+    if (id < 0 || id >= FF6_BATTLE_DLG_COUNT) return {};
+    const size_t pointer = static_cast<size_t>(battleDlgPtrs[static_cast<size_t>(id) * 2] | (battleDlgPtrs[static_cast<size_t>(id) * 2 + 1] << 8));
+    if (pointer < FF6_BATTLE_DLG_BASE) return {};
+    std::vector<uint8_t> text;
+    for (size_t at = pointer - FF6_BATTLE_DLG_BASE; at < battleDlg.size() && battleDlg[at] != 0; ++at) text.push_back(battleDlg[at]);
+    return text;
+}
+
 std::vector<uint8_t> BattleData::attackName(int attack) const {
     const auto entry = [](const std::vector<uint8_t>& names, int index) {
         const auto first = names.begin() + static_cast<std::ptrdiff_t>(index) * FF6_ATTACK_NAME_BYTES;
@@ -87,6 +105,18 @@ BattleData loadBattleData(const std::string& packDir) {
     data.attackNames = reader.bytes(static_cast<size_t>(FF6_ATTACK_NAME_COUNT) * FF6_ATTACK_NAME_BYTES);
     data.sketch = reader.bytes(static_cast<size_t>(FF6_MONSTER_COUNT) * FF6_SKETCH_BYTES);
     data.control = reader.bytes(static_cast<size_t>(FF6_MONSTER_COUNT) * FF6_CONTROL_BYTES);
+    data.magicPoints = reader.bytes(FF6_MAGIC_POINT_BYTES);
+    data.monsterRage = reader.bytes(static_cast<size_t>(FF6_RAGE_MONSTERS) * 2);
+    data.danceProp = reader.bytes(static_cast<size_t>(FF6_DANCE_COUNT) * FF6_DANCE_ATTACKS);
+    data.battleBgDance = reader.bytes(FF6_BG_DANCE_BYTES);
+    data.danceBg = reader.bytes(FF6_DANCE_BG_BYTES);
+    data.monsterDlgPtrs = reader.bytes(static_cast<size_t>(FF6_MONSTER_DLG_COUNT) * 2);
+    data.monsterDlg = reader.bytes(FF6_MONSTER_DLG_BYTES);
+    data.battleDlgPtrs = reader.bytes(static_cast<size_t>(FF6_BATTLE_DLG_COUNT) * 2);
+    data.battleDlg = reader.bytes(FF6_BATTLE_DLG_BYTES);
+    data.metamorph = reader.bytes(FF6_METAMORPH_BYTES);
+    data.charAi = reader.bytes(static_cast<size_t>(FF6_CHAR_AI_COUNT) * FF6_CHAR_AI_BYTES);
+    data.colosseum = reader.bytes(FF6_COLOSSEUM_BYTES);
     if (reader.remaining() != 0) throw std::runtime_error("battle data has trailing bytes");
     return data;
 }

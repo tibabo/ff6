@@ -59,7 +59,9 @@ public:
     bool aligned() const { return (dfx_ & 0xFF) == 0 && (dfy_ & 0xFF) == 0; }
     bool eventRunning() const { return eventRunning_; }
     // The tile that the map holds at a place, after the changes that the events made to it.
-    int tileAt(int x, int y) const { return tilemap_[static_cast<size_t>((y & 255) * FF6_WORLD_SIZE + (x & 255))]; }
+    int tileAt(int x, int y) const { return tilemap_[static_cast<size_t>((y & (mapSize() - 1)) * mapSize() + (x & (mapSize() - 1)))]; }
+    // The serpent trench is a map of 128 x 128 tiles, the worlds of 256 x 256.
+    int mapSize() const { return world_ == FF6_TRENCH_MAP ? FF6_TRENCH_SIZE : FF6_WORLD_SIZE; }
     uint16_t propAt(int x, int y) const;
     bool zooming() const { return zoom_ >= 0; }
     // The menu button was pressed on a tile.
@@ -74,7 +76,12 @@ public:
     int airshipY() const { return airshipY_; }
     // The party comes out of the story on board, flying in a direction (degrees, 0 is north) at an altitude.
     void enterFlying(int world, int tileX, int tileY, int facing, const Lead& lead, int angle = 0, int altitude = 0);
+    // The party rides a chocobo: it turns and runs like the airship, on the ground.
+    void enterRiding(int world, int tileX, int tileY, int facing, const Lead& lead);
+    // The serpent trench: the airship goes along the channel by the script of the story that hands it the screen.
+    void enterTrench(int tileX, int tileY, int facing, const Lead& lead);
     bool flying() const { return mode_ != Mode::Walk; }
+    bool riding() const { return vehicle_ == Vehicle::Chocobo && mode_ != Mode::Walk; }
     // The airship keeps flying while the party is on its deck.
     bool keepsFlying() const { return deck_ || keepFlight_; }
     // Doom Gaze waits in two places of the world of ruin, in squares of 4 x 4 tiles; the battle starts when the airship goes over one.
@@ -86,6 +93,28 @@ public:
     }
     // A script of the airship, which the story runs while it flies.
     void startVehicleEvent(uint32_t offset) { startEvent(offset); }
+    // The script that an event of the field hands to the world map (a vehicle, or the party on foot); it goes on at the end
+    // of the command that loads a map, and gives the event back there.
+    void startStoryScript(uint32_t offset) {
+        storyScript_ = true;
+        startEvent(offset);
+    }
+    // A battle that a script of a vehicle asks for: the group of the event battles and the background.
+    bool takeScriptBattle(int* group, int* background) {
+        if (!scriptBattleReady_) return false;
+        scriptBattleReady_ = false;
+        *group = scriptBattleGroup_;
+        *background = scriptBattleBackground_;
+        return true;
+    }
+    bool storyScriptRunning() const { return storyScript_ && (eventRunning_ || entranceReady_); }
+    bool takeResume(uint32_t* offset) {
+        if (!resumeValid_) return false;
+        resumeValid_ = false;
+        storyScript_ = false;
+        *offset = resumeOffset_;
+        return true;
+    }
     int flightAngle() const { return flight_.angle >> 8; }
     int flightAltitude() const { return flight_.altitude; }
     // The tile that the airship is over.
@@ -95,10 +124,13 @@ public:
     const Ppu& ppu() const { return ppu_; }
 
 private:
-    enum class Mode { Walk, TakeoffFade, TweenIn, Fly, TweenOut };
+    enum class Mode { Walk, TakeoffFade, TweenIn, Fly, TweenOut, Dismount };
+    enum class Vehicle { Airship, Chocobo, Trench };
     // The airship in flight: positions are in 1/256 pixel, angles in 1/256 degree, altitudes as the game keeps them.
     struct Flight {
         int angle = 0, rate = 0, speed = 0, climb = 0, altitude = 0;
+        int moveAngle = 0;  // $75: the heading that it moves along, when a script keeps it apart from the camera
+        unsigned flags = 0;  // $1e: what the scripts turn off
         int x = 0, y = 0;
         int horizon = 0x92, rotation = 0;  // $85 and $83
         bool landing = false;
@@ -124,6 +156,13 @@ private:
     void drawParkedAirship();
     void hideSprites(size_t first, size_t count);
     void boardAirship();
+    void playVehicleMusic();
+    void drawChocobo();
+    void drawArrows();
+    void dismount();
+    void advance(int degrees);
+    void fixChocoboCollision(int degrees);
+    bool chocoboBlocked() const;
     void applyModifications();
     void buildWindow();
     void updateMode7Vars();
@@ -145,6 +184,8 @@ private:
     void jumpTo(uint32_t offset);
     void loadMapCommand();
     void playMusic();
+
+    const WorldMapData& map() const { return world_ == FF6_TRENCH_MAP ? data_.trench : data_.worlds[static_cast<size_t>(world_ & 1)]; }
 
     const WorldData& data_;
     const CommonData& common_;
@@ -193,6 +234,9 @@ private:
     int paletteCounter_ = 0;  // $b860
     bool minimapShown_ = true;
     Mode mode_ = Mode::Walk;
+    Vehicle vehicle_ = Vehicle::Airship;
+    int chocoboFrame_ = 0x25;  // $7eb650
+    int pivot_ = 0xD0;  // $7d: the line of the screen that the airship is on
     Flight flight_;
     Camera camera_;
     int airshipX_ = 0, airshipY_ = 0;  // $1f62: the tile where the airship is parked
@@ -207,6 +251,15 @@ private:
     DoomGaze doomGaze_;
     bool doomGazeReady_ = false;
     bool keepFlight_ = false;  // a script of the airship leaves the world while the airship flies on
+    bool scriptBattleReady_ = false;
+    int scriptBattleGroup_ = 0, scriptBattleBackground_ = 0;
+    bool vehicleHidden_ = false;  // $e7 bit 5
+    bool arrowsShown_ = false, arrowsInput_ = false;  // the arrows of the serpent trench: $e8 bits 1 and 2
+    int arrowCounter_ = 0, arrowTick_ = 0;  // $7eb660, $7eb661
+    int pivotX_ = 0x80;  // $7b
+    bool storyScript_ = false;  // the script that runs belongs to an event of the field
+    bool resumeValid_ = false;
+    uint32_t resumeOffset_ = 0;
     bool deck_ = false;  // the party goes to the deck: the airship keeps its heading and altitude for the way back
     unsigned autoHeld_ = 0;  // the buttons that a script of the airship holds down
 };

@@ -64,7 +64,8 @@ int Encounters::stepWorld(const BattleData& data, const WorldData& world, int wo
     if (number(data) >= (counter_ >> 8)) return -1;
     counter_ = 0;
     const int group = world.battleGroups[groupAt];
-    if (group == FF6_WORLD_VELDT_GROUP) return veldtBattle(data, party);
+    onVeldt_ = group == FF6_WORLD_VELDT_GROUP;
+    if (onVeldt_) return veldtBattle(data, party);
     const int draw = groupNumber(data);
     int pick = 0;
     while (pick < 3 && draw >= kPicks[pick]) ++pick;

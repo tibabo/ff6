@@ -292,6 +292,9 @@ bool EventRunner::step(EventHost& host) {
         case FF6_EVENT_TAKE_ITEM:
         case FF6_EVENT_GIVE_GIL:
         case FF6_EVENT_TAKE_GIL:
+        case FF6_EVENT_AND_STATUS:
+        case FF6_EVENT_SET_STATUS:
+        case FF6_EVENT_TOGGLE_STATUS:
         case FF6_EVENT_CHANGE_HP:
         case FF6_EVENT_CHANGE_MP:
         case FF6_EVENT_REMOVE_EQUIPMENT:
@@ -307,10 +310,13 @@ bool EventRunner::step(EventHost& host) {
             return next();
         }
         case FF6_EVENT_SHOP:  // the menu takes the screen, and the event goes on once it is closed
+        case FF6_EVENT_COLOSSEUM_MENU:
+        case FF6_EVENT_COLOSSEUM_BATTLE:
         case FF6_EVENT_BATTLE:  // so does the battle, and the title screen, the opening and the menu of saved games
         case FF6_EVENT_BATTLE_COLLISION:
         case FF6_EVENT_RANDOM_BATTLE:
         case FF6_EVENT_BOX_BATTLE:
+        case FF6_EVENT_TRAIN:
         case FF6_EVENT_TITLE_SCREEN:
         case FF6_EVENT_OPENING:
         case FF6_EVENT_LOAD_MENU:

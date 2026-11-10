@@ -57,6 +57,7 @@ ff6::SaveState sampleState() {
     terra.mp = 30;
     terra.maxMp = 44;
     terra.experience = 1234;
+    terra.status = FF6_ST_POISON | FF6_ST_BLIND;
     terra.vigor = 31;
     terra.speed = 33;
     terra.stamina = 28;
@@ -75,6 +76,11 @@ ff6::SaveState sampleState() {
     state.airshipX = 137;
     state.airshipY = 199;
     state.party.spells[0][45] = true;
+    state.party.spellLearn[0][3] = 70;
+    state.party.rages[0x19] = true;
+    state.party.rages[255] = true;
+    state.party.dances = 0x81;
+    state.party.morphCounter = 123;
     state.party.spells[6][1] = true;
     state.party.espers[3] = true;
     state.party.swordtechs = 0x0F;
@@ -119,6 +125,7 @@ void testSave() {
     CHECK(terra.level == 12 && terra.hp == 150 && terra.maxHp == 210 && terra.mp == 30 && terra.maxMp == 44);
     CHECK(terra.experience == 1234 && terra.vigor == 31 && terra.speed == 33 && terra.stamina == 28 && terra.magicPower == 39);
     CHECK(terra.equipment == state.party.characters[0].equipment);
+    CHECK(terra.status == (FF6_ST_POISON | FF6_ST_BLIND) && back.party.characters[1].status == 0);
     CHECK(back.party.inventory[0].item == 233 && back.party.inventory[0].quantity == 5);
     CHECK(back.party.inventory[1].item == 0 && back.party.inventory[1].quantity == 99);
     CHECK(back.party.inventory[2].item == FF6_ITEM_EMPTY);
@@ -126,6 +133,8 @@ void testSave() {
     CHECK(back.airshipX == 137 && back.airshipY == 199 && back.doomGazeCounter == 99);
     CHECK(back.party.veldtBattles[17] && back.party.veldtBattles[511] && !back.party.veldtBattles[18] && back.party.veldtPointer == 63);
     CHECK(back.party.spells[0][45] && back.party.spells[6][1] && !back.party.spells[0][1] && !back.party.spells[1][45]);
+    CHECK(back.party.spellLearn[0][3] == 70 && back.party.spellLearn[0][4] == 0 && back.party.rages[0x19] && back.party.rages[255] &&
+          !back.party.rages[0x1A] && back.party.dances == 0x81 && back.party.morphCounter == 123);
     CHECK(back.party.espers[3] && !back.party.espers[4] && back.party.swordtechs == 0x0F && back.party.blitzes == 0x81);
     CHECK(!ff6::saveFromJson(ff6::saveToJson(ff6::SaveState())).hasParty);  // an older save has none
     {  // a save without config has the defaults of a new game

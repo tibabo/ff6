@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstdlib>
 #include <memory>
 #include <vector>
 
@@ -7,6 +8,8 @@
 #include "../tests.hpp"
 #include "battle/encounters.hpp"
 #include "world/world_screen.hpp"
+#include "cutscene/train.hpp"
+#include "data/battle_data.hpp"
 
 namespace {
 
@@ -417,5 +420,100 @@ void testWorld() {
         h.screen->startVehicleEvent(0x74);
         for (int i = 0; i < 3; ++i) h.screen->tick({});
         CHECK(h.screen->takeEntrance(&target) && target.map == 0x11 && h.screen->keepsFlying() && h.screen->airshipX() != 70);
+    }
+
+    {  // The chocobo: it runs at the pace of a walk, stops at the tiles that it cannot cross and the party gets off where it is
+        ff6::WorldData world = makeWorld();
+        world.worlds[0].tileProps[5] = 0x0005;  // the chocobo does not go there
+        for (int x = 90; x < 110; ++x) setTile(world, 0, x, 90, 5);
+        Harness h(world);
+        const ff6::WorldScreen::Lead lead{0, 0};
+        const auto hold = [&](unsigned buttons, int frames) {
+            ff6::InputState input;
+            input.held = buttons;
+            for (int i = 0; i < frames; ++i) h.screen->tick(input);
+        };
+        h.screen->enterRiding(0, 100, 100, ff6::Up, lead);
+        CHECK(h.screen->riding() && h.screen->flying() && h.screen->flightAngle() == 0);
+        hold(FF6_HELD_UP, 20);
+        CHECK(h.screen->flightTileY() == 99 || h.screen->flightTileY() == 98);  // 20 frames, a pixel each at most
+        hold(FF6_HELD_UP, 300);
+        CHECK(h.screen->flightTileY() == 91);  // the wall stops it, and it does not go through
+        const int stuck = h.screen->flightTileY();
+        hold(FF6_HELD_UP | FF6_HELD_LEFT, 40);  // it turns, and slides along the wall or leaves it
+        CHECK(h.screen->flightAngle() > 0 && h.screen->flightTileY() >= stuck - 0 && h.screen->flightTileY() > 90);
+        h.screen->enterRiding(0, 100, 100, ff6::Down, lead);
+        CHECK(h.screen->flightAngle() == 180);
+        ff6::InputState land;
+        land.cancel = true;
+        h.screen->tick(land);
+        for (int i = 0; i < 40; ++i) h.screen->tick({});
+        CHECK(!h.screen->flying() && h.screen->tileX() == 100 && h.screen->tileY() == 100);
+        CHECK(h.screen->airshipX() == 0 && h.screen->airshipY() == 0);  // the chocobo is not the airship
+    }
+
+    {  // A script that an event of the field hands to the airship: the camera and the heading, the battle, the loading of a map
+        std::vector<uint8_t> script(0x40, 0xFF);
+        const uint8_t story[] = {0xC0, 0x20, 0xC1, 0xB4, 0x00, 0xC2, 0xB4, 0x00, 0xC6, 0x00, 0x08, 0xC5, 0x00, 0x10, 0xD1, 0xDA, 0xE0, 0x01,
+                                 0xCA, 0x14, 0x23, 0xD2, 0xAF, 0x04, 0x2C, 0x10, 0x00, 0xFF};
+        std::copy(story, story + sizeof(story), script.begin() + 0x10);
+        Harness h(makeWorld(), script);
+        const ff6::WorldScreen::Lead lead{0, 0};
+        h.screen->enterFlying(0, 70, 70, ff6::Down, lead, 90, 0);
+        h.screen->startStoryScript(0x10);
+        for (int i = 0; i < 4; ++i) h.screen->tick({});
+        CHECK(h.screen->flightAngle() == 180 && h.screen->flightAltitude() == 0x1000);
+        std::vector<uint8_t> image(static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL);
+        h.screen->draw(image.data());
+        CHECK(h.screen->ppu().sprites[20].y == 0xE0);  // the airship is hidden
+        ff6::InputState left;
+        left.held = FF6_HELD_LEFT;
+        for (int i = 0; i < 4; ++i) h.screen->tick(left);  // the arrows are shown: the left is the choice
+        CHECK(std::find(h.bits.begin(), h.bits.end(), FF6_EVENT_BIT_TRENCH_LEFT) != h.bits.end());
+        int group = -1, background = -1;
+        for (int i = 0; i < 60 && !h.screen->takeScriptBattle(&group, &background); ++i) h.screen->tick({});
+        CHECK(group == 0x14 && background == 0x23);
+        CHECK(h.screen->flightTileY() > 70);  // it moved south, whichever way the camera turned
+        ff6::EntranceTarget target;
+        uint32_t resume = 0;
+        for (int i = 0; i < 4 && !h.screen->takeEntrance(&target); ++i) h.screen->tick({});
+        CHECK(target.map == 175 && target.x == 0x2C && target.y == 0x10);
+        CHECK(h.screen->takeResume(&resume) && resume == 0x10 + 27 && !h.screen->storyScriptRunning());
+    }
+
+    if (const char* pack = std::getenv("FF6_PACK")) {  // The ride of the magitek train, on the data of the game
+        const ff6::WorldData world = ff6::loadWorldData(pack);
+        const ff6::BattleData battle = ff6::loadBattleData(pack);
+        ff6::NoSound sound;
+        ff6::TrainRide ride(world.train, battle.rngTable, 0, sound);
+        CHECK(ride.brightness() == 0 && ride.step() == 0 && !ride.finished());
+        for (int i = 0; i < 8; ++i) ride.tick({});  // two steps of four frames
+        CHECK(ride.step() == 2 && ride.brightness() == 2);
+        int lit = 0;
+        for (int y = FF6_TRAIN_BUFFER_Y; y < FF6_TRAIN_BUFFER_Y + FF6_TRAIN_BUFFER; ++y) {
+            for (int x = FF6_TRAIN_BUFFER_X; x < FF6_TRAIN_BUFFER_X + FF6_TRAIN_BUFFER; ++x) lit += ride.cell(x, y) != 0;
+        }
+        CHECK(lit > 400);  // the tunnel and its rails
+        std::vector<uint8_t> image(static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL);
+        ride.draw(image.data());
+        // The way: the first battle comes before the 33rd step, the ride waits for it and goes on after it, the course ends
+        // with a fade out.
+        int battles = 0, group = 0, background = 0, bosses = 0;
+        bool second = false;
+        for (int i = 0; i < 20000 && !ride.finished(); ++i) {
+            ride.tick({});
+            if (ride.takeBattle(&group, &second, &background)) {
+                if (battles == 0) {
+                    CHECK(group == FF6_TRAIN_BATTLE_GROUP_1 && background == FF6_TRAIN_BATTLE_BG && ride.step() == 33);
+                    const int waiting = ride.step();
+                    for (int k = 0; k < 20; ++k) ride.tick({});
+                    CHECK(ride.step() == waiting);  // it waits for the battle
+                }
+                ++battles;
+                bosses += group == FF6_TRAIN_BOSS_GROUP;
+                ride.resume();
+            }
+        }
+        CHECK(ride.finished() && battles >= 3 && bosses == 1);
     }
 }

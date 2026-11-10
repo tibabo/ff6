@@ -200,6 +200,62 @@ void testItemUse(const ff6::GameRules& rules) {
     CHECK(!ff6::useItemOn(party, rules, 0, 99));  // and an item that she does not have
 }
 
+void testPoison(const ff6::GameRules& rules) {
+    ff6::PartyState party;
+    ff6::setCharacterProperties(party, rules, 0, 0, 0);
+    ff6::CharacterState& terra = party.characters[0];
+    terra.equipment.fill(FF6_ITEM_EMPTY);
+    terra.hp = terra.maxHp = 320;
+    const int maximum = ff6::calcStats(rules, terra).maxHp;
+    CHECK(!ff6::poisonStep(party, rules, {0}) && terra.hp == 320);  // not poisoned: nothing happens
+    terra.status = FF6_ST_POISON;
+    CHECK(ff6::poisonStep(party, rules, {0}) && terra.hp == 320 - (maximum >> FF6_POISON_SHIFT));
+    CHECK(!ff6::poisonStep(party, rules, {}) && terra.hp == 320 - (maximum >> FF6_POISON_SHIFT));  // a character out of the party is not touched
+    terra.hp = 5;
+    ff6::poisonStep(party, rules, {0});
+    CHECK(terra.hp == 1);  // the poison does not kill
+    terra.hp = 1;
+    ff6::poisonStep(party, rules, {0});
+    CHECK(terra.hp == 1);
+    // The relic of recovery heals a fourth of the stamina at each step.
+    terra.status = 0;
+    terra.stamina = 40;
+    terra.hp = 100;
+    terra.equipment[FF6_EQUIP_FIRST_RELIC + 1] = FF6_ITEM_TINTINABAR;
+    ff6::poisonStep(party, rules, {0});
+    CHECK(terra.hp == 110);
+    terra.status = FF6_ST_ZOMBIE;
+    ff6::poisonStep(party, rules, {0});
+    CHECK(terra.hp == 110);  // not the undead
+    // The commands of the story.
+    ff6::changeStatus(party, 0, FF6_EVENT_SET_STATUS, FF6_ST_POISON | FF6_ST_SLEEP);
+    CHECK(terra.status == (FF6_ST_ZOMBIE | FF6_ST_POISON));  // sleep does not last
+    ff6::changeStatus(party, 0, FF6_EVENT_AND_STATUS, 0xFFFF ^ FF6_ST_ZOMBIE);
+    CHECK(terra.status == FF6_ST_POISON);
+    ff6::changeStatus(party, 0, FF6_EVENT_TOGGLE_STATUS, FF6_ST_POISON | FF6_ST_BLIND);
+    CHECK(terra.status == FF6_ST_BLIND);
+    ff6::changeStatus(party, 0, FF6_EVENT_AND_STATUS, 0);
+    CHECK(terra.status == 0);
+    ff6::changeStatus(party, 0, FF6_EVENT_SET_STATUS, FF6_ST_MAGITEK);
+    CHECK(terra.status == FF6_ST_MAGITEK);  // the armor lasts until the story takes it off
+    ff6::changeStatus(party, 0, FF6_EVENT_AND_STATUS, 0);
+    CHECK(terra.status == 0);
+    // An item that takes the status away, which is of use only when the character has it.
+    int antidote = -1;
+    for (int item = 0; item < FF6_ITEM_COUNT && antidote < 0; ++item) {
+        const uint8_t* prop = rules.item(item);
+        if ((prop[FF6_ITEM_PROP_TYPE] & FF6_ITEM_PROP_TYPE_MASK) == FF6_ITEM_TYPE_CONSUMABLE && (prop[FF6_ITEM_PROP_FLAGS] & FF6_ITEM_FLAG_REMOVE_STATUS) &&
+            prop[FF6_ITEM_PROP_STATUS] == FF6_ST_POISON) {
+            antidote = item;
+        }
+    }
+    CHECK(antidote >= 0 && ff6::itemUsableInMenu(rules, antidote));
+    ff6::giveItem(party, antidote);
+    CHECK(!ff6::canUseItemOn(party, rules, 0, antidote));
+    terra.status = FF6_ST_POISON | FF6_ST_BLIND;
+    CHECK(ff6::useItemOn(party, rules, 0, antidote) && terra.status == FF6_ST_BLIND && ff6::itemQuantity(party, antidote) == 0);
+}
+
 void testShops(const ff6::GameRules& rules) {
     const std::vector<int> stock = ff6::shopStock(rules, 0);  // the weapons of Narshe
     CHECK(stock.size() == 7 && (rules.shop(0)[0] & FF6_SHOP_KIND_MASK) == 1);
@@ -305,6 +361,7 @@ void testParty() {
     testEquipmentRemoval(rules);
     testEquipping(rules);
     testItemUse(rules);
+    testPoison(rules);
     testShops(rules);
     testAbilities(rules);
     testExperience(rules);

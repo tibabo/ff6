@@ -29,11 +29,13 @@
 #include "field/text.hpp"
 #include "input.hpp"
 #include "menu/field_menu.hpp"
+#include "menu/colosseum_menu.hpp"
 #include "menu/load_menu.hpp"
 #include "menu/shop_menu.hpp"
 #include "renderer.hpp"
 #include "sound.hpp"
 #include "state/party_ops.hpp"
+#include "cutscene/train.hpp"
 #include "world/world_screen.hpp"
 
 namespace ff6 {
@@ -77,6 +79,8 @@ public:
     const FieldMenu& menu() const { return menu_; }
     const ShopMenu& shop() const { return shop_; }
     bool shopOpen() const { return shopOpen_; }
+    const ColosseumMenu& colosseum() const { return colosseum_; }
+    bool colosseumOpen() const { return colosseumOpen_; }
     const BattleScreen& battle() const { return battleScreen_; }
     BattleScreen& battle() { return battleScreen_; }
     bool battleOpen() const { return battleOpen_; }
@@ -121,6 +125,8 @@ private:
     bool loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEvent, bool fadeIn);
     bool enterWorld(uint32_t mapId, int x, int y, int facing, bool fadeIn);
     void placeDoomGaze();
+    void startTrain();
+    void takeStep();
     void tickWorld(const InputState& input);
     WorldScreen::Lead worldLead() const;
     void initialize(uint32_t startMap, const std::vector<int>& party, const SaveState* save, bool newGame = false);
@@ -145,13 +151,15 @@ private:
     void moveParty(int tileX, int tileY);
     void tickMenu(const InputState& input);
     void openShop(int shop);
+    void openColosseum();
+    void startColosseumBattle();
     void startCutscene(bool opening);
     void endCutscene();
     void openLoadMenu();
     void restoreSavedGame();
     void startBattle(int group, int flags);
     void beginBattle(int battle, int flags);
-    void launchBattle(int battle, int background);
+    void launchBattle(int battle, int background, bool veldt = false);
     void recordVeldtBattle();
     void checkEncounter();
     void endBattle();
@@ -181,6 +189,12 @@ private:
     FieldMenu menu_;
     ShopMenu shop_;
     bool shopOpen_ = false;  // the menu that is open is a shop, not the field menu
+    ColosseumMenu colosseum_;
+    bool colosseumOpen_ = false;  // or the menu of the colosseum
+    int colosseumItem_ = FF6_ITEM_EMPTY, colosseumFighter_ = -1;  // what the menu chose
+    ColosseumMatch colosseumMatch_;
+    Battle::Colosseum colosseumBout_;  // set while the bout is fought
+    CharacterState colosseumBackup_;  // what the fighter was before: the bout leaves no mark on it
     BattleData battleData_;
     BattleGfx battleGfx_;
     AttackAnim attackAnim_;
@@ -189,6 +203,8 @@ private:
     uint32_t battleSeed_ = 1;
     Encounters encounters_;
     int lastBattle_ = -1;  // the battle that started last
+    int mapSong_ = -1;  // the song that the battle music replaced, to bring back
+    bool fanfarePlayed_ = false;
     int pendingBattle_ = 0;  // the battle that the random battle event starts
     int boxGroup_ = 0;  // the group of the monster in the box that was just opened
     MenuPhase menuPhase_ = MenuPhase::Closed;
@@ -199,6 +215,8 @@ private:
     std::function<std::unique_ptr<SaveState>()> loadHandler_;
     TitleData titleData_;
     bool titleDataLoaded_ = false;
+    TrainRide* train_ = nullptr;  // the cutscene, when it is the ride of the magitek train
+    bool trainBattle_ = false;  // the battle that is open comes from the ride
     std::unique_ptr<Cutscene> cutscene_;  // the title screen or the opening, which take the screen like the menu does
     WorldData worldData_;
     bool worldDataLoaded_ = false;
@@ -208,6 +226,10 @@ private:
     bool flightSaved_ = false;  // the party is on the deck of the airship, which flies on
     int flightAngle_ = 0, flightAltitude_ = 0;
     int doomGazeCounter_ = 0;
+    bool eventLoad_ = false;  // the map is loaded by an event of the field, which hands what follows to the world map
+    bool worldScript_ = false;  // the event waits while the world map runs its script
+    bool resumePending_ = false;  // the script of the world map loads a map, where the event goes on
+    uint32_t resumeOffset_ = 0;
     bool doomGazeBattle_ = false;  // the battle that is open is Doom Gaze
     LoadMenu loadMenu_;
     bool loadMenuOpen_ = false;

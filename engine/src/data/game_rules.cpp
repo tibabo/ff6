@@ -21,6 +21,7 @@ GameRules loadGameRules(const std::string& packDir) {
     rules.bushidoLevels = reader.bytes(FF6_TECH_COUNT);
     rules.blitzLevels = reader.bytes(FF6_TECH_COUNT);
     rules.magicProp = reader.bytes(static_cast<size_t>(FF6_MAGIC_PROP_COUNT) * FF6_MAGIC_PROP_BYTES);
+    rules.genjuProp = reader.bytes(static_cast<size_t>(FF6_ESPER_COUNT) * FF6_GENJU_PROP_BYTES);
     if (reader.remaining() != 0) throw std::runtime_error("game data has trailing bytes");
     return rules;
 }

@@ -22,6 +22,16 @@ export const ANIM_GFX_BYTES = 0x800;
 export const AIRSHIP_GFX_BYTES = 0x1800;
 export const BACKDROP_GFX_BYTES = 0x2000;
 export const BACKDROP_TILES_BYTES = 0x1000;
+export const CHOCOBO_GFX_BYTES = 0x1800;
+export const TRENCH_TILEMAP_BYTES = 0x4000;  // 128 x 128 tiles
+export const TRENCH_PALETTE_BYTES = 0x200;  // 128 colors for the background, then 128 for the sprites
+export const TRAIN_GFX_BYTES = 0x3fc7;
+export const TRAIN_TILE_POINTER_BYTES = 0x2b8;
+export const TRAIN_PALETTE_BYTES = 0x200;
+export const TRAIN_COURSE_BYTES = 52 * 5;
+// The tables of the magitek train ride, one after the other in EE/2692: pitch, pitch, the sizes of the layers, one item of
+// 32 bytes for the yaw multiplier, three of yaw, five of background, the tiles of each background, the course.
+export const TRAIN_TABLE_BYTES = [0x1a0, 0x1a0, 0x40, 0x20, 0x60, 0xa0, 0x3c0, TRAIN_COURSE_BYTES];
 
 const GFX_PTRS = 0x2eb200;  // EE/B200
 const TILEMAP_PTR = [GFX_PTRS + 0x0f, GFX_PTRS + 0x24];
@@ -31,6 +41,14 @@ const BACKDROP_GFX_PTR = GFX_PTRS + 0x06;
 const BACKDROP_TILES_PTR = GFX_PTRS + 0x09;
 const AIRSHIP_GFX_PTR = [GFX_PTRS + 0x0c, GFX_PTRS + 0x51];
 const ANIM_GFX_PTR = GFX_PTRS + 0x42;
+const CHOCOBO_GFX_PTR = [GFX_PTRS + 0x30, GFX_PTRS + 0x48];
+const TRENCH_TILEMAP_PTR = GFX_PTRS + 0x27;
+const TRENCH_GFX_PTR = GFX_PTRS + 0x2a;
+const TRENCH_PALETTE = 0x18e6ba;  // D8/E6BA, compressed
+const TRAIN_GFX_PTR = GFX_PTRS + 0x15;
+const TRAIN_TILE_POINTERS = 0x18dd00;  // D8/DD00
+const TRAIN_PALETTE = 0x2f4846;  // EF/4846
+const TRAIN_TABLES = 0x2e2692;  // EE/2692
 const ANIM_PTRS = 0x2e573e;  // EE/573E: where the sprites of each frame are in the data that follows
 const ANIM_DATA = 0x2e5816;
 const MINIMAP_PTR = [GFX_PTRS + 0x4b, GFX_PTRS + 0x4e];
@@ -128,5 +146,21 @@ export function buildWorldData(rom, version) {
   parts.push(decompress(rom, AIRSHIP_GFX_PTR[1], AIRSHIP_GFX_BYTES, 'Falcon'));
   parts.push(decompress(rom, BACKDROP_GFX_PTR, BACKDROP_GFX_BYTES, 'Backdrop graphics'));
   parts.push(decompress(rom, BACKDROP_TILES_PTR, BACKDROP_TILES_BYTES, 'Backdrop tiles'));
+  for (const ptr of CHOCOBO_GFX_PTR) parts.push(decompress(rom, ptr, CHOCOBO_GFX_BYTES, 'Chocobo'));
+  const trench = decompress(rom, TRENCH_GFX_PTR, WORLD_GFX_BYTES, 'Serpent trench graphics');
+  parts.push(decompress(rom, TRENCH_TILEMAP_PTR, TRENCH_TILEMAP_BYTES, 'Serpent trench map'));
+  parts.push(trench.subarray(0, FORMATION_BYTES));
+  parts.push(buildChr(trench));
+  const palette = decompressLzss(rom, TRENCH_PALETTE, 0x20000);
+  if (palette.length !== TRENCH_PALETTE_BYTES) throw new Error('Serpent trench palette has an unexpected size.');
+  parts.push(Buffer.from(palette));
+  parts.push(decompress(rom, TRAIN_GFX_PTR, TRAIN_GFX_BYTES, 'Magitek train'));
+  parts.push(slice(rom, TRAIN_TILE_POINTERS, TRAIN_TILE_POINTER_BYTES, 'Magitek train tiles'));
+  parts.push(slice(rom, TRAIN_PALETTE, TRAIN_PALETTE_BYTES, 'Magitek train palette'));
+  let at = TRAIN_TABLES;
+  for (const bytes of TRAIN_TABLE_BYTES) {
+    parts.push(slice(rom, at, bytes, 'Magitek train table'));
+    at += bytes;
+  }
   return Buffer.concat(parts);
 }

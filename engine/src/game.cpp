@@ -31,21 +31,21 @@ struct Drawable {
 Game::Game(CommonData common, std::string packDir, uint32_t startMap, Renderer& renderer, Sound& sound,
            const std::vector<int>& party)
     : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
-      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
+      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), colosseum_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
       loadMenu_(menuScreen_, sound_) {
     initialize(startMap, party, nullptr);
 }
 
 Game::Game(CommonData common, std::string packDir, const SaveState& save, Renderer& renderer, Sound& sound)
     : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
-      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
+      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), colosseum_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
       loadMenu_(menuScreen_, sound_) {
     initialize(static_cast<uint32_t>(save.map), {}, &save);
 }
 
 Game::Game(CommonData common, std::string packDir, NewGame, Renderer& renderer, Sound& sound)
     : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
-      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
+      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), colosseum_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
       loadMenu_(menuScreen_, sound_) {
     initialize(FF6_GAME_START_MAP, {}, nullptr, true);
 }
@@ -237,6 +237,11 @@ bool Game::loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEven
     }
     MapData next = loadMap(packDir_, mapId);
     world_.reset();
+    if (resumePending_) {  // the event that the world map ran for gets back to where its script left it
+        event_.setPc(resumeOffset_);
+        resumePending_ = false;
+    }
+    worldScript_ = false;
     const bool inEvent = event_.running();  // an event that loads a map goes on once it is loaded
     map_ = std::move(next);
     showOpenedTreasures();
@@ -335,7 +340,9 @@ void Game::appendItemName(int item) {
 }
 
 void Game::changeMap(uint32_t map, int x, int y, int facing, bool startupEvent, bool fadeIn) {
+    eventLoad_ = true;
     loadMapNow(map, x, y, facing, startupEvent, fadeIn);
+    eventLoad_ = false;
     pendingVehicle_ = 0;
 }
 
@@ -348,7 +355,7 @@ WorldScreen::Lead Game::worldLead() const {
 
 // LoadWorld: the party is on a world map. The event that was running does not follow it there.
 bool Game::enterWorld(uint32_t mapId, int x, int y, int facing, bool fadeIn) {
-    if (mapId >= FF6_WORLD_COUNT) {
+    if (mapId >= FF6_WORLD_COUNT && mapId != FF6_TRENCH_MAP) {
         std::fprintf(stderr, "map %u is not available in the data pack\n", static_cast<unsigned>(mapId));
         return false;
     }
@@ -360,7 +367,7 @@ bool Game::enterWorld(uint32_t mapId, int x, int y, int facing, bool fadeIn) {
         WorldHooks hooks;
         hooks.bit = [this](int id) { return bits_.get(id); };
         hooks.setBit = [this](int id, bool value) { bits_.set(id, value); };
-        hooks.step = [this] { countStep(state_); };
+        hooks.step = [this] { takeStep(); };
         hooks.encounter = [this](int world, int tileBackground, int sectorX, int sectorY, int* background) {
             return encounters_.stepWorld(battleData_, worldData_, world, tileBackground, sectorX, sectorY, background, &state_);
         };
@@ -370,16 +377,26 @@ bool Game::enterWorld(uint32_t mapId, int x, int y, int facing, bool fadeIn) {
         x = FF6_WORLD_SIZE / 2;
         y = FF6_WORLD_SIZE / 2;
     }
-    event_.stop();
+    // An event that loads the world map gives it the script that follows the command; the others do not follow the party.
+    const bool handOver = (eventLoad_ || resumePending_) && event_.running();
+    const uint32_t scriptOffset = resumePending_ ? resumeOffset_ : event_.pc();
+    resumePending_ = false;
+    if (!handOver) event_.stop();
+    worldScript_ = handOver;
     dialogue_.open({}, common_.fontWidths, false);
     screenLocked_ = false;
     restorePending_ = false;
     eventWasRunning_ = false;
     leaving_ = false;
-    const bool flying = pendingVehicle_ == FF6_EVENT_MAP_AIRSHIP || (flightSaved_ && pendingVehicle_ < 0);
+    const int vehicle = pendingVehicle_;
+    const bool flying = vehicle == FF6_EVENT_MAP_AIRSHIP || (flightSaved_ && vehicle < 0);
     pendingVehicle_ = 0;
     world_->setAirship(airshipX_, airshipY_);
-    if (flying) {
+    if (mapId == FF6_TRENCH_MAP) {
+        world_->enterTrench(x, y, facing, worldLead());
+    } else if (vehicle == FF6_EVENT_MAP_CHOCOBO) {
+        world_->enterRiding(static_cast<int>(mapId), x, y, facing, worldLead());
+    } else if (flying) {
         world_->enterFlying(static_cast<int>(mapId), x, y, facing, worldLead(), flightAngle_, flightAltitude_);
         world_->setAirship(airshipX_, airshipY_);
     } else {
@@ -387,11 +404,22 @@ bool Game::enterWorld(uint32_t mapId, int x, int y, int facing, bool fadeIn) {
     }
     flightSaved_ = false;
     placeDoomGaze();
+    if (handOver) world_->startStoryScript(scriptOffset);
     brightness_ = 0;
     fade_ = 0;
     fadeInPending_ = false;
     if (fadeIn) startFade(true, FF6_BRIGHTNESS_STEP);
     return true;
+}
+
+// A step of the party, on a map or on the world: the counter of the menu, and the poison.
+void Game::takeStep() {
+    countStep(state_);
+    std::vector<int> members;
+    for (const int id : objects_.partySlots()) {
+        if (id >= 0) members.push_back(id);
+    }
+    if (poisonStep(state_, rules_, members)) sound_.command(FF6_SOUND_GAME_SFX, FF6_SFX_POISON_DAMAGE, FF6_SFX_PAN_CENTER);
 }
 
 // InitWorld for the airship: Doom Gaze waits in two squares of 4 x 4 tiles that the table of random numbers gives, which
@@ -407,7 +435,7 @@ void Game::placeDoomGaze() {
 // What one frame of the world map does besides the walk: the menu, the entrances and the battles take the screen.
 void Game::tickWorld(const InputState& input) {
     updateBrightness();
-    if (event_.running()) {  // a story event that began on the world map, which can take the party elsewhere
+    if (event_.running() && !worldScript_) {  // a story event that began on the world map, which can take the party elsewhere
         event_.update(*this);
         if (!world_) return;
     }
@@ -436,13 +464,21 @@ void Game::tickWorld(const InputState& input) {
         flightSaved_ = onDeck;
         airshipX_ = world_->airshipX();
         airshipY_ = world_->airshipY();
+        resumePending_ = world_->takeResume(&resumeOffset_);
         leaving_ = true;
         leaveTarget_ = target;
         startFade(false, FF6_BRIGHTNESS_STEP);
         return;
     }
+    if (worldScript_ && !world_->storyScriptRunning()) {  // the script of the story is over, and so is the event
+        worldScript_ = false;
+        event_.stop();
+    }
     int group = 0, background = 0;
-    if (world_->takeBattle(&group, &background)) launchBattle(group, background);
+    if (world_->takeBattle(&group, &background)) launchBattle(group, background, encounters_.lastOnVeldt());
+    if (world_->takeScriptBattle(&group, &background)) {
+        launchBattle(battleData_.eventBattle(group, frame_ % 60 >= FF6_VEHICLE_BATTLE_SECOND_FRAME ? 1 : 0), background);
+    }
     if (world_->takeDoomGaze()) {
         launchBattle(battleData_.eventBattle(FF6_DOOM_GAZE_BATTLE_GROUP, 0), FF6_BATTLE_BG_AIRSHIP_WOR);
         doomGazeBattle_ = battleOpen_;
@@ -581,6 +617,13 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
         case FF6_EVENT_TAKE_GIL:
             bits_.set(FF6_EVENT_BIT_NOT_ENOUGH_GIL, !takeGil(state_, byteAt(0) | (byteAt(1) << 8)));
             break;
+        case FF6_EVENT_AND_STATUS:
+        case FF6_EVENT_SET_STATUS:
+        case FF6_EVENT_TOGGLE_STATUS: {  // the word is the first status byte, then the fourth one (Float and Interceptor)
+            const unsigned word = static_cast<unsigned>(byteAt(1) | (byteAt(2) << 8));
+            changeStatus(state_, byteAt(0), op, (word & 0xFF) | ((word & 0xFF00) << 16));
+            break;
+        }
         case FF6_EVENT_CHANGE_HP:
             changeHp(state_, rules_, byteAt(0), byteAt(1));
             break;
@@ -592,6 +635,12 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
             break;
         case FF6_EVENT_SHOP:
             openShop(byteAt(0));
+            break;
+        case FF6_EVENT_COLOSSEUM_MENU:
+            openColosseum();
+            break;
+        case FF6_EVENT_COLOSSEUM_BATTLE:
+            startColosseumBattle();
             break;
         case FF6_EVENT_BATTLE:
         case FF6_EVENT_BATTLE_COLLISION:
@@ -637,6 +686,9 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
         case FF6_EVENT_TITLE_SCREEN:
         case FF6_EVENT_OPENING:
             startCutscene(op == FF6_EVENT_OPENING);
+            break;
+        case FF6_EVENT_TRAIN:
+            startTrain();
             break;
         case FF6_EVENT_LOAD_MENU:
             openLoadMenu();
@@ -703,7 +755,7 @@ void Game::checkArrival() {
         lastTileX_ = x;
         lastTileY_ = y;
         armed_ = true;
-        countStep(state_);
+        takeStep();
         for (size_t i = 0; i + FF6_EVENT_TRIGGER_SIZE <= map_.eventTriggers.size(); i += FF6_EVENT_TRIGGER_SIZE) {
             const EventTrigger trigger = decodeEventTrigger(&map_.eventTriggers[i]);
             if (trigger.x == x && trigger.y == y) {
@@ -826,8 +878,16 @@ bool Game::openDoor(int direction) {
 
 void Game::tick(const InputState& input) {
     ++frame_;
-    if (cutscene_) {
+    if (cutscene_ && menuPhase_ == MenuPhase::Closed) {
         cutscene_->tick(input);
+        if (train_) {
+            int group = 0, background = 0;
+            bool second = false;
+            if (train_->takeBattle(&group, &second, &background)) {
+                trainBattle_ = true;
+                launchBattle(battleData_.eventBattle(group, second ? 1 : 0), background);
+            }
+        }
         if (cutscene_->finished()) endCutscene();
         return;
     }
@@ -987,6 +1047,24 @@ MenuCharacter Game::menuCharacter(int id, const CharacterState& state) const {
         name.erase(std::find(name.begin(), name.end(), FF6_BATTLE_NAME_PAD_CODE), name.end());
         character.skills[4].push_back(name);
     }
+    if (state.actor == FF6_ACTOR_GAU) {  // the rages that he knows, by the name of the monster
+        for (int monster = 0; monster < FF6_RAGE_MONSTERS; ++monster) {
+            if (!state_.rages[static_cast<size_t>(monster)]) continue;
+            std::vector<uint8_t> name = battleData_.name(monster);
+            name.erase(std::find(name.begin(), name.end(), FF6_BATTLE_NAME_PAD_CODE), name.end());
+            character.skills[5].push_back(name);
+        }
+    }
+    if (state.actor == FF6_ACTOR_MOG) {  // and the dances of Mog
+        static constexpr const char* kDances[FF6_DANCE_COUNT] = {"Wind Song", "Forest Suite", "Desert Aria", "Love Sonata",
+                                                                 "Earth Blues", "Water Rondo", "Dusk Requiem", "Snowman Jazz"};
+        for (int dance = 0; dance < FF6_DANCE_COUNT; ++dance) {
+            if (!(state_.dances >> dance & 1)) continue;
+            std::vector<uint8_t> name;
+            for (const char letter : std::string(kDances[dance])) name.push_back(menuCode(letter));
+            character.skills[6].push_back(name);
+        }
+    }
     return character;
 }
 
@@ -1058,8 +1136,27 @@ void Game::startCutscene(bool opening) {
     fadeInPending_ = false;
 }
 
+// Event command 0xAE: the ride of the magitek train, which asks for battles and gives the event back when the way ends.
+void Game::startTrain() {
+    if (!worldDataLoaded_) {
+        worldData_ = loadWorldData(packDir_);
+        worldDataLoaded_ = true;
+    }
+    auto ride = std::make_unique<TrainRide>(worldData_.train, battleData_.rngTable, doomGazeCounter_, sound_);
+    train_ = ride.get();
+    cutscene_ = std::move(ride);
+    brightness_ = 0;
+    fade_ = 0;
+    fadeInPending_ = false;
+}
+
 void Game::endCutscene() {
-    bits_.set(FF6_EVENT_BIT_SKIPPED, cutscene_->skipped());
+    if (train_) {
+        doomGazeCounter_ = train_->counter();
+        train_ = nullptr;
+    } else {
+        bits_.set(FF6_EVENT_BIT_SKIPPED, cutscene_->skipped());
+    }
     cutscene_.reset();
     brightness_ = 0;
     fade_ = 0;
@@ -1107,6 +1204,38 @@ void Game::openShop(int shop) {
     startFade(false, FF6_BRIGHTNESS_STEP);
 }
 
+// Event command 0x9A: the menu of the colosseum takes the screen; the item that was wagered and the fighter are kept for the
+// command that starts the bout, and an event bit says whether there is a bout.
+void Game::openColosseum() {
+    ColosseumHooks hooks;
+    hooks.items = [this] { return inventoryItems(); };
+    hooks.party = [this] { return partyCharacters(); };
+    hooks.match = [this](int item) {
+        ColosseumMatch match;
+        const uint8_t* entry = &battleData_.colosseum[static_cast<size_t>(item & 0xFF) * FF6_COLOSSEUM_ENTRY_BYTES];
+        match.monster = entry[0];
+        match.prize = entry[2];
+        match.prizeHidden = entry[3] != 0;
+        match.shadow = item == FF6_COLOSSEUM_ITEM_STRIKER && bits_.get(FF6_EVENT_BIT_COLOSSEUM_SHADOW);
+        return match;
+    };
+    hooks.monsterName = [this](int monster) { return battleData_.name(monster); };
+    colosseum_.open(hooks);
+    colosseumOpen_ = true;
+    menuPhase_ = MenuPhase::FadingOut;
+    startFade(false, FF6_BRIGHTNESS_STEP);
+}
+
+// Event command 0xAF: the character fights alone, by itself, against the monster of the item, in the battlefield of the colosseum.
+void Game::startColosseumBattle() {
+    if (colosseumFighter_ < 0 || colosseumItem_ == FF6_ITEM_EMPTY) return;
+    colosseumBout_.monster = colosseumMatch_.monster;
+    colosseumBout_.wager = colosseumItem_;
+    colosseumBout_.prize = colosseumMatch_.prize;
+    colosseumBackup_ = state_.characters[static_cast<size_t>(colosseumFighter_)];
+    launchBattle(colosseumMatch_.shadow ? FF6_COLOSSEUM_SHADOW_BATTLE : FF6_COLOSSEUM_BATTLE, FF6_COLOSSEUM_BACKGROUND);
+}
+
 // Event commands 0x4C and 0x4D: the battle of an event group (the first one, or the second in one case of four) takes the
 // screen, and the event goes on once it is over. The conditional battles and the background are not read.
 void Game::startBattle(int group, int flags) {
@@ -1127,19 +1256,46 @@ void Game::startBattleNumber(int battle, int background) {
     launchBattle(battle, background >= 0 ? background : map_.prop[FF6_MAP_PROP_FLAGS] & FF6_MAP_BG_MASK);
 }
 
-void Game::launchBattle(int battle, int background) {
+void Game::launchBattle(int battle, int background, bool veldt) {
     std::vector<int> characters;
-    for (const int id : objects_.partySlots()) {
-        if (id >= 0 && characters.size() < FF6_BATTLE_PARTY_SLOTS) characters.push_back(id);
+    if (colosseumBout_.monster >= 0) {
+        characters.push_back(colosseumFighter_);
+    } else {
+        for (const int id : objects_.partySlots()) {
+            if (id >= 0 && characters.size() < FF6_BATTLE_PARTY_SLOTS) characters.push_back(id);
+        }
     }
     if (characters.empty()) return;
     battleSeed_ = battleSeed_ * FF6_BATTLE_SEED_STEP + frame_ + 1;
     BattleRandom random(battleSeed_);
     if (battle & FF6_BATTLE_RANDOM_FLAG) battle = (battle & ~FF6_BATTLE_RANDOM_FLAG) + random.below(FF6_BATTLE_RANDOM_SPAN);
+    if (battle == FF6_COND_BATTLE_FROM && bits_.battle(FF6_COND_BATTLE_FLAG)) battle = FF6_COND_BATTLE_TO;  // the one conditional battle of the game
     lastBattle_ = battle;
     bits_.setBattle(FF6_BATTLE_FLAG_DEFEATED, false);
     battleScreen_.start(battleData_, rules_, state_, characters, battle, battleSeed_, config_.battleSpeed(),
-                        (config_.battle & FF6_CONFIG_WAIT) != 0, background);
+                        (config_.battle & FF6_CONFIG_WAIT) != 0, background, veldt, colosseumBout_);
+    {  // Gau and Shadow come and go with the story
+        Battle::Story story;
+        story.gauAvailable = bits_.get(FF6_EVENT_BIT_CHAR_AVAILABLE + FF6_ACTOR_GAU);
+        story.gauObtained = bits_.battle(FF6_BATTLE_FLAG_GAU_OBTAINED);
+        story.shadowAvailable = bits_.get(FF6_EVENT_BIT_CHAR_AVAILABLE + FF6_ACTOR_SHADOW);
+        story.shadowStays = bits_.battle(FF6_BATTLE_FLAG_SHADOW_STAYS);
+        story.magicOnly = bits_.battle(FF6_BATTLE_FLAG_MAGIC_ONLY);
+        battleScreen_.setStory(story);
+    }
+    // The music of the battle comes from its properties; the song of the map waits, and comes back afterwards.
+    mapSong_ = -1;
+    fanfarePlayed_ = false;
+    const uint16_t aux = battleData_.formation(battle).aux;
+    static constexpr uint8_t kSongs[8] = FF6_BATTLE_SONGS;
+    uint8_t song = kSongs[(aux & FF6_BATTLE_AUX_SONG_MASK) >> FF6_BATTLE_AUX_SONG_SHIFT];
+    if (const Battle* opened = battleScreen_.battle()) {  // the song of a scene comes before the one of the battle
+        if (opened->sceneSong() >= 0) song = static_cast<uint8_t>(opened->sceneSong());
+    }
+    if (!(aux & FF6_BATTLE_AUX_KEEP_SONG) && song != 0xFF) {
+        sound_.command(FF6_SOUND_PLAY_SONG, song, FF6_SOUND_FULL_VOLUME);
+        mapSong_ = sound_.previousSong();
+    }
     battleOpen_ = true;
     menuPhase_ = MenuPhase::FadingOut;
     startFade(false, FF6_BRIGHTNESS_STEP);
@@ -1172,7 +1328,8 @@ void Game::recordVeldtBattle() {
 void Game::endBattle() {
     bool gameOver = false;
     const BattleOutcome outcome = battleScreen_.outcome();
-    if (outcome == BattleOutcome::Lost) {
+    const bool colosseum = colosseumBout_.monster >= 0;
+    if (outcome == BattleOutcome::Lost && !colosseum) {
         if (loadHandler_ && loadHandler_()) {
             bits_.setBattle(FF6_BATTLE_FLAG_DEFEATED, true);  // the events of the battles go on with GameOver
             gameOver = true;
@@ -1185,9 +1342,42 @@ void Game::endBattle() {
             }
         }
     }
+    const bool gauRecruited = battleScreen_.battle() && battleScreen_.battle()->recruitedGau();
+    const bool gauLeaped = battleScreen_.battle() && battleScreen_.battle()->gauLeaped();
+    const bool shadowLeft = battleScreen_.battle() && battleScreen_.battle()->shadowLeft();
     battleScreen_.close();
     battleOpen_ = false;
+    if (colosseum) {  // the fighter is as it was: only the wager and the prize count
+        state_.characters[static_cast<size_t>(colosseumFighter_)] = colosseumBackup_;
+        colosseumBout_ = Battle::Colosseum();
+        colosseumFighter_ = -1;
+        colosseumItem_ = FF6_ITEM_EMPTY;
+    }
     recordVeldtBattle();
+    if (gauRecruited) {  // a script of the battle won him over: he is a character that has joined, in the active party
+        bits_.set(FF6_EVENT_BIT_CHAR_AVAILABLE + FF6_ACTOR_GAU, true);
+        bits_.setBattle(FF6_BATTLE_FLAG_GAU_OBTAINED, true);
+        objects_.addToParty(FF6_ACTOR_GAU, objects_.activeParty());
+    } else if (gauLeaped) {  // he stays on the veldt until he jumps in again
+        bits_.set(FF6_EVENT_BIT_CHAR_AVAILABLE + FF6_ACTOR_GAU, false);
+        objects_.addToParty(FF6_ACTOR_GAU, 0);
+    }
+    if (shadowLeft) {
+        bits_.set(FF6_EVENT_BIT_CHAR_AVAILABLE + FF6_ACTOR_SHADOW, false);
+        objects_.addToParty(FF6_ACTOR_SHADOW, 0);
+    }
+    if (trainBattle_) {  // the ride of the train goes on, or the party is defeated and the story with it
+        trainBattle_ = false;
+        if (gameOver && train_) {
+            train_ = nullptr;
+            cutscene_.reset();
+            event_.stop();
+            startEvent(FF6_EVENT_SCRIPT_GAME_OVER);
+        } else if (train_) {
+            doomGazeCounter_ = train_->counter();
+            train_->resume();
+        }
+    }
     if (doomGazeBattle_ && world_ && !gameOver) {
         if (outcome == BattleOutcome::Won) {  // the story takes the party to the scene of the magicite, on board
             bits_.setBattle(FF6_BATTLE_FLAG_DOOM_GAZE_DEFEATED, true);
@@ -1198,13 +1388,15 @@ void Game::endBattle() {
     doomGazeBattle_ = false;
     if (gameOver && world_) startEvent(FF6_EVENT_SCRIPT_GAME_OVER);  // the battles of the world have no event of their own
     if (world_ && !gameOver) world_->restartMusic();
+    if (!world_ && !gameOver && mapSong_ >= 0) sound_.command(FF6_SOUND_PLAY_SONG, static_cast<uint8_t>(mapSong_), FF6_SOUND_FULL_VOLUME);
+    mapSong_ = -1;
 }
 
 void Game::tickMenu(const InputState& input) {
     updateBrightness();
     if (fading()) return;
     if (menuPhase_ == MenuPhase::FadingOut) {
-        if (!shopOpen_ && !battleOpen_ && !loadMenuOpen_) menu_.open(menuStatus(), config_);
+        if (!shopOpen_ && !battleOpen_ && !loadMenuOpen_ && !colosseumOpen_) menu_.open(menuStatus(), config_);
         menuPhase_ = MenuPhase::Open;
         startFade(true, FF6_BRIGHTNESS_STEP);
     } else if (menuPhase_ == MenuPhase::Open && loadMenuOpen_) {
@@ -1215,7 +1407,21 @@ void Game::tickMenu(const InputState& input) {
         }
     } else if (menuPhase_ == MenuPhase::Open && battleOpen_) {
         battleScreen_.update(input);
+        if (const Battle* fought = battleScreen_.battle()) {  // the fanfare of a victory, unless the battle has none
+            if (fought->victory() && !fanfarePlayed_) {
+                fanfarePlayed_ = true;
+                if (!(battleData_.formation(lastBattle_).flags & FF6_BATTLE_FLAG_NO_FANFARE) && !fought->shadowLeft()) {
+                    sound_.command(FF6_SOUND_PLAY_SONG, FF6_SONG_VICTORY_FANFARE, FF6_SOUND_FULL_VOLUME);
+                }
+            }
+        }
         if (battleScreen_.finished()) {
+            menuPhase_ = MenuPhase::Leaving;
+            startFade(false, FF6_BRIGHTNESS_STEP);
+        }
+    } else if (menuPhase_ == MenuPhase::Open && colosseumOpen_) {
+        colosseum_.update(input);
+        if (colosseum_.closed()) {
             menuPhase_ = MenuPhase::Leaving;
             startFade(false, FF6_BRIGHTNESS_STEP);
         }
@@ -1242,6 +1448,13 @@ void Game::tickMenu(const InputState& input) {
             return;
         }
         shopOpen_ = false;
+        if (colosseumOpen_) {
+            colosseumOpen_ = false;
+            colosseumItem_ = colosseum_.chosen() ? colosseum_.item() : FF6_ITEM_EMPTY;
+            colosseumFighter_ = colosseum_.chosen() ? colosseum_.character() : -1;
+            colosseumMatch_ = colosseum_.match();
+            bits_.set(FF6_EVENT_BIT_COLOSSEUM_ITEM, colosseum_.chosen());
+        }
         if (battleOpen_) endBattle();
         common_.windowTiles = buildWindowTiles(menuData_, config_);  // the dialogues have the windows of the config
         if (world_) world_->setLead(worldLead());  // the menu may have changed who leads
@@ -1339,7 +1552,7 @@ void Game::drawSprites(bool above) {
 }
 
 void Game::draw() {
-    if (cutscene_) {
+    if (cutscene_ && menuPhase_ == MenuPhase::Closed) {
         cutscene_->draw(screenPixels_.data());
         renderer_.beginFrame();
         renderer_.updateTexture(screen_, screenPixels_.data());
@@ -1354,6 +1567,8 @@ void Game::draw() {
             loadMenu_.draw();
         } else if (shopOpen_) {
             shop_.draw();
+        } else if (colosseumOpen_) {
+            colosseum_.draw();
         } else {
             menu_.draw();
         }

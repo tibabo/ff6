@@ -7,7 +7,7 @@ import {
 } from './battle/battle_bg.mjs';
 import {
   CHAR_ACTION_COUNT, CHAR_ACTION_TILES, CHAR_GFX_BYTES, CHAR_GFX_COUNT, CHAR_PAL_BYTES, CHAR_PAL_COUNT, CHAR_PAL_TABLE_BYTES,
-  readCharActions, readCharGfx, readCharPalTable,
+  STATUS_GFX_BYTES, STATUS_PAL_BYTES, readCharActions, readCharGfx, readCharPalTable, readStatusGfx,
 } from './battle/battle_chars.mjs';
 import {
   BATTLE_GFX_MAGIC, MONSTER_GFX_BYTES, MONSTER_GFX_COUNT, MONSTER_GFX_PROP_BYTES, MONSTER_PAL_BYTES, STENCIL_LARGE_BYTES,
@@ -55,7 +55,10 @@ test('battle graphics hold the tables one after the other', { skip }, () => {
     + STENCIL_SMALL_COUNT * STENCIL_SMALL_BYTES + STENCIL_LARGE_COUNT * STENCIL_LARGE_BYTES + MONSTER_GFX_BYTES
     + BG_COUNT * (BG_PROP_BYTES + BG_PAL_BYTES) + BG_GFX_COUNT * BG_GFX_BYTES + BG_TILES_COUNT * BG_TILES_BYTES
     + CHAR_GFX_COUNT * CHAR_GFX_BYTES + CHAR_ACTION_COUNT * CHAR_ACTION_TILES * 2 + CHAR_PAL_TABLE_BYTES
-    + CHAR_PAL_COUNT * CHAR_PAL_BYTES);
+    + CHAR_PAL_COUNT * CHAR_PAL_BYTES + STATUS_GFX_BYTES + STATUS_PAL_BYTES);
+  const status = readStatusGfx(loadRom());
+  assert.equal(status.length, STATUS_GFX_BYTES);
+  assert.ok(status.some(byte => byte !== 0));  // the sprites of poison and sleep
 });
 
 test('the characters of a battle are posed with tiles of their map sprite', { skip }, () => {

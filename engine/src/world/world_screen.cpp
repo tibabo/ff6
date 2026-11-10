@@ -43,10 +43,10 @@ uint16_t word(const std::vector<uint8_t>& bytes, size_t at) {
 WorldScreen::WorldScreen(const WorldData& data, const CommonData& common, Sound& sound, WorldHooks hooks)
     : data_(data), common_(common), sound_(sound), hooks_(std::move(hooks)) {}
 
-uint16_t WorldScreen::propAt(int x, int y) const { return data_.worlds[static_cast<size_t>(world_)].tileProps[static_cast<size_t>(tileAt(x, y))]; }
+uint16_t WorldScreen::propAt(int x, int y) const { return map().tileProps[static_cast<size_t>(tileAt(x, y))]; }
 
 void WorldScreen::enter(int world, int tileX, int tileY, int facing, const Lead& lead) {
-    world_ = world & 1;
+    world_ = world == FF6_TRENCH_MAP ? world : (world & 1);
     lead_ = lead;
     dfx_ = static_cast<uint16_t>(tileX << 8);
     dfy_ = static_cast<uint16_t>(tileY << 8);
@@ -61,7 +61,11 @@ void WorldScreen::enter(int world, int tileX, int tileY, int facing, const Lead&
     sectorY_ = tileY;
     phase_ = phaseCounter_ = 0;
     mode_ = Mode::Walk;
-    deck_ = keepFlight_ = doomGazeReady_ = false;
+    vehicle_ = Vehicle::Airship;
+    pivot_ = 0xD0;
+    pivotX_ = 0x80;
+    vehicleHidden_ = arrowsShown_ = arrowsInput_ = scriptBattleReady_ = false;
+    deck_ = keepFlight_ = doomGazeReady_ = storyScript_ = resumeValid_ = false;
     autoHeld_ = 0;
     brightness_ = targetBrightness_ = 15;
     windowX_ = windowY_ = -1;
@@ -94,7 +98,7 @@ void WorldScreen::playMusic() {
 
 // ModifyMap: the map of the file, with the rectangles of the events that happened.
 void WorldScreen::applyModifications() {
-    const WorldMapData& map = data_.worlds[static_cast<size_t>(world_)];
+    const WorldMapData& map = this->map();
     tilemap_ = map.tilemap;
     for (const WorldMod& mod : map.mods) {
         if (!hooks_.bit || !hooks_.bit(mod.bit & 0x7FFF)) continue;
@@ -110,13 +114,13 @@ void WorldScreen::applyModifications() {
 // The memory of the picture processor as LoadWorld fills it: the characters of the map, the sprites of the mini-map, the
 // palettes, and the water that is going to move.
 void WorldScreen::loadGraphics() {
-    const WorldMapData& map = data_.worlds[static_cast<size_t>(world_)];
+    const WorldMapData& map = this->map();
     ppu_.clearVram();
     for (size_t i = 0; i < map.chr.size(); ++i) ppu_.vram[i] = static_cast<uint16_t>(map.chr[i] << 8);
     for (size_t i = 0; i + 1 < map.minimap.size(); i += 2) ppu_.vram[kVramMinimap + i / 2] = word(map.minimap, i);
     for (size_t i = 0; i + 1 < data_.miscSprites.size(); i += 2) ppu_.vram[kVramMisc + i / 2] = word(data_.miscSprites, i);
     for (size_t i = 0; i + 1 < data_.animGfx.size(); i += 2) ppu_.vram[kVramAnimGfx + i / 2] = word(data_.animGfx, i);
-    const std::vector<uint8_t>& airship = data_.airshipGfx[static_cast<size_t>(world_)];
+    const std::vector<uint8_t>& airship = data_.airshipGfx[static_cast<size_t>(world_ & 1)];
     for (size_t i = 0; i + 1 < airship.size(); i += 2) ppu_.vram[kVramAirshipGfx + i / 2] = word(airship, i);
     for (size_t i = 0; i < FF6_WORLD_PALETTE_COLORS; ++i) {
         ppu_.cgram[i] = map.palette[i];
@@ -145,14 +149,14 @@ void WorldScreen::loadGraphics() {
 // UpdateTilemap256 and InitTilemap256: the video memory has the 64 x 64 tiles of the map that start 32 tiles to the
 // left of and above the party, each tile at the place that its coordinates give modulo 64.
 void WorldScreen::buildWindow() {
-    const int x0 = (((pixelX() - 0x200) & 0xFFF) >> 4), y0 = (((pixelY() - 0x200) & 0xFFF) >> 4);
+    const int x0 = (((pixelX() - 0x200) & (mapSize() * 16 - 1)) >> 4), y0 = (((pixelY() - 0x200) & (mapSize() * 16 - 1)) >> 4);
     if (x0 == windowX_ && y0 == windowY_) return;
     windowX_ = x0;
     windowY_ = y0;
-    const WorldMapData& map = data_.worlds[static_cast<size_t>(world_)];
+    const WorldMapData& map = this->map();
     for (int dy = 0; dy < kTilesPerWindow; ++dy) {
         for (int dx = 0; dx < kTilesPerWindow; ++dx) {
-            const int wx = (x0 + dx) & 255, wy = (y0 + dy) & 255;
+            const int wx = (x0 + dx) & (mapSize() - 1), wy = (y0 + dy) & (mapSize() - 1);
             const uint8_t* characters = &map.formation[static_cast<size_t>(tileAt(wx, wy)) * 4];
             const size_t at = static_cast<size_t>(((wy * 2) & 127) * 128 + ((wx * 2) & 127));
             // The low byte of a word of the video memory is the map, the high byte the graphics of the characters.
@@ -289,7 +293,7 @@ void WorldScreen::getPlayerInput(const InputState& input) {
 
 // CheckEvent: a tile with an event runs its script.
 void WorldScreen::checkEvent() {
-    const std::vector<uint8_t>& triggers = data_.worlds[static_cast<size_t>(world_)].eventTriggers;
+    const std::vector<uint8_t>& triggers = map().eventTriggers;
     for (size_t i = 0; i + FF6_WORLD_EVENT_TRIGGER_SIZE <= triggers.size(); i += FF6_WORLD_EVENT_TRIGGER_SIZE) {
         if (triggers[i] != tileX() || triggers[i + 1] != tileY()) continue;
         startEvent(static_cast<uint32_t>(triggers[i + 2] | (triggers[i + 3] << 8) | (triggers[i + 4] << 16)));
@@ -301,7 +305,7 @@ void WorldScreen::checkEvent() {
 
 // CheckEntrance: a tile that leads to another map, where the party is taken once the screen has faded out.
 bool WorldScreen::checkEntrance() {
-    const std::vector<uint8_t>& entrances = data_.worlds[static_cast<size_t>(world_)].shortEntrances;
+    const std::vector<uint8_t>& entrances = map().shortEntrances;
     for (size_t i = 0; i + FF6_WORLD_SHORT_ENTRANCE_SIZE <= entrances.size(); i += FF6_WORLD_SHORT_ENTRANCE_SIZE) {
         if (entrances[i] != tileX() || entrances[i + 1] != tileY()) continue;
         entrance_ = makeEntranceTarget(word(entrances, i + 2), entrances[i + 4], entrances[i + 5]);
@@ -466,11 +470,13 @@ void WorldScreen::execWorldCmd() {
             }
             case 0xFF:
                 eventRunning_ = false;
+                storyScript_ = false;
                 menuLocked_ = false;
                 return;
             default:
                 std::fprintf(stderr, "world event: unsupported command 0x%02X, event ended\n", cmd);
                 eventRunning_ = false;
+                storyScript_ = false;
                 menuLocked_ = false;
                 return;
         }
@@ -486,6 +492,8 @@ void WorldScreen::loadMapCommand() {
     entrance_ = makeEntranceTarget(static_cast<uint16_t>(mapWord), x, y);
     entranceReady_ = true;
     eventRunning_ = false;
+    resumeValid_ = storyScript_;
+    resumeOffset_ = scriptPtr_;
 }
 
 // DrawWorldChar: the frame of the sprite sheet for the way that the party faces and the step of the walk.
@@ -591,7 +599,7 @@ void WorldScreen::drawMinimap() {
 }
 
 void WorldScreen::draw(uint8_t* rgba) {
-    if (mode_ == Mode::TweenIn || mode_ == Mode::Fly || mode_ == Mode::TweenOut) {
+    if (mode_ == Mode::TweenIn || mode_ == Mode::Fly || mode_ == Mode::TweenOut || mode_ == Mode::Dismount) {
         renderFlight();
         ppu_.brightness = static_cast<uint8_t>(brightness_);
     } else {

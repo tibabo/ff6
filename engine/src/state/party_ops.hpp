@@ -55,8 +55,17 @@ bool useItemOn(PartyState& party, const GameRules& rules, int character, int ite
 
 // What the character needs to be at level `level`.
 long experienceForLevel(const GameRules& rules, int level);
-// The experience of a battle: the character goes up as many levels as it earns, with the hp and mp of each.
-void addExperience(PartyState& party, const GameRules& rules, int character, long amount);
+// The experience of a battle: the character goes up as many levels as it earns, with the hp and mp of each and the bonus
+// of the esper that it carries (DoLevelUp). Returns the levels that it gained.
+int addExperience(PartyState& party, const GameRules& rules, int character, long amount);
+
+// A spell that a character learned from the espers and the items that it wears (LearnItemMagic, LearnGenjuMagic).
+struct LearnedSpell {
+    int character = 0, spell = 0;
+};
+// The magic points of a battle teach the spells of the equipment: each point adds the rate of the esper or of the item to
+// the percent that the spell has reached, and at 100 the spell is known. The characters from Gogo on learn nothing.
+std::vector<LearnedSpell> learnSpells(PartyState& party, const GameRules& rules, const std::vector<int>& characters, int points);
 
 // The items that a shop sells, in order.
 std::vector<int> shopStock(const GameRules& rules, int shop);
@@ -71,5 +80,11 @@ bool buyItem(PartyState& party, int item, int quantity, int unitPrice);
 // Takes the items and pays for them; false when the party does not have that many.
 bool sellItem(PartyState& party, int item, int quantity, int unitPrice);
 void countStep(PartyState& party);
+// DoPoisonDmg, at each step of the party: the relic of recovery heals, then the poison takes a 32nd of the maximum hp and
+// leaves one. True when someone was poisoned. `members` are the characters of the party that walks.
+bool poisonStep(PartyState& party, const GameRules& rules, const std::vector<int>& members);
+// The commands of the story that change statuses (FF6_EVENT_AND_STATUS to FF6_EVENT_TOGGLE_STATUS); only the statuses that
+// last are kept.
+void changeStatus(PartyState& party, int slot, int op, unsigned bits);
 
 }  // namespace ff6

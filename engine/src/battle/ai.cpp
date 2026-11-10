@@ -20,6 +20,9 @@ int lowestBit(uint16_t mask) {
 
 }  // namespace
 
+// The bit of a monster in the masks of its script: its own place, nothing for a character.
+int Battle::monsterBit(int index) const { return index >= FF6_BATTLE_PARTY_SLOTS ? 1 << (index - FF6_BATTLE_PARTY_SLOTS) : 0; }
+
 int& Battle::aiVariable(int index, int number) {
     if (number < FF6_AI_VARIABLES) return variables_[static_cast<size_t>(number)];
     return combatants_[static_cast<size_t>(index)].variable;
@@ -28,7 +31,8 @@ int& Battle::aiVariable(int index, int number) {
 // FindAIScriptEnd for a monster: the main script ends with 0xFF and the retaliation script follows it.
 void Battle::initAi(int index) {
     Combatant& c = combatants_[static_cast<size_t>(index)];
-    const size_t start = data_.aiStart(c.id);
+    if (scriptId(c) < 0) return;
+    const size_t start = data_.aiStart(scriptId(c));
     if (start >= data_.aiScript.size()) return;
     c.aiStart = static_cast<int>(start);
     size_t pos = start;
@@ -105,6 +109,12 @@ uint16_t Battle::aiTargets(int index, int code, bool onlyAlive) {
             const uint16_t others = (party | monsters) & ~self;
             return random_.below(2) ? some(others) : others;
         }
+        case FF6_AI_TARGET_TARGETTING: {  // the one that was marked, once
+            Combatant& me = combatants_[static_cast<size_t>(index)];
+            const int marked = me.targettingTarget;
+            me.targettingTarget = -1;
+            return marked >= 0 ? static_cast<uint16_t>(1u << marked) & (party | monsters) : uint16_t(0);
+        }
         default: return 0;
     }
 }
@@ -176,7 +186,7 @@ bool Battle::aiCondition(int index, int condition, int first, int second, uint16
         }
         case 17:
         case 18: {
-            const int slots = first ? first : 1 << (index - FF6_BATTLE_PARTY_SLOTS);
+            const int slots = first ? first : monsterBit(index);
             uint16_t wanted = static_cast<uint16_t>(slots << FF6_BATTLE_PARTY_SLOTS), present = 0;
             for (int i = FF6_BATTLE_PARTY_SLOTS; i < FF6_BATTLE_COMBATANTS; ++i) {
                 if (combatants_[static_cast<size_t>(i)].present) present |= static_cast<uint16_t>(1u << i);
@@ -192,7 +202,8 @@ bool Battle::aiCondition(int index, int condition, int first, int second, uint16
         case 21: return switchSet() == 0;
         case 22: return (battleTimer_ >> 1) >= word;
         case 23: return aimed();
-        case 25: return (1 << (index - FF6_BATTLE_PARTY_SLOTS)) & first;
+        case 24: return !gauJoined_;  // the veldt scripts that wait for Gau to be won over
+        case 25: return monsterBit(index) & first;
         case 26: return aimed() && (combatants_[static_cast<size_t>(target)].elemWeak & second);
         case 27: return battleNumber_ == word;
         case 28: return true;
@@ -213,10 +224,14 @@ void Battle::aiMisc(int index, int effect, int value) {
         case 1: each(aiTargets(index, value, false), [&](int i) { combatants_[static_cast<size_t>(i)].invincible = true; }); break;
         case 5: each(aiTargets(index, value, false), [&](int i) { combatants_[static_cast<size_t>(i)].invincible = false; }); break;
         case 2:
-        case 9:
+        case 9:  // the veldt ends the battle, and Gau learns the rages that he saw
+            if (effect == 9) learnRages();
             if (outcome_ == BattleOutcome::Fighting) outcome_ = BattleOutcome::Won;
             break;
         case 4: battleTimer_ = 0; break;
+        case 3: recruitedGau_ = true; break;
+        case 6: targetMask_ |= aiTargets(index, value, false) >> FF6_BATTLE_PARTY_SLOTS; break;  // only the monsters have a say
+        case 7: targetMask_ &= ~(aiTargets(index, value, false) >> FF6_BATTLE_PARTY_SLOTS); break;
         case 8: each(aiTargets(index, value, true), [&](int i) { combatants_[static_cast<size_t>(i)].gauge = FF6_ATB_FULL; }); break;
         case 11: setStatus(index, 1u << (value & 0x1F)); break;
         case 12: clearStatus(index, 1u << (value & 0x1F)); break;
@@ -257,7 +272,7 @@ void Battle::aiAttack(int index, int attackId, uint16_t mask) {
     }
     Attack a = attackFromProp(rules_.attack(attackId));
     if (attackId == FF6_AI_ATTACK_SPECIAL) {
-        const int special = data_.monster(user.id)[FF6_MONSTER_PROP_SPECIAL];
+        const int special = data_.monster(scriptId(user))[FF6_MONSTER_PROP_SPECIAL];
         const int kind = special & FF6_SPECIAL_KIND_MASK;
         a.power = user.hands[0].power;
         a.hit = user.hands[0].hitRate;
@@ -304,6 +319,65 @@ void Battle::aiAttack(int index, int attackId, uint16_t mask) {
     perform(index, a, targets, attackId, -1);
 }
 
+// F2: the monsters of another battle take the place of these.
+void Battle::aiChangeBattle(int battle, bool restore) {
+    (void)restore;  // the new monsters always start with all their hp and mp
+    if (battle < 0 || battle >= FF6_BATTLE_COUNT) return;
+    battleNumber_ = battle;
+    holdEnd_ = false;
+    initMonsters(data_.formation(battle));
+    BattleEvent changed;
+    changed.kind = BattleEvent::Kind::ChangeBattle;
+    changed.damage = battle;
+    events_.push_back(changed);
+}
+
+// F5: monsters come into the battle or go out of it. Mode 0 brings them back with all their hp, 2 with the hp that they have, 1 and
+// 3 hide them, 4 hides them and keeps the battle from ending, 5 hides them for dead.
+void Battle::aiEntryExit(int index, int mode, uint16_t mask) {
+    (void)index;
+    for (int slot = 0; slot < FF6_BATTLE_SLOTS; ++slot) {
+        if (!(mask & (1u << slot))) continue;
+        const size_t at = static_cast<size_t>(FF6_BATTLE_PARTY_SLOTS + slot);
+        Combatant& m = combatants_[at];
+        if (!m.present) continue;
+        BattleEvent entry;
+        entry.kind = BattleEvent::Kind::Entry;
+        entry.attacker = static_cast<int>(at);
+        entry.damage = mode;
+        if (mode == 0 || mode == 2) {
+            if (mode == 0 || m.hp == 0) m.hp = mode == 0 ? m.maxHp : 1;
+            m.status &= ~(FF6_ST_DEAD | FF6_ST_PETRIFY | FF6_ST_ZOMBIE | FF6_ST_IMP | FF6_ST_HIDE);
+            m.escaped = false;
+            holdEnd_ = false;
+        } else if (mode >= 1 && mode <= 5) {
+            m.status |= FF6_ST_HIDE;
+            if (mode == 4) holdEnd_ = true;
+            if (mode == 5) m.status |= FF6_ST_DEAD;
+        }
+        events_.push_back(entry);
+    }
+}
+
+// F6: a monster uses an item on the combatants of its target, or throws it.
+void Battle::aiItem(int index, bool throwing, int item, uint16_t mask) {
+    (void)throwing;
+    if (item < 0 || item >= FF6_ITEM_COUNT || item == FF6_ITEM_EMPTY || !combatants_[static_cast<size_t>(index)].alive()) return;
+    const Attack a = attackFromItem(rules_.item(item));
+    std::vector<int> targets;
+    for (int i = 0; i < FF6_BATTLE_COMBATANTS; ++i) {
+        if ((mask & (1u << i)) && canTarget(a, i)) targets.push_back(i);
+    }
+    if (targets.empty()) targets = targetsFor(index, a, -1);
+    if (targets.empty()) return;
+    BattleEvent used;
+    used.kind = BattleEvent::Kind::UseItem;
+    used.attacker = index;
+    used.item = item;
+    events_.push_back(used);
+    perform(index, a, targets, -1, item);
+}
+
 // ExecAICmd: the commands of a script, from `start`, until it waits or ends. The counter script runs when the monster is hit.
 void Battle::runScript(int index, size_t start, bool counter) {
     Combatant& self = combatants_[static_cast<size_t>(index)];
@@ -339,6 +413,30 @@ void Battle::runScript(int index, size_t start, bool counter) {
                     if (pick == FF6_CMD_FIGHT) aiAttack(index, FF6_AI_ATTACK_BATTLE, mask);
                     break;
                 }
+                case 0xF2: aiChangeBattle(first | ((second & 0x7F) << 8), (second & 0x80) == 0); break;
+                case 0xF3: {
+                    BattleEvent said;
+                    said.kind = BattleEvent::Kind::Dialog;
+                    said.attacker = index;
+                    said.damage = first;
+                    events_.push_back(said);
+                    break;
+                }
+                case 0xF5: aiEntryExit(index, second, static_cast<uint16_t>(third ? third : monsterBit(index))); break;
+                case 0xF6: {
+                    const int pick = (std::array<int, 3>{second, third, third})[static_cast<size_t>(random_.below(3))];
+                    aiItem(index, first != 0, pick, mask);
+                    break;
+                }
+                case 0xF7: {  // a scene: its dialogs are shown, not its animations
+                    BattleEvent scene;
+                    scene.kind = BattleEvent::Kind::Scene;
+                    scene.attacker = index;
+                    scene.damage = first;
+                    events_.push_back(scene);
+                    sceneEffects(first);
+                    break;
+                }
                 case 0xF8: {
                     int& variable = aiVariable(index, first);
                     const int amount = second & FF6_AI_VALUE_MASK;
@@ -350,6 +448,26 @@ void Battle::runScript(int index, size_t start, bool counter) {
                     int& variable = aiVariable(index, second);
                     const int bit = 1 << (third & 7);
                     variable = first == 0 ? variable ^ bit : first == 1 ? variable | bit : variable & ~bit;
+                    break;
+                }
+                case 0xFA: {  // a monster slides, flashes or glows, or a sound plays
+                    static constexpr int kAnims[14] = FF6_MONSTER_ANIMS;
+                    BattleEvent shown;
+                    shown.kind = BattleEvent::Kind::MonsterAnim;
+                    shown.attacker = index;
+                    shown.damage = first;
+                    if (first == FF6_MONSTER_ANIM_SFX) {
+                        shown.attack = third;
+                        events_.push_back(shown);
+                    } else if (first >= 0 && first < 14 && kAnims[first] >= 0) {
+                        shown.attack = kAnims[first];
+                        for (int slot = 0; slot < FF6_BATTLE_COMBATANTS - FF6_BATTLE_PARTY_SLOTS; ++slot) {
+                            const Combatant& other = combatants_[static_cast<size_t>(FF6_BATTLE_PARTY_SLOTS + slot)];
+                            if (!(second & (1 << slot)) || !other.present || !other.monster) continue;
+                            shown.target = FF6_BATTLE_PARTY_SLOTS + slot;
+                            events_.push_back(shown);
+                        }
+                    }
                     break;
                 }
                 case 0xFB: aiMisc(index, first, second); break;
@@ -403,7 +521,7 @@ void Battle::monsterTurn(int index) {
 // What hit a monster last, for the conditions of its retaliation script, which runs at once.
 void Battle::noteHit(int user, int target, int command, int attack, int item, int element) {
     Combatant& c = combatants_[static_cast<size_t>(target)];
-    if (!c.monster || combatants_[static_cast<size_t>(user)].monster) return;
+    if (c.monster == combatants_[static_cast<size_t>(user)].monster) return;  // a script answers the other side
     c.retalAttacker = user;
     c.retalCommand = command;
     c.retalAttack = attack;

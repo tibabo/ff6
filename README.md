@@ -188,7 +188,7 @@ carte par fichier dans `maps/` ; il n'ecrase jamais un
 dossier existant. `--text` utilise un `dialogues.json` modifie. Un caractere
 absent de la police de la ROM, par exemple un accent, provoque une erreur
 explicite. Le pack contient des donnees du jeu : ne pas le distribuer. Le format
-est versionne (version 15 : cartes du monde et dirigeable) ; un ancien pack
+est versionne (version 23 : cartes du monde, dirigeable, chocobo, Fosse du Serpent, train, et les tables du combat : esprits, rages, danses, points de magie, dialogues des monstres et des scenes, Metamorph, scenes a personnages scriptes, Colisee) ; un ancien pack
 doit etre regenere.
 
 Controles :
@@ -253,9 +253,17 @@ Limites actuelles :
   les moteurs sur l'un de ses deux carres du monde de la Ruine, tires de la
   table de hasard et changes a chaque chargement, puis la scene de la magicite
   ; sa victoire est retenue dans les drapeaux de combat) et position du
-  dirigeable sauvegardee. Manquent le chocobo, le train fantome et leurs
-  scripts, la Fosse du Serpent (carte 2), le poison a chaque pas (le moteur ne
-  garde pas les etats des personnages) et les commandes du script du monde qui
+  dirigeable sauvegardee. Le chocobo du monde (`world_screen.cpp`) se monte et
+  se quitte comme dans le jeu (carte des cases ou il va, bruits, musique, sa
+  rencontre propre) ; la Fosse du Serpent (carte 2) se joue en mode 7 avec la
+  barque et les deux embranchements ; les scripts du monde peuvent lancer un
+  vehicule, un combat ou une carte du champ, et le script de l'evenement
+  continue de l'autre cote (champ vers monde, monde vers champ). Le train
+  fantome (`cutscene/train.cpp`, commande d'evenement 0xAE) est le trajet du
+  jeu : tunnel en mode 2, rails qui bifurquent, ses combats (le premier au pas
+  33) et le fondu final. Le poison fait perdre des PV a chaque pas, sur la
+  carte du champ et celle du monde (l'etat est garde dans la sauvegarde ; pas
+  d'effet de mosaique). Manquent les commandes du script du monde qui
   deplacent ou dessinent autre chose que le personnage.
 - Decor : la transparence (mathematiques de couleur : addition, soustraction,
   moitie)
@@ -267,7 +275,7 @@ Limites actuelles :
   executes, y compris pendant les evenements. Les vehicules des cartes (chocobo,
   armure Magitek, radeau), avec ou sans passager, viennent des donnees des PNJ
   et des commandes d'evenement et d'objet ; ceux de la carte du monde
-  (chocobo du monde) ne sont pas portes ; le dirigeable l'est. PNJ a graphismes
+  (chocobo, dirigeable) sont portes. PNJ a graphismes
   speciaux et animations speciales sont ignores ; le hasard n'est pas celui de
   la console.
 - Evenements : sont executes les dialogues, les choix, les interrupteurs, les
@@ -352,15 +360,34 @@ Limites actuelles :
   remplacent l'animation d'une attaque qui n'en a pas. `--anim n --capture`
   ecrit la planche des images d'une attaque.
   Les noms des poses ne sont pas dans le jeu : elles sont choisies sur la planche
-  des personnages. Ne sont pas dessines : le defilement des fonds, les
-  animations des esprits et des attaques a vecteurs, les images des esprits et
-  des diablotins, et les icones de statut (le nom du personnage change de couleur : gris a terre, jaune quand il est pret, bleu-vert avec un statut) ;
+  des personnages. Defilement des fonds (nuages, cascade, trains, voiture Magitek, a chaque image comme UpdateBattleBG) et palettes qui tournent (radeau, cascade, monde du reve de Cyan). Ne sont pas dessines : le defilement du dernier fond de Kefka, les
+  animations des esprits et des attaques a vecteurs, les images des esprits ;
+  les statuts se voient (sprites de statut, effets de palette, diablotin, vol, poses ; `--status bits` les capture) et le nom
+  du personnage change de couleur : gris a terre, jaune quand il est pret, bleu-vert avec un statut ;
   les positions sont a peu pres celles des menus. Gauche dans le menu des
   commandes ouvre la fenetre de Row et Defend, droite celle de Run, qui remplace le maintien des
   boutons (Annuler l'arrete) ; une defaite affiche un ecran GAME OVER noir puis,
   avec une sauvegarde a recharger, la scene de fin de partie de l'histoire et le
   retour a cette sauvegarde ; sans sauvegarde, elle remet le groupe debout avec
-  tous ses PV.
+  tous ses PV. La musique du combat vient des proprietes du combat (theme de
+  combat, bataille decisive, bataille acharnee, Returners, Save Them, Dancing
+  Mad) ; le morceau de la carte attend et revient apres, et une victoire joue
+  la fanfare, sauf pour les combats qui n'en ont pas ou quand Shadow part. Le
+  combat conditionnel du jeu (0x1C4 devient 0x1A8 avec son interrupteur) est lu.
+  Le statut Magitek (pose par l'histoire, il dure apres le combat) et les combats
+  de magie seule (Tour du Fanatique) remplacent Fight par Magitek ou Magic et
+  retirent les autres commandes, sauf Item et Mimic. Les scenes a personnages
+  scriptes (`battle/scene.cpp`, la table du jeu, 24 scenes) sont lues : le groupe
+  peut etre cache, un personnage de l'histoire (retrouve par son acteur parmi
+  les 16 que le jeu garde) prend une place avec le script d'un monstre, un
+  sprite et une position, combat pour les monstres avec ses propres stats
+  (Kefka, au milieu d'eux) ou attend hors du combat jusqu'a la scene qui l'amene
+  (Sabin contre Vargas ; Terra, Locke et Edgar sortent, Relm entre). Le fond, la
+  musique et le masquage des noms de la scene sont repris, ainsi que le masque
+  des monstres que l'on peut viser, que les scripts allument et eteignent (FB 6
+  et 7). Gau du Veldt est la scene 10 du jeu : un personnage hors du combat,
+  place a (48, 52), qui saute apres la victoire avec le script du monstre 0x172. Les 48 acteurs du jeu (Wedge, Vicks, les
+  sept Kefka) et les 24 sprites de personnages sont dans le pack.
   Magie, objets et statuts (`battle/action.cpp`) suivent la table des attaques
   du jeu (cible, element, drapeaux, puissance, taux de touche, statuts) : degats
   de magie `puissance x 4 + niveau x pouvoir magique x puissance / 32` avec
@@ -375,9 +402,14 @@ Limites actuelles :
   et les noms d'attaques) : attaques au hasard parmi trois, cibles, les 28
   conditions (PV, PM, statut, niveau, minuteries, variables, interrupteurs,
   monstres restants, dernier coup recu...), attente, variables, effets divers
-  et script de riposte quand un personnage les touche. Les dialogues, les
-  changements de combat, les entrees et sorties de monstres, les evenements et les
-  animations des scripts sont ignores, ainsi que la recrue de Gau. Les commandes
+  et script de riposte quand un personnage les touche ; les commandes F2
+  (changement de combat), F3 (dialogue, lu dans les textes du jeu), F5 (entree
+  et sortie de monstres), F6 (objet), la condition « Gau present » et les
+  effets 3, 6 et 7 de FB (recruter Gau, viser ou non) sont executes ; les
+  evenements de combat (F7) jouent leurs dialogues et les animations des personnages et des attaques de leur script (`--scene n` les capture ; les commandes de scene 7 a 12, pour les monstres, sont sautees) ; les
+  animations des monstres (FA : clignotement rouge, recul et avance, tete de Kefka, lueurs d'Atma, mort de Kefka, et le son
+  du sous-code 9) jouent les animations du jeu sur le monstre, sans garder le decalage une fois finies ; la course des
+  personnages (sous-codes 5 et 6) n'est pas jouee. Les commandes
   Fight, Magic, Item, Tools (les outils d'Edgar, jamais consommes), Steal,
   SwdTech, Blitz, Lore (les sorts de Strago, appris quand un monstre l'en
   touche ; sauvegardes), Morph et Revert (les degats de Terra doublent 600 pas
@@ -393,10 +425,77 @@ Limites actuelles :
   Economiseur, Epingle d'or, Sniper Sight et Sneak Ring comptent, et
   l'equipement protege : elements absorbes, nuls, faibles ou diminues, statuts
   refuses, statuts poses au debut (Bouclier, Hate...) et element de l'arme.
-  Manquent les effets des autres reliques, les effets speciaux hors Elixir,
-  et les commandes Rage, Dance, Leap et Slot (affichees en grise) : Rage, Dance et Leap
-  dependent de la carte du monde (Veldt, terrains), absente du moteur ; Slot
-  veut sa machine a sous, que le pack n'a pas. Sketch utilise l'une des deux
+  Victoire : l'experience (le double avec l'Oeuf d'exp), les gils (le double avec
+  le Bonnet de chat, 9 999 999 au plus), les objets, les points de magie du combat,
+  qui font apprendre aux personnages les sorts des esprits et des objets qu'ils
+  portent (pourcentage par sort, sauvegarde), le bonus de l'esprit a chaque niveau
+  (PV, PM ou une caracteristique), les niveaux gagnes, et le stock de Morph de
+  Terra (la commande Morph demande plus de 15 ; il baisse tant qu'elle est
+  transformee). Reliques : Gale Hairpin (surprises doublees) et Back Guard (ni
+  attaque en tenaille ni dans le dos), Ceinture noire (riposte trois fois sur
+  quatre), Perles et cecite (les coups touchent moins), True Knight (couvre un
+  allie presque a terre), Offrande (huit coups au hasard, jamais rates, moitie
+  moins forts), Genji Glove (un quart de moins), Corne de dragon (Jump de deux a
+  quatre coups, lance triple), anneaux qui lancent Bouclier et Garde sous 1/8 des
+  PV, Relic Ring (mort-vivant) et celles qui changent une commande (Jump, X Magic,
+  Control, GP Rain, Capture). Chaque personnage presque a terre peut, une fois par
+  combat, lancer son attaque de desespoir a la place de Fight (une chance sur 16,
+  apres trois tours). Armes : Thief Knife, Atma, mort instantanee (Striker, Wing
+  Edge, Trump, Assassin, Scimitar), Man Eater, Drainer, Soul Sabre, critiques payes
+  en PM (Rune Edge, Illumina, Ragnarok, Punisher), Hawk Eye et Sniper, des, Valiant
+  Knife, Tempest, Heal Rod, Ogre Nix (qui se brise), et le sort que certaines armes
+  lancent de temps en temps. Effets speciaux des attaques (`battle/special.cpp`) :
+  Quick (deux tours de suite pendant que les autres attendent), Warp et Bombe
+  fumigene (le groupe fuit, sauf contre les monstres qui retiennent), Scan, Mantra,
+  Vent blanc, Blow Fish, Revenge, Step Mine, Flare Star, N. Cross, Pearl, Quadra
+  Slam, Suplex, Golem (absorbe les coups), Exploder, les sorts qui ratent ce qui
+  flotte, Reflect, Dischord, Rippler, Stone, Wallchange, Escape, Sneeze, Engulf,
+  R. Polarity et la stance Retort. Umaro charge, lance un ami (avec la Bague de
+  rage) ou appelle la tempete (avec l'Orbe de glace). Gau a la commande Rage (le
+  monstre dont il connait la rage ; il agit seul ensuite avec ses deux attaques),
+  Leap sur le Veldt (il apprend les rages des monstres presents et le combat
+  s'arrete ; Gau quitte le groupe, et revient en sautant dans un combat du
+  Veldt, cinq fois sur huit quand les monstres sont tombes et qu'il reste
+  une place : c'est un monstre au script du jeu (monstre 370), place a gauche.
+  S'il a deja ete conquis il demande a venir des son premier tour ; sinon il a
+  faim, et il faut lui lancer de la viande seche avec Objet (curseur a gauche,
+  sur lui : la scene de sa rencontre avec Sabin et Cyan est jouee), ou le frapper pour qu'il s'enfuie. Le combat qu'il termine ne
+  donne rien, et le Veldt ne donne pas d'experience), Mog la
+  commande Dance (les quatre pas de chaque danse ; il apprend celle du decor apres
+  une victoire, et un decor qui ne correspond pas la change une fois sur deux ou la
+  rate) et Setzer la machine a sous (trois rouleaux arretes avec la touche : trois
+  pareils lancent l'attaque de l'icone, 7-7-Bar tue le groupe, sinon le lapin ne
+  fait rien). Le hasard de ces effets n'est pas celui de la console. Apres une
+  victoire, Shadow peut partir une fois sur seize (« My job here's over »),
+  sauf si l'histoire le retient ; son chien Interceptor, un statut que
+  l'histoire pose, prend un coup de monstre sur deux et riposte une fois sur
+  deux (Takedown ou Rush). Marchent aussi Metamorph (un monstre tombe et laisse
+  un objet, selon son groupe et sa chance), Tapir (soigne qui dort), Pep Up et
+  Spiraler (le lanceur s'epuise), Fallen One (un seul PV), Stunner (retire les
+  statuts), Debilitator (une nouvelle faiblesse) et Palidor (ni cible figee ni
+  endormie), Seize (le monstre tient un personnage, qui n'agit plus et perd des
+  PV a son profit, jusqu'a Discard ou la mort de l'un des deux), Charm (le
+  personnage frappe son propre groupe), Phantasm (perte de PV comme Sap) et
+  Forcefield (un element de plus est annule pour tous), Love Token (la cible
+  protege le lanceur), Zinger (le lanceur reste hors du combat tant que sa
+  cible vit), Targetting (la cible marquee, visee par le code 0x4D des scripts)
+  et Empowerer (des PM a pleine puissance, puis des PV au quart). Evil Toot et
+  Mind Blast ne donnent qu'un des statuts de l'attaque, le second a quelques
+  cibles tirees au hasard. Overcast (le prochain a tomber devient zombie),
+  Air Anchor (l'outil d'Edgar, qui rate ce que la mort ne touche pas et laisse
+  sans riposte) et Doom (la mort guerit un personnage mort-vivant, et fait
+  disparaitre un monstre mort-vivant) marchent aussi ; le Debilitator et l'Air
+  Anchor sont lances par leurs outils.
+  Colisee (commandes 0x9A et 0xAF des evenements) : le menu choisit l'objet
+  mise (la table du jeu donne l'adversaire et le prix, cache pour trois
+  objets) puis le personnage ; il se bat seul, par lui-meme (Fight sur le
+  monstre), contre l'adversaire dans le decor 0x1C. Le prix vient avec la
+  victoire, sans experience ni gils, la mise est perdue dans tous les cas, une
+  defaite ne finit pas la partie et le personnage retrouve son etat d'avant.
+  Shadow comme adversaire (Striker et le bit 495) est choisi, mais le combat
+  est celui du monstre de la table ; l'apercu du monstre est un nom, et le
+  personnage n'utilise pas la magie ni les objets.
+  Sketch utilise l'une des deux
   attaques du monstre (la table du jeu, la seconde si un octet aleatoire
   vaut au moins 0x40) ; Sketch et Control reussissent selon la formule du jeu
   (niveau du lanceur sur celui du monstre, reduit d'un tiers avec le Beret ou
@@ -456,8 +555,8 @@ Limites actuelles :
   cout en PM), des
   techniques de sabre de Cyan et des furies de Sabin (apprises par niveau, ou
   par evenement) : la validation parcourt la liste sans rien lancer ; Lore,
-  Rage et Dance restent vides, ils s'apprennent en combat, et les esprits ne
-  s'equipent pas encore. Sur
+  Rage et Dance se remplissent en combat (les rages de Gau portent le nom du
+  monstre) et les esprits se portent depuis la liste Espers. Sur
   Equip et Relic, la validation sur un emplacement ouvre la liste des objets
   de l'inventaire que le personnage peut y mettre (types, personnages
   autorises, deux armes seulement avec le Genji Glove, jamais deux boucliers)
@@ -548,14 +647,13 @@ genere par `build-pack`, pour leurs tests sur les vraies donnees.
 ## Perimetre restant
 
 - Reconstruction binaire de la ROM via le desassemblage de reference.
-- Cartes du monde a pied et dirigeable sont portes ; restent le chocobo du monde, le train, la Fosse du Serpent et les textes.
+- Cartes du monde (a pied, dirigeable, chocobo, Fosse du Serpent) et train fantome sont portes.
 - Commandes d'evenements restantes (defilements, changements de decor
   anime, eclairs, tremblements, filtres de couleur, mosaique).
-- Portage natif des menus et combats ; soins d'etat,
-  tente et sac de couchage, esprits equipes, Lore/Rage/Dance, Rmove/Empty/
-  Optimum, graphismes et animations des
-  combats, commandes de combat autres que Fight, Magic, Item, Steal,
-  SwdTech, Blitz, Defend et Row.
+- Menus : soins d'etat, tente et sac de couchage, Rmove/Empty/Optimum, Order.
+- Combat : la course des personnages des monstres (FA 5 et 6), le decalage qui reste des monstres (FA), les commandes de
+  scene pour les monstres, le fond de Kefka et les commandes d'animation encore sautees (triangles, priorites, la plupart des
+  sous-commandes de `$80` propres a une attaque) ; les objets utilisables jouent leur animation (table `ItemAnimPtrs`).
 - Audio natif sans emulation du SPC700 : mode mono.
 - Interface adaptable aux ecrans larges et remappage des commandes.
 - Gestion des graphismes HD.

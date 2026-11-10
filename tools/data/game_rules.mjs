@@ -1,7 +1,7 @@
 // src/field/char_prop.asm, src/item/item_prop.asm and src/data/level_up.asm: what the characters and the items are.
 export const RULES_MAGIC = 'FF6GAME1';
 
-export const CHAR_PROP_COUNT = 24;
+export const CHAR_PROP_COUNT = 48;  // the characters, then the ones of the scenes: Wedge, Vicks, the Kefkas...
 export const CHAR_PROP_BYTES = 22;
 const CHAR_PROP = 0x2d7ca0;  // ED/7CA0
 
@@ -42,6 +42,14 @@ export function readMagicProp(rom) {
   return Buffer.from(rom.subarray(MAGIC_PROP, MAGIC_PROP + MAGIC_PROP_COUNT * MAGIC_PROP_BYTES));
 }
 
+export const GENJU_COUNT = 27;
+export const GENJU_PROP_BYTES = 11;  // five pairs of a learn rate and a spell, then the bonus at each level
+const GENJU_PROP = 0x186e00;  // D8/6E00
+
+export function readGenjuProp(rom) {
+  return Buffer.from(rom.subarray(GENJU_PROP, GENJU_PROP + GENJU_COUNT * GENJU_PROP_BYTES));
+}
+
 export function readCharProp(rom) {
   return Buffer.from(rom.subarray(CHAR_PROP, CHAR_PROP + CHAR_PROP_COUNT * CHAR_PROP_BYTES));
 }
@@ -63,5 +71,5 @@ export function buildRulesData(rom, version) {
   const header = Buffer.alloc(12);
   header.write(RULES_MAGIC, 0, 8, 'ascii');
   header.writeUInt32LE(version, 8);
-  return Buffer.concat([header, readCharProp(rom), readItemProp(rom), readLevelUp(rom), readShopProp(rom), readAbilityLevels(rom), readMagicProp(rom)]);
+  return Buffer.concat([header, readCharProp(rom), readItemProp(rom), readLevelUp(rom), readShopProp(rom), readAbilityLevels(rom), readMagicProp(rom), readGenjuProp(rom)]);
 }

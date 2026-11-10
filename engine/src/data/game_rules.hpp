@@ -18,10 +18,12 @@ struct GameRules {
     std::vector<uint8_t> naturalMagic;  // FF6_NATURAL_MAGIC_BYTES: Terra's pairs of spell and level, then Celes'
     std::vector<uint8_t> bushidoLevels, blitzLevels;  // the level of the character that learns each technique
     std::vector<uint8_t> magicProp;  // FF6_MAGIC_PROP_COUNT attacks of FF6_MAGIC_PROP_BYTES
+    std::vector<uint8_t> genjuProp;  // FF6_ESPER_COUNT espers of FF6_GENJU_PROP_BYTES: the spells that they teach and the bonus
 
     const uint8_t* actor(int actor) const { return &charProp[static_cast<size_t>(actor) * FF6_CHAR_PROP_BYTES]; }
     const uint8_t* item(int item) const { return &itemProp[static_cast<size_t>(item) * FF6_ITEM_PROP_BYTES]; }
     const uint8_t* shop(int shop) const { return &shopProp[static_cast<size_t>(shop) * FF6_SHOP_PROP_BYTES]; }
+    const uint8_t* genju(int esper) const { return &genjuProp[static_cast<size_t>(esper) * FF6_GENJU_PROP_BYTES]; }
     const uint8_t* attack(int attack) const { return &magicProp[static_cast<size_t>(attack) * FF6_MAGIC_PROP_BYTES]; }
 };
 

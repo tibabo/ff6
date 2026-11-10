@@ -410,4 +410,5 @@ liste exacte. Aujourd'hui :
 - priorités entre couches (le moteur dessine toujours dans le même ordre) ;
 - la plupart des sous-commandes de `$80` propres à une attaque (tornade, perle,
   arc-en-ciel, dégradés bleus…) ;
-- animations des objets consommables (table `ItemAnimPtrs`).
+- les animations des objets consommables (table `ItemAnimPtrs`) sont jouées :
+  l'objet `$E7` donne l'animation 402, `$E8` à `$FE` les animations 337 à 359.

@@ -182,6 +182,36 @@ void removeEquipment(PartyState& party, int slot) {
     }
 }
 
+bool poisonStep(PartyState& party, const GameRules& rules, const std::vector<int>& members) {
+    bool poisoned = false;
+    for (const int slot : members) {
+        if (!validSlot(slot)) continue;
+        CharacterState& character = party.characters[static_cast<size_t>(slot)];
+        const unsigned status = character.status | (character.hp == 0 ? FF6_ST_DEAD : 0u);
+        const int maximum = calcStats(rules, character).maxHp;
+        if (!(status & FF6_POISON_IMMUNE) &&
+            (character.equipment[FF6_EQUIP_FIRST_RELIC] == FF6_ITEM_TINTINABAR || character.equipment[FF6_EQUIP_FIRST_RELIC + 1] == FF6_ITEM_TINTINABAR)) {
+            character.hp = std::min(character.hp + (character.stamina >> 2), maximum);
+        }
+        if (!(character.status & FF6_ST_POISON) || character.hp == 0) continue;
+        character.hp = std::max(1, character.hp - (maximum >> FF6_POISON_SHIFT));
+        poisoned = true;
+    }
+    return poisoned;
+}
+
+void changeStatus(PartyState& party, int slot, int op, unsigned bits) {
+    if (!validSlot(slot)) return;
+    unsigned& status = party.characters[static_cast<size_t>(slot)].status;
+    if (op == FF6_EVENT_AND_STATUS) {
+        status &= bits | ~FF6_ST_PERSISTENT;
+    } else if (op == FF6_EVENT_SET_STATUS) {
+        status |= bits & FF6_ST_PERSISTENT;
+    } else {
+        status ^= bits & FF6_ST_PERSISTENT;
+    }
+}
+
 void countStep(PartyState& party) { party.steps = std::min(party.steps + 1, static_cast<long>(FF6_MAX_STEPS)); }
 
 std::vector<int> equippableItems(const PartyState& party, const GameRules& rules, int character, int slot) {
@@ -214,6 +244,12 @@ std::vector<int> equippableItems(const PartyState& party, const GameRules& rules
     return items;
 }
 
+// The statuses that last after a battle and that an item takes away.
+static unsigned curedStatuses(const uint8_t* prop) {
+    if (!(prop[FF6_ITEM_PROP_FLAGS] & FF6_ITEM_FLAG_REMOVE_STATUS)) return 0;
+    return static_cast<unsigned>(prop[FF6_ITEM_PROP_STATUS] | (prop[FF6_ITEM_PROP_STATUS + 1] << 8)) & FF6_ST_PERSISTENT;
+}
+
 bool itemUsableInMenu(const GameRules& rules, int item) {
     if (item < 0 || item >= FF6_ITEM_COUNT || item == FF6_ITEM_MEGALIXIR || item == FF6_ITEM_SLEEPING_BAG ||
         item == FF6_ITEM_TENT || item == FF6_ITEM_WARP_STONE) {
@@ -223,7 +259,7 @@ bool itemUsableInMenu(const GameRules& rules, int item) {
     if ((prop[FF6_ITEM_PROP_TYPE] & FF6_ITEM_PROP_TYPE_MASK) != FF6_ITEM_TYPE_CONSUMABLE) return false;
     if (!(prop[FF6_ITEM_PROP_TYPE] & FF6_ITEM_USAGE_MENU)) return false;
     const int flags = prop[FF6_ITEM_PROP_FLAGS];
-    return !(flags & FF6_ITEM_FLAG_DAMAGE) && (flags & (FF6_ITEM_FLAG_HP | FF6_ITEM_FLAG_MP));
+    return !(flags & FF6_ITEM_FLAG_DAMAGE) && ((flags & (FF6_ITEM_FLAG_HP | FF6_ITEM_FLAG_MP)) || curedStatuses(prop) != 0);
 }
 
 bool canUseItemOn(const PartyState& party, const GameRules& rules, int character, int item) {
@@ -236,6 +272,7 @@ bool canUseItemOn(const PartyState& party, const GameRules& rules, int character
     const int flags = prop[FF6_ITEM_PROP_FLAGS];
     const bool revives = (flags & FF6_ITEM_FLAG_REMOVE_STATUS) && (prop[FF6_ITEM_PROP_STATUS] & FF6_STATUS_DEAD);
     if (state.hp == 0) return revives;  // a character without hp is dead
+    if (curedStatuses(prop) & state.status) return true;
     if (flags & FF6_ITEM_FLAG_REMOVE_STATUS) return false;
     const CharacterStats stats = calcStats(rules, state);
     return ((flags & FF6_ITEM_FLAG_HP) && state.hp < stats.maxHp) || ((flags & FF6_ITEM_FLAG_MP) && state.mp < stats.maxMp);
@@ -250,6 +287,7 @@ bool useItemOn(PartyState& party, const GameRules& rules, int character, int ite
     const auto amount = [&](int maximum) {
         return flags & FF6_ITEM_FLAG_FRACTION ? (maximum * power) >> FF6_ITEM_FRACTION_SHIFT : power;
     };
+    state.status &= ~curedStatuses(prop);
     if (flags & FF6_ITEM_FLAG_HP) state.hp = std::min(state.hp + amount(stats.maxHp), stats.maxHp);
     if (flags & FF6_ITEM_FLAG_MP) state.mp = std::min(state.mp + amount(stats.maxMp), stats.maxMp);
     takeItem(party, item);
@@ -262,16 +300,67 @@ long experienceForLevel(const GameRules& rules, int level) {
     return total << FF6_EXP_SHIFT;
 }
 
-void addExperience(PartyState& party, const GameRules& rules, int character, long amount) {
-    if (!validSlot(character) || amount <= 0) return;
+int addExperience(PartyState& party, const GameRules& rules, int character, long amount) {
+    if (!validSlot(character) || amount <= 0) return 0;
     CharacterState& state = party.characters[static_cast<size_t>(character)];
     state.experience = std::min(state.experience + amount, static_cast<long>(FF6_MAX_EXPERIENCE));
+    int gained = 0;
     while (state.level < FF6_MAX_LEVEL && state.experience >= experienceForLevel(rules, state.level + 1)) {
-        state.maxHp = std::min(state.maxHp + rules.levelHp[static_cast<size_t>(state.level - 1)], FF6_MAX_HP);
-        state.maxMp = std::min(state.maxMp + rules.levelMp[static_cast<size_t>(state.level - 1)], FF6_MAX_MP);
+        int hp = rules.levelHp[static_cast<size_t>(state.level - 1)], mp = rules.levelMp[static_cast<size_t>(state.level - 1)];
+        const int bonus = state.esper >= 0 ? rules.genju(state.esper)[FF6_GENJU_PROP_BYTES - 1] : FF6_GENJU_BONUS_NONE;
+        // The esper raises the hp or mp gained by a tenth, three tenths, a half or all of it (at least 1), or a stat by 1 or 2.
+        static constexpr int kPercent[] = {26, 78, 128};
+        const auto more = [](int value, int percent) { return value + std::max((value * percent) >> 8, 1); };
+        if (bonus <= 2) hp = more(hp, kPercent[bonus]);
+        else if (bonus <= 5) mp = more(mp, kPercent[bonus - 3]);
+        else if (bonus == 6) hp += hp;
+        else if (bonus >= 9 && bonus <= 16) {
+            const int kind = (bonus - 9) / 2, step = bonus % 2 ? 1 : 2;
+            int& stat = kind == 0 ? state.vigor : kind == 1 ? state.speed : kind == 2 ? state.stamina : state.magicPower;
+            stat = std::min(stat + step, FF6_GENJU_BONUS_STAT_MAX);
+        }
+        state.maxHp = std::min(state.maxHp + hp, FF6_MAX_HP);
+        state.maxMp = std::min(state.maxMp + mp, FF6_MAX_MP);
         ++state.level;
+        ++gained;
     }
     updateAbilities(party, rules, character);
+    return gained;
+}
+
+std::vector<LearnedSpell> learnSpells(PartyState& party, const GameRules& rules, const std::vector<int>& characters, int points) {
+    std::vector<LearnedSpell> learned;
+    for (const int character : characters) {
+        if (!validSlot(character) || points <= 0) continue;
+        const CharacterState& state = party.characters[static_cast<size_t>(character)];
+        if (state.actor >= FF6_ACTOR_GOGO) continue;
+        std::array<bool, FF6_SPELL_COUNT> reached{};
+        const auto teach = [&](int rate, int spell) {
+            if (rate == 0 || spell < 0 || spell >= FF6_SPELL_COUNT || party.spells[static_cast<size_t>(character)][static_cast<size_t>(spell)]) return;
+            uint8_t& progress = party.spellLearn[static_cast<size_t>(character)][static_cast<size_t>(spell)];
+            const int total = progress + rate * points;
+            if (total >= 100) {
+                reached[static_cast<size_t>(spell)] = true;
+                progress = 0;
+            } else {
+                progress = static_cast<uint8_t>(total);
+            }
+        };
+        for (const int id : state.equipment) {
+            const int item = id & 0xFF;
+            if (item != FF6_ITEM_EMPTY) teach(rules.item(item)[FF6_EQUIP_ITEM_SPELL_RATE], rules.item(item)[FF6_EQUIP_ITEM_SPELL]);
+        }
+        if (state.esper >= 0) {
+            const uint8_t* esper = rules.genju(state.esper);
+            for (int i = 0; i < FF6_GENJU_SPELLS; ++i) teach(esper[i * 2], esper[i * 2 + 1]);
+        }
+        for (int spell = FF6_SPELL_COUNT - 1; spell >= 0; --spell) {
+            if (!reached[static_cast<size_t>(spell)]) continue;
+            party.spells[static_cast<size_t>(character)][static_cast<size_t>(spell)] = true;
+            learned.push_back({character, spell});
+        }
+    }
+    return learned;
 }
 
 bool equipItem(PartyState& party, const GameRules& rules, int character, int slot, int item) {

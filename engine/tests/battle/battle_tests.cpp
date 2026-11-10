@@ -52,6 +52,13 @@ void testBattle() {
     party.characters[0].hp = party.characters[0].maxHp = 900;
     party.characters[0].vigor = 40;
 
+    {  // The statuses that last come into the battle with the character
+        ff6::PartyState sick = party;
+        sick.characters[0].status = FF6_ST_POISON | FF6_ST_BLIND;
+        const ff6::Battle ill(data, rules, sick, {0}, 0, 1);
+        CHECK((ill.combatants()[0].status & (FF6_ST_POISON | FF6_ST_BLIND)) == (FF6_ST_POISON | FF6_ST_BLIND));
+    }
+
     // The first battle: one monster, which the party defeats.
     ff6::Battle battle(data, rules, party, {0}, 0, 1);
     CHECK(battle.combatants()[0].alive() && battle.combatants()[FF6_BATTLE_PARTY_SLOTS].alive());
@@ -86,10 +93,17 @@ void testBattle() {
     dead.characters[0].hp = 0;
     CHECK(ff6::Battle(data, rules, dead, {0}, 0, 1).outcome() == ff6::BattleOutcome::Lost);
 
+    // The guard of the first battle holds the party back: nothing makes it run.
+    ff6::Battle held(data, rules, party, {0}, 0, 1);
+    CHECK(!held.canRun());
+    held.setRunning(true);
+    for (int ticks = 0; ticks < 2000; ++ticks) held.tick();
+    CHECK(!held.combatants()[0].escaped);
+
     // A weak character that runs leaves or dies, and the hp of the party follow the battle.
     ff6::PartyState weak = party;
     weak.characters[0].hp = 1;
-    ff6::Battle losing(data, rules, weak, {0}, 0, 3);
+    ff6::Battle losing(data, rules, weak, {0}, 6, 3);  // a battle that can be left
     losing.setRunning(true);
     for (int ticks = 0; ticks < 20000 && losing.outcome() == ff6::BattleOutcome::Fighting; ++ticks) losing.tick();
     CHECK(losing.outcome() != ff6::BattleOutcome::Fighting);
@@ -98,7 +112,7 @@ void testBattle() {
     // A character that runs leaves once its gauge is full, at its next turn of the counter, so never at the start.
     for (uint32_t seed = 1; seed <= 20; ++seed) {
         ff6::PartyState copy = party;
-        ff6::Battle runner(data, rules, copy, {0}, 0, seed);
+        ff6::Battle runner(data, rules, copy, {0}, 6, seed);
         runner.setRunning(true);
         int ticks = 0;
         for (; ticks < 20000 && runner.outcome() == ff6::BattleOutcome::Fighting; ++ticks) runner.tick();
@@ -179,7 +193,7 @@ void testBattle() {
 
     // Run is in the window that right brings: the party leaves once the gauge is full, and the buttons let go stop it.
     ff6::PartyState escaping = party;
-    view.start(data, rules, escaping, {0}, 0, 4, FF6_BATTLE_SPEED_DEFAULT, true);
+    view.start(data, rules, escaping, {0}, 6, 4, FF6_BATTLE_SPEED_DEFAULT, true);
     ff6::InputState right;
     right.direction = ff6::Right;
     for (int frame = 0; frame < 60000 && view.mode() != ff6::BattleMode::Command; ++frame) {
@@ -191,6 +205,29 @@ void testBattle() {
     view.update(press);
     for (int frame = 0; frame < 60000 && !view.finished(); ++frame) view.update(frame % 3 == 0 ? press : ff6::InputState());
     CHECK(view.finished() && view.outcome() == ff6::BattleOutcome::Fled);
+
+    // Setzer's Slot: the reels turn on the screen and the button stops them one after the other.
+    ff6::PartyState gambler = party;
+    ff6::setCharacterProperties(gambler, rules, 9, 9, 0);
+    gambler.characters[9].hp = gambler.characters[9].maxHp = 900;
+    gambler.characters[9].mp = gambler.characters[9].maxMp = 99;
+    view.start(data, rules, gambler, {9}, 5, 3, FF6_BATTLE_SPEED_DEFAULT, true);
+    ff6::InputState down;
+    down.direction = ff6::Down;
+    for (int frame = 0; frame < 60000 && view.mode() != ff6::BattleMode::Command; ++frame) view.update(frame % 3 == 0 ? press : ff6::InputState());
+    CHECK(view.mode() == ff6::BattleMode::Command);
+    view.update(down);
+    view.update(ff6::InputState());
+    view.update(press);
+    CHECK(view.mode() == ff6::BattleMode::Slot);
+    view.draw();
+    for (int stop = 0; stop < 3; ++stop) {
+        for (int frame = 0; frame < 7; ++frame) view.update(ff6::InputState());
+        view.draw();
+        view.update(press);
+    }
+    CHECK(view.mode() != ff6::BattleMode::Slot);
+    view.close();
 
     // The events that start the random battles and the monsters in boxes are where the game keeps them.
     CHECK(common.eventScript[FF6_EVENT_SCRIPT_RAND_BATTLE] == FF6_EVENT_RANDOM_BATTLE);

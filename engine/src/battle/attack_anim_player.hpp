@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <array>
 #include <vector>
 
 #include "data/attack_anim.hpp"
@@ -35,6 +36,20 @@ struct AnimShift {
     int x = 0, y = 0;
     bool hidden = false;
     int pose = -1;  // the pose of a character that the script chose
+    bool flip = false;  // the pose is turned the other way round
+    int action = 0;  // the animated action of a character (CHAR_ACTION), which makes its pose go on changing
+};
+
+// A thread of a scene of a battle event: the script (an address of bank D0) of a character, and who it moves.
+struct SceneThread {
+    int script = 0;
+    AnimBody body;
+};
+// An attack animation of a scene: the attack of the table, who casts it and who it reaches.
+struct SceneAttack {
+    int attack = 0;
+    AnimBody attacker;
+    std::vector<AnimBody> targets;
 };
 
 // The waves that scroll a background layer line by line (the HDMA of the game): an amplitude, a phase and the speed
@@ -100,6 +115,22 @@ public:
     // missed. A monster attacks with a script of its own.
     void startWeapon(const WeaponAnimProp& weapon, const AnimBody& attacker, const AnimBody& target, bool flipped, bool leftHand,
                      bool miss);
+    // The animations of the scene of a battle event that go on together: the characters walk and pose by their scripts, and the
+    // attacks of the scene play over them.
+    void startScene(const std::vector<SceneThread>& threads, const std::vector<SceneAttack>& attacks, bool flipped, int battleType = 0);
+    // What the scripts of a scene asked of the screen: sound commands (the three bytes of the SPC command), a new picture for a
+    // character (its actor and the number of its graphics), and how the field shakes (-1 when nothing was asked).
+    std::vector<std::array<int, 3>> takeSoundCommands();
+    std::vector<std::pair<int, int>> takeGfxChanges();
+    // The characters that a scene hid stay hidden for the animations that follow, until another scene shows them.
+    void presetHidden(const bool hidden[4]) {
+        for (int slot = 0; slot < 4; ++slot) shifts_[slot].hidden = hidden[slot];
+    }
+    int takeShake() {
+        const int value = shake_;
+        shake_ = -1;
+        return value;
+    }
     // One frame; false when every thread is over.
     bool tick();
     bool done() const { return done_; }
@@ -176,11 +207,18 @@ private:
         int spriteFrame = 0, spriteX = 0, spriteY = 0, spriteLayer = 0, spriteSheet = -1, spritePalette = 0;
         int priority = 3;  // of the sprites of the thread, from $90
         bool spriteFlipped = false;
+        AnimBody attacker;  // who the commands that name the attacker move
     };
 
     void run(Thread& thread);
     void begin(const AnimBody& attacker, bool flipped);
     void addThread(int layer, int script, int palette, const AnimBody& target, int counter, int index);
+    void addAttack(int attack, const AnimBody& attacker, const std::vector<AnimBody>& targets);
+    void addSceneThread(int address, const AnimBody& body);
+    void commandScene(Thread& thread, const uint8_t* code, size_t at);
+    void syncChar(int slot);
+    void updatePose(int slot);
+    void pickAction(const Thread& thread, bool arms);
     void command(Thread& thread, const uint8_t* code, size_t at);
     void special(Thread& thread, const uint8_t* code, size_t at);
     void move(Thread& thread, int argument);
@@ -220,6 +258,15 @@ private:
     int w12_ = -1, w34_ = -1, shape_ = 0, subscreen_ = 0, circleAngle_ = 0;
     int spanLeft_[256], spanRight_[256];
     AnimShift shifts_[4 + 6];  // the characters, then the monsters
+    // Where the characters of a scene stand: the position, the offset that the vectors add, the one that Save keeps, and where
+    // the scene found them (what shifts_ is counted from).
+    struct CharMove {
+        bool known = false;
+        int posX = 0, posY = 0, offX = 0, offY = 0, savedX = 0, savedY = 0, startX = 0, startY = 0;
+    } charMove_[4];
+    std::vector<std::array<int, 3>> soundCommands_;
+    std::vector<std::pair<int, int>> gfxChanges_;
+    int shake_ = -1, maxFrames_ = 0;
     AnimMode7 mode7_;
     AnimPlane plane_;
     AnimEsperSheet esperSheet_;

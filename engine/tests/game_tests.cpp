@@ -347,6 +347,11 @@ void testGame() {
         CHECK(box.party().treasures[static_cast<size_t>(boxBit)]);
         for (int i = 0; i < 3000 && !box.battleOpen(); ++i) box.tick(i % 20 == 0 ? confirm : idle);
         CHECK(box.battleOpen());
+        bool battleSong = false;  // the battle brings its own music, from its properties
+        for (const test::RecordingSound::Command& sent : boxSound.commands) {
+            battleSong = battleSong || (sent.command == FF6_SOUND_PLAY_SONG && (sent.arg1 == 0x24 || sent.arg1 == 0x14 || sent.arg1 == 0x33 || sent.arg1 == 0x2E));
+        }
+        CHECK(battleSong);
     }
     {  // a new game begins with the title screen; a press of the button ends it, and a new game starts the story
         test::RecordingSound startSound;

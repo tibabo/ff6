@@ -53,6 +53,8 @@ Attack attackFromTool(int item, const uint8_t* prop) {
     a.flags = FF6_AF_PHYSICAL | FF6_AF_NO_REFLECT;
     if (item == FF6_ITEM_NOISEBLASTER) a.status = FF6_ST_CONFUSE;
     if (item == FF6_ITEM_DRILL || item == FF6_ITEM_CHAIN_SAW) a.flags |= FF6_AF_IGNORE_DEF;
+    if (item == FF6_ITEM_DEBILITATOR) a.special = FF6_SP_DEBILITATOR;
+    if (item == FF6_ITEM_AIR_ANCHOR) a.special = FF6_SP_AIR_ANCHOR;
     if (item == FF6_ITEM_AUTOCROSSBOW) a.flags |= FF6_AF_NO_SPLIT;
     return a;
 }
@@ -67,7 +69,8 @@ bool Battle::canCast(int caster) const {
 bool Battle::canTarget(const Attack& attack, int target) const {
     if (target < 0 || target >= FF6_BATTLE_COMBATANTS) return false;
     const Combatant& c = combatants_[static_cast<size_t>(target)];
-    if (!c.present || c.escaped || (c.status & FF6_ST_HIDE)) return false;
+    if (!c.present || c.escaped || c.offstage || c.noTarget || (c.status & FF6_ST_HIDE)) return false;
+    if (target >= FF6_BATTLE_PARTY_SLOTS && !((targetMask_ >> (target - FF6_BATTLE_PARTY_SLOTS)) & 1)) return false;
     if (c.alive()) return true;
     return (attack.has(FF6_AF_RESURRECT) || ((attack.status & FF6_ST_DEAD) && attack.has(FF6_AF_REMOVE_STATUS))) && c.hp == 0 &&
            !(c.status & FF6_ST_PETRIFY);
@@ -78,6 +81,7 @@ void Battle::syncParty(const Combatant& c) {
     CharacterState& state = party_.characters[static_cast<size_t>(c.id)];
     state.hp = c.hp;
     state.mp = c.mp;
+    state.status = c.status & FF6_ST_PERSISTENT;
 }
 
 void Battle::refreshPace(Combatant& c) {
@@ -86,19 +90,45 @@ void Battle::refreshPace(Combatant& c) {
     c.paceConstant = slow ? FF6_ATB_SLOW : haste ? FF6_ATB_HASTE : FF6_ATB_NORMAL;
 }
 
-// A character is near fatal at an eighth of its hp, or less.
+// A character is near fatal at an eighth of its hp, or less; the relics that cast a spell then do it once in a battle.
 void Battle::updateNearFatal(Combatant& c) {
     if (c.monster) return;
+    const bool was = (c.status & FF6_ST_NEAR_FATAL) != 0;
     if (c.hp > 0 && c.hp <= (c.maxHp >> FF6_NEAR_FATAL_SHIFT) && !(c.status & FF6_ST_GONE)) {
         c.status |= FF6_ST_NEAR_FATAL;
     } else {
         c.status &= ~FF6_ST_NEAR_FATAL;
+    }
+    if (!was && (c.status & FF6_ST_NEAR_FATAL) && started_ && !c.lowHpDone) lowHpSpells(static_cast<int>(&c - combatants_.data()));
+}
+
+// NearFatalEffect: the barrier ring casts Shell on its wearer, the mithril glove Safe, and the czarina ring both.
+void Battle::lowHpSpells(int index) {
+    Combatant& c = combatants_[static_cast<size_t>(index)];
+    if (c.lowHpDone || !c.alive()) return;
+    c.lowHpDone = true;
+    static constexpr std::array<std::pair<int, int>, 3> kSpells{{{FF6_RELIC5_SHELL_HP_LOW, FF6_ATTACK_SHELL},
+                                                                  {FF6_RELIC5_SAFE_HP_LOW, FF6_ATTACK_SAFE},
+                                                                  {FF6_RELIC5_REFLECT_HP_LOW, FF6_ATTACK_REFLECT}}};
+    for (const auto& [bit, spell] : kSpells) {
+        if (!(c.relic5 & bit)) continue;
+        BattleEvent announce;
+        announce.kind = BattleEvent::Kind::Cast;
+        announce.attacker = index;
+        announce.attack = spell;
+        events_.push_back(announce);
+        perform(index, spellAttack(spell), {index}, spell, -1);
     }
 }
 
 // The set tables of the game: what each status brings with it and takes away.
 void Battle::setStatus(int index, uint32_t status, int level) {
     Combatant& c = combatants_[static_cast<size_t>(index)];
+    if ((status & FF6_ST_DEAD) && !(status & FF6_ST_PETRIFY) && c.overcast) {  // it falls as a zombie, with no countdown left
+        status = (status & ~FF6_ST_DEAD) | FF6_ST_ZOMBIE;
+        c.condemned = 0;
+        c.status &= ~FF6_ST_CONDEMNED;
+    }
     uint32_t clear = 0;
     if (status & FF6_ST_HASTE) clear |= FF6_ST_SLOW;
     if (status & FF6_ST_SLOW) clear |= FF6_ST_HASTE;
@@ -123,7 +153,9 @@ void Battle::setStatus(int index, uint32_t status, int level) {
     if (status & FF6_ST_GONE) {
         c.sleepCounter = c.stopCounter = c.reflectCounter = c.freezeCounter = c.condemned = 0;
         c.ready = false;
+        c.phantasm = false;
         if (status & FF6_ST_DEAD) c.hp = 0;
+        releaseHolds(index);
     }
     if ((before ^ c.status) & (FF6_ST_SLOW | FF6_ST_HASTE)) refreshPace(c);
     updateNearFatal(c);
@@ -141,6 +173,7 @@ void Battle::clearStatus(int index, uint32_t status) {
     if (status & FF6_ST_CONDEMNED) c.condemned = 0;
     if ((before ^ c.status) & (FF6_ST_SLOW | FF6_ST_HASTE)) refreshPace(c);
     updateNearFatal(c);
+    syncParty(c);
 }
 
 // The hit check of a spell (CheckHit): the target's block against the hit rate, or the special rolls of the ones that kill.
@@ -162,7 +195,8 @@ bool Battle::spellHits(const Attack& attack, const Combatant& user, const Combat
 
 // CalcTargetDmg, MagicStatusEffect and ApplyDmg for one target of an attack: `base` is the damage before the target's
 // defenses. The statuses that leave come before the hp, the ones that arrive after it.
-void Battle::applyTo(int userIndex, const Attack& a, int targetIndex, int base) {
+void Battle::applyTo(int userIndex, const Attack& attackIn, int targetIndex, int base) {
+    Attack a = attackIn;
     Combatant& user = combatants_[static_cast<size_t>(userIndex)];
     Combatant& target = combatants_[static_cast<size_t>(targetIndex)];
     BattleEvent event;
@@ -171,6 +205,14 @@ void Battle::applyTo(int userIndex, const Attack& a, int targetIndex, int base) 
     if (!spellHits(a, user, target)) {
         events_.push_back(event);
         return;
+    }
+    if (a.special != 0 && a.special != 0xFF) {  // the special effect of the target
+        const int effect = specialTarget(userIndex, a, targetIndex);
+        if (effect == 0) {
+            events_.push_back(event);
+            return;
+        }
+        if (effect == 2) return;
     }
     const bool mp = a.has(FF6_AF_AFFECT_MP);
     uint32_t add = 0, remove = 0;
@@ -211,7 +253,9 @@ void Battle::applyTo(int userIndex, const Attack& a, int targetIndex, int base) 
             events_.push_back(restored);
         }
     } else if (a.power > 0 || (a.has(FF6_AF_PHYSICAL) && !user.monster && user.hands[0].power > 0)) {
-        if (a.has(FF6_AF_HP_FRACTION)) {
+        if (a.fixed) {
+            value = base;
+        } else if (a.has(FF6_AF_HP_FRACTION)) {
             const int whole = a.item || a.has(FF6_AF_RESURRECT) ? (mp ? target.maxMp : target.maxHp) : (mp ? target.mp : target.hp);
             value = std::max((whole * a.power) >> FF6_FRACTION_SHIFT, 1);
         } else if (a.has(FF6_AF_PHYSICAL)) {
@@ -229,7 +273,7 @@ void Battle::applyTo(int userIndex, const Attack& a, int targetIndex, int base) 
         }
         if (target.status & FF6_ST_PETRIFY) {
             value = 0;
-        } else {
+        } else if (!a.fixed) {
             value += value * a.bonus / 2;
             if (a.has(FF6_AF_INVERT_UNDEAD)) {
                 if (undeadMonster) {
@@ -239,7 +283,9 @@ void Battle::applyTo(int userIndex, const Attack& a, int targetIndex, int base) 
                 if ((undeadMonster || (target.status & FF6_ST_ZOMBIE)) && a.has(FF6_AF_DRAIN)) heal = !heal;
             }
             if (a.element) {
-                if (target.elemAbsorb & a.element) {
+                if (forcefield_ && !(a.element & ~forcefield_)) {
+                    value = 0;
+                } else if (target.elemAbsorb & a.element) {
                     heal = !heal;
                 } else if (target.elemNull & a.element) {
                     value = 0;
@@ -356,7 +402,8 @@ void Battle::resolve(int user, const Attack& attack, const std::vector<int>& tar
 }
 
 // The base damage of a spell (CalcMagicDmg): the power, times four from level 1, and the magic power times the level.
-void Battle::perform(int userIndex, const Attack& attack, std::vector<int> targets, int spell, int item) {
+void Battle::perform(int userIndex, const Attack& original, std::vector<int> targets, int spell, int item) {
+    Attack attack = original;
     const Combatant& user = combatants_[static_cast<size_t>(userIndex)];
     const int level = attack.item ? 0 : user.level;
     int base = 0;
@@ -371,8 +418,23 @@ void Battle::perform(int userIndex, const Attack& attack, std::vector<int> targe
         if (user.status & FF6_ST_MORPH) base = std::min(base << 1, 0xFFFF);
     }
     targets.erase(std::remove_if(targets.begin(), targets.end(), [&](int t) { return !canTarget(attack, t); }), targets.end());
+    int rounds = 1;
+    if (attack.special != 0 && attack.special != 0xFF && !specialBefore(userIndex, attack, targets, base, rounds)) return;
     if (!attack.has(FF6_AF_NO_SPLIT) && static_cast<int>(targets.size()) >= FF6_DAMAGE_SPLIT_TARGETS) base >>= 1;
-    resolve(userIndex, attack, targets, base, false);
+    if (rounds > 1) {  // the same blow, again and again, each at one of the targets picked at random
+        const std::vector<int> pool = targets;
+        for (int round = 0; round < rounds && !pool.empty(); ++round) {
+            std::vector<int> standing;
+            for (const int t : pool) {
+                if (canTarget(attack, t)) standing.push_back(t);
+            }
+            if (standing.empty()) break;
+            resolve(userIndex, attack, {standing[static_cast<size_t>(random_.below(static_cast<int>(standing.size())))]}, base, false);
+        }
+    } else {
+        resolve(userIndex, attack, targets, base, false);
+    }
+    if (attack.special != 0 && attack.special != 0xFF) specialAfter(userIndex, attack);
     if (attack.has(FF6_AF_LORE) && spell >= FF6_ATTACK_FIRST_LORE && spell < FF6_ATTACK_FIRST_LORE + FF6_LORE_COUNT) {
         for (const int target : targets) {
             const Combatant& victim = combatants_[static_cast<size_t>(target)];
@@ -387,6 +449,7 @@ void Battle::perform(int userIndex, const Attack& attack, std::vector<int> targe
             events_.push_back(learned);
         }
     }
+    if (attack.special == FF6_SP_NO_RETAL || attack.special == FF6_SP_AIR_ANCHOR) return;  // some attacks leave no room for an answer
     for (const int target : targets) noteHit(userIndex, target, item >= 0 ? FF6_CMD_ITEM : FF6_CMD_MAGIC, spell >= 0 ? spell : item, item, attack.element);
 }
 
@@ -474,10 +537,10 @@ void Battle::defend(int userIndex) {
 
 void Battle::morph(int userIndex) {
     Combatant& user = combatants_[static_cast<size_t>(userIndex)];
-    if (outcome_ != BattleOutcome::Fighting || user.monster || !user.ready || !user.alive() || (user.status & FF6_ST_MORPH)) return;
+    if (outcome_ != BattleOutcome::Fighting || user.monster || !user.ready || !user.alive() || (user.status & FF6_ST_MORPH) || !canMorph()) return;
     user.ready = false;
     user.gauge = 0;
-    user.morph = FF6_MORPH_TICKS;
+    user.morph = party_.morphCounter * FF6_MORPH_TICKS_PER_SUPPLY;
     setStatus(userIndex, FF6_ST_MORPH);
 }
 
@@ -529,13 +592,29 @@ void Battle::throwWeapon(int userIndex, int item, int targetIndex) {
     checkEnd();
 }
 
+// Jump: a blow that cannot be dodged and does twice the damage, three times with a spear. The dragon horn makes it two
+// blows, and sometimes three or four.
 void Battle::jump(int userIndex, int targetIndex) {
     Combatant& user = combatants_[static_cast<size_t>(userIndex)];
     if (outcome_ != BattleOutcome::Fighting || user.monster || !user.ready || !user.alive()) return;
     if (targetIndex < FF6_BATTLE_PARTY_SLOTS || !combatants_[static_cast<size_t>(targetIndex)].alive()) return;
-    doubleBlow_ = true;
-    strike(userIndex, targetIndex);
-    doubleBlow_ = false;
+    const CharacterState& state = party_.characters[static_cast<size_t>(user.id)];
+    bool spear = false;
+    for (const int hand : {0, 1}) {
+        const int item = state.equipment[static_cast<size_t>(hand)] & 0xFF;
+        spear = spear || (item >= FF6_ITEM_MITHRIL_PIKE && item < FF6_ITEM_IMPERIAL);
+    }
+    int rounds = 1;
+    if (user.relic2 & FF6_RELIC2_DRAGON_HORN) {
+        const int roll = random_.byte();
+        rounds = 2 + (roll < FF6_DRAGON_HORN_THREE) + (roll < FF6_DRAGON_HORN_FOUR);
+    }
+    blowMultiplier_ = spear ? 3 : 2;
+    user.ready = false;
+    user.gauge = 0;
+    for (int round = 0; round < rounds && combatants_[static_cast<size_t>(targetIndex)].alive(); ++round) blows(userIndex, targetIndex);
+    blowMultiplier_ = 1;
+    checkEnd();
 }
 
 void Battle::mimic(int userIndex) {
@@ -816,11 +895,12 @@ void Battle::expireCounters(int index) {
     if (phase == FF6_DOT_POISON_PHASE && (c.status & FF6_ST_POISON)) {
         damageStatus(index, false, BattleEvent::Kind::Poison);
     } else if ((FF6_DOT_REGEN_PHASES >> phase) & 1) {
-        if (c.status & FF6_ST_SAP) {
+        if ((c.status & FF6_ST_SAP) || c.phantasm) {
             damageStatus(index, false, BattleEvent::Kind::Sap);
         } else if (c.status & FF6_ST_REGEN) {
             damageStatus(index, true, BattleEvent::Kind::Regen);
         }
+        if (c.monster && c.seizeTarget >= 0 && c.alive()) seizeDrain(index);
     }
 }
 

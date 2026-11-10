@@ -126,7 +126,7 @@
 #define FF6_PACK_MAGIC_SIZE 8
 #define FF6_COMMON_MAGIC "FF6COMMN"
 #define FF6_MAP_MAGIC "FF6MAP01"
-#define FF6_PACK_VERSION 15
+#define FF6_PACK_VERSION 23
 #define FF6_COMMON_FILE "common.ff6data"
 #define FF6_MAP_DIR "maps"
 #define FF6_MAP_FILE_EXTENSION ".ff6map"
@@ -391,6 +391,7 @@
 #define FF6_EVENT_MAP_NO_FADE_IN_FLAG 0x40
 #define FF6_EVENT_MAP_VEHICLE_MASK 0x03  // the party comes out on the world map on board: 1 the airship, 2 a chocobo
 #define FF6_EVENT_MAP_AIRSHIP 1
+#define FF6_EVENT_MAP_CHOCOBO 2
 #define FF6_EVENT_FADE_IN_SPEED 0x59  // speed
 #define FF6_EVENT_FADE_OUT_SPEED 0x5A  // speed
 #define FF6_EVENT_FADE_STOP 0x5B
@@ -701,6 +702,45 @@
 #define FF6_ATTACK_NAME_COUNT 175  // the attacks 81 to 255
 #define FF6_SKETCH_BYTES 2  // the attacks of Sketch and of Control of each monster
 #define FF6_CONTROL_BYTES 4
+#define FF6_MONSTER_DLG_COUNT 256  // what the monsters say: a pointer to each, and the texts
+#define FF6_MONSTER_DLG_BYTES 0x1E20
+#define FF6_MONSTER_DLG_BASE 0xE1E0  // the pointers are addresses in the bank, from here
+#define FF6_BATTLE_DLG_COUNT 256  // what the characters say in the scenes of a battle: a pointer to each, and the texts
+#define FF6_BATTLE_DLG_BYTES 0x2B00
+#define FF6_BATTLE_DLG_BASE 0xD200
+#define FF6_METAMORPH_BYTES 128  // four items for each of 32 groups of monsters
+#define FF6_CHAR_AI_COUNT 24  // the scenes with characters that act by a script
+#define FF6_CHAR_AI_BYTES 24  // flags, background, targets, song, then four characters of five bytes: actor and flags, sprite, script, x, y
+#define FF6_MONSTER_ANIM_SFX 9  // the command FA of the scripts: the sound effect, and the others are animations of the table of the attacks
+#define FF6_MONSTER_ANIMS {274, 273, 272, 383, 382, -1, -1, 393, 392, -1, 399, 400, 401, 403}  // flash, move back and forward, Kefka, glows
+#define FF6_COLOSSEUM_BYTES 1024  // four bytes for each of the 256 items: opponent, $40, prize, prize name hidden
+#define FF6_COLOSSEUM_ENTRY_BYTES 4
+#define FF6_COLOSSEUM_BATTLE 0x23F
+#define FF6_COLOSSEUM_SHADOW_BATTLE 0x23E
+#define FF6_COLOSSEUM_BACKGROUND 0x1C
+#define FF6_COLOSSEUM_ITEM_STRIKER 41  // wagered when Shadow waits, it calls him
+#define FF6_EVENT_BIT_COLOSSEUM_ITEM 494  // set by the menu: an item was wagered
+#define FF6_EVENT_BIT_COLOSSEUM_SHADOW 495  // set by the story: Shadow waits at the colosseum
+#define FF6_EVENT_COLOSSEUM_MENU 0x9A
+#define FF6_EVENT_COLOSSEUM_BATTLE 0xAF
+#define FF6_CHAR_AI_HIDE_NAMES 0x01
+#define FF6_CHAR_AI_HIDE_PARTY 0x80
+#define FF6_CHAR_AI_NOT_IN_PARTY 0x80  // of the actor: it waits out of the battle until a scene brings it
+#define FF6_CHAR_AI_ENEMY 0x40  // of the actor: it fights for the monsters
+#define FF6_CHAR_AI_NONE 0xFF
+#define FF6_BATTLE_FLAG_CHAR_AI 0x8000  // of the first word of the battle properties: the scene is in the aux word
+#define FF6_BATTLE_EVENT_SABIN_INTRO 7
+#define FF6_BATTLE_EVENT_RELM_ULTROS 22
+#define FF6_MONSTER_PROP_METAMORPH 17  // the group (low 5 bits) and the chance (high 3 bits) of Metamorph
+#define FF6_MAGIC_POINT_BYTES 512  // the magic points that each battle gives
+#define FF6_RAGE_MONSTERS 256  // the monsters that have a rage: two attacks each
+#define FF6_DANCE_COUNT 8
+#define FF6_DANCE_ATTACKS 4
+#define FF6_BG_DANCE_BYTES 64  // the dance that each battle background teaches
+#define FF6_DANCE_BG_BYTES 10  // and the background that each dance shows
+#define FF6_GENJU_PROP_BYTES 11  // five pairs of a rate and a spell, then the bonus of a level
+#define FF6_GENJU_SPELLS 5
+#define FF6_GENJU_BONUS_NONE 0xFF
 #define FF6_FIRST_GENJU_ATTACK FF6_SPELL_COUNT
 #define FF6_FIRST_NAMED_ATTACK (FF6_SPELL_COUNT + FF6_GENJU_ATTACK_COUNT)
 #define FF6_SUB_RATES {0x70, 0x40, 0x160, 0x200}  // added to the counter of the steps: normal, low, high, very high
@@ -752,6 +792,16 @@
 #define FF6_MAX_DAMAGE 9999
 #define FF6_HIT_ALWAYS 0xFF  // a hit rate that never misses
 #define FF6_DROP_RARE_LIMIT 0x20  // a random byte under it drops the rare item: 1 in 8
+#define FF6_GAU_APPEAR_LIMIT 0xA0  // a random byte under it brings Gau back after a battle of the veldt
+#define FF6_SHADOW_LEAVE_LIMIT 0x10  // a random byte under it makes Shadow leave after a battle: 1 in 16
+#define FF6_ITEM_DRIED_MEAT 254  // what wins Gau over the first time
+#define FF6_MONSTER_GAU_VELDT 370  // Gau who jumps in after a battle of the veldt: a monster with the script of the game
+#define FF6_BATTLE_EVENT_SHADOW_LEAVES 11  // the scenes (F7) that the engine starts itself
+#define FF6_BATTLE_EVENT_GAU_APPEARS 27
+#define FF6_CHAR_AI_GAU 10  // the scene of Gau on the veldt
+#define FF6_AI_STORY_VARIABLE 13  // the variable of the battle that holds the flags of the story: Gau won over, Shadow kept
+#define FF6_AI_STORY_GAU_OBTAINED 0x02
+#define FF6_AI_STORY_SHADOW_STAYS 0x08
 #define FF6_TWO_HAND_NUM 7  // a weapon with the two-hand effect hits for 7/4 of its power
 #define FF6_TWO_HAND_DEN 4
 #define FF6_CRITICAL_LIMIT 8  // a random byte under it is a critical hit, which doubles the damage: 1 in 32
@@ -764,6 +814,15 @@
 #define FF6_BATTLE_TYPE_RATES {0xCF, 0x07, 0x07, 0x1E}  // normal, back, pincer, side
 #define FF6_BATTLE_SIDE_MIN_ALLIES 3  // fewer allies alive forbid the side attack
 #define FF6_BATTLE_AUX_NO_PREEMPTIVE 0x0400  // of the second word of the battle properties
+#define FF6_BATTLE_AUX_KEEP_SONG 0x8000  // the music goes on
+#define FF6_BATTLE_AUX_SONG_MASK 0x3800  // the song of the battle, in the table of battle songs
+#define FF6_BATTLE_AUX_SONG_SHIFT 11
+#define FF6_BATTLE_SONGS {0x24, 0x14, 0x33, 0x2E, 0x1A, 0x3B, 0xFF, 0xFF}  // battle theme, decisive battle, fierce battle, returners, save them, dancing mad
+#define FF6_SONG_VICTORY_FANFARE 0x2F
+#define FF6_BATTLE_FLAG_NO_FANFARE 0x0200  // of the first word of the battle properties
+#define FF6_COND_BATTLE_FROM 0x1C4  // the table of conditional battles (CF/3780): this battle becomes the next one when the flag is set
+#define FF6_COND_BATTLE_TO 0x1A8
+#define FF6_COND_BATTLE_FLAG 0x30
 #define FF6_PREEMPTIVE_BASE 0x20  // a random byte under it, plus 4 for each battle type, is a preemptive strike
 #define FF6_PREEMPTIVE_STEP 4
 #define FF6_GAUGE_START 0xFF  // the high byte of a gauge that no rule has set
@@ -807,6 +866,11 @@
 #define FF6_ST_INTERCEPTOR 0x40000000u
 #define FF6_ST_FLOAT 0x80000000u
 #define FF6_ST_COUNT 32
+#define FF6_POISON_SHIFT 5  // each step takes a 32nd of the maximum hp, but never the last one
+#define FF6_POISON_IMMUNE (FF6_ST_ZOMBIE | FF6_ST_PETRIFY | FF6_ST_DEAD)  // $c2: what the relics of recovery do not heal
+#define FF6_ITEM_TINTINABAR 229  // heals a fourth of the stamina in hp at each step
+#define FF6_SFX_POISON_DAMAGE 0xEC
+#define FF6_ST_PERSISTENT (FF6_ST_BLIND | FF6_ST_ZOMBIE | FF6_ST_POISON | FF6_ST_IMP | FF6_ST_INTERCEPTOR | FF6_ST_MAGITEK)  // the statuses that last after a battle
 #define FF6_ST_GONE (FF6_ST_DEAD | FF6_ST_PETRIFY)  // out of the fight
 #define FF6_ST_NO_GAUGE (FF6_ST_DEAD | FF6_ST_PETRIFY | FF6_ST_SLEEP | FF6_ST_STOP | FF6_ST_FROZEN)  // the gauge stands still
 #define FF6_ST_NO_COUNTER_HIT (FF6_ST_PETRIFY | FF6_ST_SLEEP | FF6_ST_STOP | FF6_ST_FROZEN)  // an attack never misses them
@@ -918,6 +982,12 @@
 #define FF6_CMD_ROW 20
 #define FF6_CMD_DEFEND 21
 #define FF6_CMD_NONE 0xFF
+#define FF6_CMD_SLOT 15
+#define FF6_CMD_RAGE 16
+#define FF6_CMD_LEAP 17
+#define FF6_CMD_DANCE 19
+#define FF6_ITEM_MITHRIL_PIKE 29  // the spears: a jump with one of them does three times the damage
+#define FF6_ITEM_IMPERIAL 37  // the first weapon after them
 #define FF6_CMD_COUNT 32
 #define FF6_BATTLE_DEFEND_HALF 2  // a defending character takes half the damage of a physical attack
 
@@ -996,6 +1066,15 @@
 #define FF6_BG_WAVE_AMPLITUDE 3  // in pixels, and the lines and frames of a period
 #define FF6_BG_WAVE_AMPLITUDE_DREAM 4
 #define FF6_BG_CYANS_DREAM 46
+#define FF6_BG_CLOUDS 7  // the fields that move by themselves (UpdateBattleBG)
+#define FF6_BG_RAFT 13
+#define FF6_BG_FALL_SPEED 6  // pixels at each frame
+#define FF6_BG_TRAIN_SPEED 4
+#define FF6_BG_MAGITEK_SPEED 8
+#define FF6_BG_TRAIN_TOP 15
+#define FF6_BG_WATERFALL 31
+#define FF6_BG_TRAIN_TRACKS 33
+#define FF6_BG_MAGITEK_CAR 44
 #define FF6_BG_TENTACLES 55
 #define FF6_BG_WAVE_LINES 48
 #define FF6_BG_WAVE_FRAMES 90
@@ -1031,7 +1110,10 @@
 #define FF6_ATTACK_PROP_BYTES 14
 #define FF6_ATTACK_SCRIPT_COUNT 650  // the scripts, each with the properties of its sheet of frames
 #define FF6_ATTACK_GFX_PROP_BYTES 6
-#define FF6_ATTACK_SCRIPT_BYTES 0x7FB2
+#define FF6_ATTACK_SCRIPT_BYTES 0xD000
+#define FF6_BATTLE_EVENT_TABLE 0x9800  // in the same bank: the pointers to the scripts of the battle events, then the scripts
+#define FF6_BATTLE_EVENT_COUNT 33
+#define FF6_EVENT_ANIM_ATTACKS {257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 294, 384, 385, 273, 273}  // the attacks of the scenes
 #define FF6_ATTACK_FRAME_PTR_COUNT 2949
 #define FF6_ATTACK_FRAME_FIRST 0x141  // the frame pointers are addresses, the data starts here
 #define FF6_ATTACK_FRAME_END 59785
@@ -1090,7 +1172,18 @@
 #define FF6_ATTACK_FRAME_END_MARK 0xFF
 #define FF6_ATTACK_SPRITE_HFLIP 0x40
 #define FF6_ATTACK_SPRITE_VFLIP 0x80
-#define FF6_CHAR_GFX_COUNT 23
+#define FF6_CHAR_GFX_COUNT 24
+#define FF6_STATUS_GFX_BYTES 0x1000  // the sprites of the statuses: 16 x 8 tiles
+#define FF6_STATUS_PAL_BYTES 32
+#define FF6_CHAR_GFX_IMP 15  // what a character is while it is an imp
+#define FF6_CHAR_GFX_ESPER_TERRA 18  // and while it is morphed
+#define FF6_STATUS_PETRIFY_COLORS {0x0842, 0x6b5a, 0x18c6, 0x4210, 0x294a, 0x6b5a, 0x4e73, 0x6318, 0x3def, 0x4e73, 0x294a}  // the colors 1 to 11
+#define FF6_STATUS_SKIN_COLORS {{0x7edb, 0x4dd3}, {0x3af5, 0x3210}, {0x013f, 0x001f}}  // the colors 6 and 7 of poison, zombie and berserk
+#define FF6_STATUS_OUTLINE_COLORS {0x6a60, 0x031f, 0x0b64, 0x001a, 0x7fff, 0x7fff, 0x001a, 0x7c1f}  // reflect, safe, shell, haste, slow, vanish, -, stop
+#define FF6_STATUS_OUTLINE_DELAYS {0, 8, 16, 24}
+#define FF6_FLOAT_OFFSETS {5, 6, 7, 8, 8, 7, 6, 5}  // pixels that a character that floats rises
+#define FF6_STATUS_SPRITE_SHADOW 7
+#define FF6_CHAR_GFX_LEO 0x10
 #define FF6_CHAR_GFX_BYTES 0x1500
 #define FF6_CHAR_ACTION_COUNT 32
 #define FF6_CHAR_ACTION_TILES 8  // two unused, then six in reading order
@@ -1140,7 +1233,7 @@
 // ---- Characters, items and levels (game.ff6data) ------------------------------------------
 #define FF6_RULES_FILE "game.ff6data"
 #define FF6_RULES_MAGIC "FF6GAME1"
-#define FF6_CHAR_PROP_COUNT 24  // actors
+#define FF6_CHAR_PROP_COUNT 48  // actors
 #define FF6_CHAR_PROP_BYTES 22
 #define FF6_CHAR_PROP_HP 0  // offsets in a character's properties
 #define FF6_CHAR_PROP_MP 1
@@ -1160,8 +1253,13 @@
 #define FF6_ITEM_PROP_TYPE_MASK 7
 #define FF6_ITEM_PROP_EQUIP_FLAGS 2
 #define FF6_ITEM_PROP_RELIC1 9  // hp and mp boosts
+#define FF6_ITEM_PROP_RELIC2 10
 #define FF6_ITEM_PROP_RELIC3 11
 #define FF6_ITEM_PROP_RELIC4 12
+#define FF6_ITEM_PROP_RELIC5 13
+#define FF6_ITEM_PROP_SPELL_CAST 18  // of a weapon: the spell that it casts at random, with the flags in the high bits
+#define FF6_ITEM_PROP_WEAPON_SPECIAL 27  // the special effect of a weapon is the high nibble
+#define FF6_WEAPON_SPELL_RAND_CAST 0x40
 #define FF6_ITEM_PROP_STATS 16  // vigor and speed, then stamina and magic power: a nibble each
 #define FF6_ITEM_PROP_WEAPON_FLAGS 19
 #define FF6_ITEM_PROP_POWER 20  // battle power of a weapon, defense of an armor
@@ -1209,6 +1307,145 @@
 #define FF6_RELIC1_MP_12 0x80
 #define FF6_RELIC3_STRENGTH_50 0x80  // the hyper wrist
 #define FF6_RELIC4_GAUNTLET 0x08
+#define FF6_RELIC2_GALE_HAIRPIN 0x01
+#define FF6_RELIC2_BACK_GUARD 0x02
+#define FF6_RELIC2_JUMP 0x04  // the relics that change a command: Fight to Jump, Magic to X Magic, Sketch to Control, Slot to GP Rain, Steal to Capture
+#define FF6_RELIC2_X_MAGIC 0x08
+#define FF6_RELIC2_CONTROL 0x10
+#define FF6_RELIC2_GIL_TOSS 0x20
+#define FF6_RELIC2_CAPTURE 0x40
+#define FF6_RELIC2_DRAGON_HORN 0x80
+#define FF6_RELIC4_X_FIGHT 0x01  // the offering
+#define FF6_RELIC4_RAND_RETAL 0x02  // the black belt
+#define FF6_RELIC4_RAND_EVADE 0x04  // the beads
+#define FF6_RELIC4_COVER 0x40  // the true knight
+#define FF6_RELIC5_SHELL_HP_LOW 0x01
+#define FF6_RELIC5_SAFE_HP_LOW 0x02
+#define FF6_RELIC5_REFLECT_HP_LOW 0x04
+#define FF6_RELIC5_DOUBLE_EXP 0x08
+#define FF6_RELIC5_DOUBLE_GP 0x10
+#define FF6_RELIC5_MAKE_UNDEAD 0x80
+#define FF6_MORPH_MIN_SUPPLY 15  // the morph command needs more than this in the supply
+#define FF6_MORPH_TICKS_PER_SUPPLY 8
+#define FF6_MAX_GIL 9999999
+#define FF6_DESPERATION_MIN_TURNS 3  // a desperation attack needs this many turns in the battle
+#define FF6_DESPERATION_MASK 0x0F  // and a random byte whose low nibble is zero
+#define FF6_ATTACK_FIRST_DESPERATION 240
+#define FF6_ATTACK_FIRST_INTERCEPTOR 252  // Takedown, then Rush
+#define FF6_DRAGON_HORN_THREE 0x40  // the dragon horn adds a blow to a jump below these random bytes
+#define FF6_DRAGON_HORN_FOUR 0x10
+#define FF6_WEAPON_THIEFKNIFE 1  // the special effects of weapons
+#define FF6_WEAPON_ATMA 2
+#define FF6_WEAPON_INSTANT_DEATH 3
+#define FF6_WEAPON_MAN_EATER 4
+#define FF6_WEAPON_DRAINER 5
+#define FF6_WEAPON_SOUL_SABRE 6
+#define FF6_WEAPON_MP_CRIT 7
+#define FF6_WEAPON_STRONG_VS_FLYING 8
+#define FF6_WEAPON_DICE 9
+#define FF6_WEAPON_VALIANT 10
+#define FF6_WEAPON_TEMPEST 11
+#define FF6_WEAPON_HEAL_ROD 12
+#define FF6_WEAPON_SCIMITAR 13
+#define FF6_WEAPON_OGRE_NIX 14
+#define FF6_WEAPON_MORE_MP_CRIT 15
+#define FF6_WEAPON_HALF_LIMIT 0x80  // a random byte under it: one time in two
+#define FF6_WEAPON_SPELL_LIMIT 0x40  // a weapon casts its spell one time in four
+#define FF6_DICE_SPAN 0x60
+#define FF6_ATTACK_WIND_SLASH 101
+#define FF6_SP_SCAN 16  // the special effects of attacks (ATTACK_SPECIAL_EFFECT): what the ones that the engine knows are
+#define FF6_SP_GOLEM 17
+#define FF6_SP_METAMORPH 18
+#define FF6_SP_PALIDOR 19
+#define FF6_SP_SPIRALER 22
+#define FF6_SP_TAPIR 23
+#define FF6_SP_PEP_UP 32
+#define FF6_SP_STUNNER 63
+#define FF6_SP_FALLEN_ONE 64
+#define FF6_SP_DEBILITATOR 86
+#define FF6_SP_SEIZE 46
+#define FF6_SP_DOOM 53
+#define FF6_SP_OVERCAST 55
+#define FF6_SP_AIR_ANCHOR 87
+#define FF6_ITEM_DEBILITATOR 167  // the tools that have a special effect of their own
+#define FF6_ITEM_AIR_ANCHOR 169
+#define FF6_SP_LOVE_TOKEN 45
+#define FF6_SP_ZINGER 58
+#define FF6_SP_TARGETTING 47
+#define FF6_SP_EMPOWERER 54
+#define FF6_SP_MIND_BLAST 40
+#define FF6_SP_EVIL_TOOT 59
+#define FF6_MIND_BLAST_DRAWS 4  // the targets that a mind blast picks
+#define FF6_AI_TARGET_TARGETTING 0x4D  // the combatant that Targetting marked
+#define FF6_SP_CHARM 52
+#define FF6_SP_DISCARD 68
+#define FF6_SP_PHANTASM 62
+#define FF6_SP_FORCEFIELD 49
+#define FF6_SEIZE_POWER 16  // what a monster that holds a character drains from it, as a spell
+#define FF6_METAMORPH_RATES {0xFF, 0xC0, 0x80, 0x40, 0x20, 0x10, 0x08, 0x00}  // the chance of each rate of a monster, out of 256
+#define FF6_SP_MANTRA 21
+#define FF6_SP_WARP 24
+#define FF6_SP_EXPLODER 25
+#define FF6_SP_BLOW_FISH 26
+#define FF6_SP_WHITE_WIND 27
+#define FF6_SP_REFLECT_LORE 28
+#define FF6_SP_PEARL_LORE 29
+#define FF6_SP_STEP_MINE 30
+#define FF6_SP_DISCHORD 31
+#define FF6_SP_RIPPLER 33
+#define FF6_SP_STONE 34
+#define FF6_SP_NO_RETAL 35
+#define FF6_SP_MISS_FLYING 37
+#define FF6_SP_WALLCHANGE 38
+#define FF6_SP_ESCAPE 39
+#define FF6_SP_N_CROSS 41
+#define FF6_SP_FLARE_STAR 42
+#define FF6_SP_R_POLARITY 43
+#define FF6_SP_SUPLEX 48
+#define FF6_SP_QUADRA_SLAM 50
+#define FF6_SP_BABABREATH 51
+#define FF6_SP_SNEEZE 56
+#define FF6_SP_ENGULF 57
+#define FF6_SP_RETORT 60
+#define FF6_SP_REVENGE 61
+#define FF6_SP_QUICK 67
+#define FF6_SP_SMOKE_BOMB 75
+#define FF6_SP_WARP_STONE 77
+#define FF6_MONSTER_CANT_SUPLEX 0x04  // of the second status byte of a monster
+#define FF6_MONSTER_CANT_ESCAPE 0x08
+#define FF6_MONSTER_CANT_SCAN 0x10
+#define FF6_STONE_BONUS 14  // half-steps of extra damage when the levels are the same
+#define FF6_QUICK_TURNS 2
+#define FF6_BLOW_FISH_DAMAGE 1000
+#define FF6_QUADRA_ROUNDS 4
+#define FF6_ITEM_BLIZZARD_ORB 197  // Umaro: more attacks with these
+#define FF6_ITEM_RAGE_RING 198
+#define FF6_ATTACK_STORM 84
+#define FF6_UMARO_TABLE {0x9E, 0x5F, 0xFF, 0xFF, 0x5E, 0x3F, 0xFF, 0x5F, 0x5E, 0x3F, 0x5F, 0xFF, 0x3E, 0x3F, 0x3F, 0x3F}  // RandBitRateTbl
+#define FF6_UMARO_MOVE_CHARGE 0
+#define FF6_UMARO_MOVE_THROW 1
+#define FF6_ATTACK_L5_DOOM 148  // the attacks of the slot, by what the reels show
+#define FF6_ATTACK_BAHAMUT 67
+#define FF6_ATTACK_CHOCOBOP 127
+#define FF6_ATTACK_H_BOMB 128
+#define FF6_ATTACK_SEVEN_FLUSH 129
+#define FF6_ATTACK_LAGOMORPH 254
+#define FF6_SLOT_ICONS 7  // seven, dragon, bar, airship, chocobo, diamond, rabbit
+#define FF6_SLOT_ICON_SEVEN 0
+#define FF6_SLOT_ICON_BAR 2
+#define FF6_DANCE_RATES {0x10, 0x30, 0x90}  // a random byte under each one moves the dance on to a rarer step
+#define FF6_ATTACK_BATTLE_BLOW 0xEE
+#define FF6_SLOT_SPEED_BASE 3  // the reels turn an icon every few frames
+#define FF6_SLOT_SPEED_STEP 2
+#define FF6_BATTLE_SLOT_X 8  // the window of the slot
+#define FF6_BATTLE_SLOT_Y 6
+#define FF6_BATTLE_SLOT_W 16
+#define FF6_BATTLE_SLOT_H 5
+#define FF6_BATTLE_SLOT_STEP 5
+#define FF6_OFFERING_ROUNDS 8  // the offering strikes this many times
+#define FF6_ATTACK_SAFE 28
+#define FF6_ATTACK_REFLECT 36
+#define FF6_ATTACK_SHELL 37
 #define FF6_WEAPON_BACK_ROW 0x20  // of the weapon flags: it reaches from the back row
 #define FF6_RELIC1_ATLAS 0x01  // +25% of the physical damage
 #define FF6_RELIC1_EARRING 0x02  // +50% of the magic damage
@@ -1257,12 +1494,21 @@
 #define FF6_NATURAL_MAGIC_TERRA 0  // the actors that learn them, and the swordtech and blitz users
 #define FF6_NATURAL_MAGIC_CELES 6
 #define FF6_ACTOR_CYAN 2
+#define FF6_ACTOR_SHADOW 3
 #define FF6_MAGIC_PROP_COUNT 256  // the attacks, of which the first FF6_SPELL_COUNT are spells
 #define FF6_MAGIC_PROP_BYTES 14
 #define FF6_MAGIC_PROP_MP 5  // the cost of a spell, in the properties of the attack
 #define FF6_ACTOR_SABIN 5
 #define FF6_ACTOR_CELES 6
 #define FF6_ACTOR_STRAGO 7
+#define FF6_ACTOR_MOG 10
+#define FF6_ACTOR_GAU 11
+#define FF6_ACTOR_GOGO 12  // the actors from Gogo on learn nothing from espers and items
+#define FF6_ACTOR_UMARO 13
+#define FF6_ACTOR_TERRA 0
+#define FF6_EQUIP_ITEM_SPELL_RATE 3  // of an item: how fast it teaches the spell, and which one
+#define FF6_EQUIP_ITEM_SPELL 4
+#define FF6_GENJU_BONUS_STAT_MAX 128  // an esper raises a stat up to this at most
 #define FF6_LORE_COUNT 24  // the attacks 139 to 162, which Strago learns
 #define FF6_ATTACK_FIRST_LORE 139
 #define FF6_CMD_MORPH 3
@@ -1286,6 +1532,11 @@
 #define FF6_ATTACK_FLASH_TOOL 126
 #define FF6_ATTACK_ANIM_TOOLS 328  // the animation of the tool number n is this plus n; the chain saw that kills is the ninth
 #define FF6_TOOL_FIRST 163
+#define FF6_ITEM_ANIM_RENAME_CARD 0xE7  // the usable items from here to 0xFE have an animation of the attacks: ItemAnimPtrs of the game
+#define FF6_ITEM_ANIM_RENAME_CARD_ANIM 402
+#define FF6_ITEM_ANIM_FIRST 0xE8  // the animations 337 to 359, in the order of the items
+#define FF6_ITEM_ANIM_FIRST_ANIM 337
+#define FF6_ITEM_ANIM_LAST 0xFE
 #define FF6_TOOL_CHAIN_SAW_KILL 8
 #define FF6_CHAIN_SAW_KILL_MASK 3  // it kills when two random bits are all zero
 #define FF6_ITEM_PROP_TOOL_HIT 21
@@ -1354,6 +1605,9 @@
 #define FF6_EVENT_TAKE_ITEM 0x81
 #define FF6_EVENT_GIVE_GIL 0x84
 #define FF6_EVENT_TAKE_GIL 0x85
+#define FF6_EVENT_AND_STATUS 0x88  // a character and a word of statuses: keeps only those, sets them, or toggles them
+#define FF6_EVENT_SET_STATUS 0x89
+#define FF6_EVENT_TOGGLE_STATUS 0x8A
 #define FF6_EVENT_CHANGE_HP 0x8B
 #define FF6_EVENT_CHANGE_MP 0x8C
 #define FF6_EVENT_REMOVE_EQUIPMENT 0x8D
@@ -1459,17 +1713,26 @@
 #define FF6_WORLD_TILE_BATTLE 0x0040  // random battles happen on it
 #define FF6_EVENT_BIT_WORLD_ALT_SONG 0x1B8
 #define FF6_EVENT_BIT_AIRSHIP_VISIBLE 0x1B9  // the airship is on the world map, where it was parked
+#define FF6_EVENT_BIT_TRENCH_LEFT 0x1B7  // the fork that the party takes in the serpent trench: set for the left
 #define FF6_EVENT_BIT_AIRSHIP_GROUND 0x1BA  // boarding it starts a scene of the story instead of a flight
 #define FF6_EVENT_BIT_VELDT 0x1BB
 #define FF6_EVENT_BIT_KEEP_SONG 0x1CC
 #define FF6_EVENT_BIT_FLOATING_LIFTED 0x9E
 #define FF6_SONG_TERRA 0x06
+#define FF6_SONG_TECHNO_DE_CHOCOBO 0x13
+#define FF6_SONG_SAVE_THEM 0x1A
+#define FF6_SONG_SERPENT_TRENCH 0x28
+#define FF6_SONG_BLACKJACK 0x35
 #define FF6_SONG_VELDT 0x19
 #define FF6_SONG_DARK_WORLD 0x4F
 #define FF6_SONG_SEARCHING_FOR_FRIENDS 0x4C
 #define FF6_EVENT_SCRIPT_GAME_OVER 0x2E566  // the scene that follows a lost battle, called by the event of the random battles
 #define FF6_BATTLE_FLAG_DEFEATED 0x40  // set when the party lost, for the events that follow a battle
 #define FF6_BATTLE_FLAG_DOOM_GAZE_DEFEATED 0x48  // battle flag 1 of $1dd2: no more Doom Gaze
+#define FF6_BATTLE_FLAG_GAU_OBTAINED 0x49  // Gau has been won over once
+#define FF6_BATTLE_FLAG_SHADOW_STAYS 0x4B  // Shadow does not leave after a battle
+#define FF6_BATTLE_FLAG_MAGIC_ONLY 0x38  // the characters have only magic (the Fanatic's Tower)
+#define FF6_VEHICLE_BATTLE_SECOND_FRAME 45  // the battle of a script of a vehicle is the second one of its group a quarter of the time
 #define FF6_DOOM_GAZE_BATTLE_GROUP 93  // of the event battles
 #define FF6_BATTLE_BG_AIRSHIP_WOR 0x29
 #define FF6_EVENT_SCRIPT_DOOM_GAZE_DEFEATED 0x96  // of the airship scripts, in the event script
@@ -1480,6 +1743,34 @@
 #define FF6_WORLD_AIRSHIP_GFX_BYTES 0x1800
 #define FF6_WORLD_BACKDROP_GFX_BYTES 0x2000
 #define FF6_WORLD_BACKDROP_TILES_BYTES 0x1000
+#define FF6_WORLD_CHOCOBO_GFX_BYTES 0x1800
+#define FF6_TRAIN_GFX_BYTES 0x3FC7
+#define FF6_TRAIN_TILE_POINTERS 348  // 29 tiles, 12 sizes each
+#define FF6_TRAIN_PALETTE_COLORS 256
+#define FF6_TRAIN_COURSE_RECORDS 52
+#define FF6_TRAIN_COURSE_RECORD_BYTES 5
+#define FF6_TRAIN_RING 64  // positions of the course that the ride looks at, as two halves of 32
+#define FF6_TRAIN_LAYERS 24
+#define FF6_TRAIN_TILES_PER_LAYER 12
+#define FF6_TRAIN_DRAWN_LAYERS 22
+#define FF6_TRAIN_BUFFER 80  // the picture is 80 x 80 cells
+#define FF6_TRAIN_BUFFER_X 24  // where it starts in the 128 x 128 cells of the map
+#define FF6_TRAIN_BUFFER_Y 22
+#define FF6_TRAIN_FRAMES_PER_STEP 4
+#define FF6_TRAIN_SCALE 0x2FD  // $3d: three times the cosine of no rotation
+#define FF6_TRAIN_MARKER_BATTLE_1 0xE0
+#define FF6_TRAIN_MARKER_BATTLE_2 0xE1
+#define FF6_TRAIN_MARKER_BOSS 0xE2
+#define FF6_TRAIN_MARKER_END 0xFF
+#define FF6_TRAIN_BATTLE_GROUP_1 41
+#define FF6_TRAIN_BATTLE_GROUP_2 144
+#define FF6_TRAIN_BOSS_GROUP 0x49
+#define FF6_TRAIN_BATTLE_BG 0x2C
+#define FF6_TRAIN_SECOND_BATTLE_ROLL 0xC0  // a roll above this picks the second battle of the group
+#define FF6_EVENT_TRAIN 0xAE  // the magitek train ride
+#define FF6_TRENCH_SIZE 128  // tiles on a side
+#define FF6_TRENCH_TILEMAP_BYTES 0x4000
+#define FF6_TRENCH_MAP 2  // the number of the map of the serpent trench
 #define FF6_HELD_UP (1u << 0)  // InputState::held: the directions as the Facing values number them, then the buttons
 #define FF6_HELD_RIGHT (1u << 1)
 #define FF6_HELD_DOWN (1u << 2)

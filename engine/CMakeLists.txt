@@ -20,6 +20,7 @@ add_library(ff6_core STATIC
   src/cutscene/opening.cpp
   src/cutscene/ppu.cpp
   src/cutscene/title.cpp
+  src/cutscene/train.cpp
   src/field/anim.cpp
   src/field/bg.cpp
   src/field/color.cpp
@@ -36,6 +37,7 @@ add_library(ff6_core STATIC
   src/field/text.cpp
   src/field/window.cpp
   src/menu/character_menu.cpp
+  src/menu/colosseum_menu.cpp
   src/menu/config_menu.cpp
   src/menu/field_menu.cpp
   src/menu/item_menu.cpp
@@ -50,6 +52,9 @@ add_library(ff6_core STATIC
   src/battle/battle.cpp
   src/battle/action.cpp
   src/battle/ai.cpp
+  src/battle/special.cpp
+  src/battle/skills.cpp
+  src/battle/scene.cpp
   src/battle/attack_anim_player.cpp
   src/battle/battle_screen.cpp
   src/battle/encounters.cpp

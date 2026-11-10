@@ -196,6 +196,8 @@ struct Start {
     std::unique_ptr<ff6::SaveState> save;
     int battle = -1, battleBackground = -1;  // a battle that starts at once, over the field
     int playAnimation = -1;  // an attack whose animation plays in that battle
+    unsigned partyStatus = 0;  // statuses that the party has when the battle starts, to see them
+    int scene = -1;  // a battle event that plays when the battle opens
     bool stock = false;  // weapons, tools and every Lore, to try the commands that need them
     bool newGame = false;  // begin like the console: the title screen, the story, the opening
     std::string cutscene;  // "title" or "opening": only that scene, for a capture
@@ -252,12 +254,14 @@ int run(const std::string& packDir, const Start& start, const std::string& saveP
         const std::unique_ptr<ff6::Game> game = makeGame(std::move(common), packDir, start, renderer, sound);
         if (capture->atX >= 0) game->placeParty(capture->atX, capture->atY);
         if (start.battle >= 0) {
+            for (ff6::CharacterState& character : game->party().characters) character.status |= start.partyStatus;
             game->startBattleNumber(start.battle, start.battleBackground);
             for (int frame = 0; frame < FF6_CAPTURE_MAX_STEP_FRAMES * 2 && game->menuPhase() != ff6::MenuPhase::Open; ++frame) {
                 game->tick({});
             }
             game->finishFade();
             if (start.playAnimation >= 0) game->battle().playAnimation(start.playAnimation);
+            if (start.scene >= 0) game->battle().playScene(start.scene);
         }
         captureFrame(*game, renderer, *capture);
         return 0;
@@ -268,13 +272,15 @@ int run(const std::string& packDir, const Start& start, const std::string& saveP
     ff6::SdlAudio sound(program);
     const std::unique_ptr<ff6::Game> game = makeGame(std::move(common), packDir, start, renderer, sound);
     if (start.battle >= 0) {
+        for (ff6::CharacterState& character : game->party().characters) character.status |= start.partyStatus;
         game->startBattleNumber(start.battle, start.battleBackground);
-        if (start.playAnimation >= 0) {  // the battle opens first, then the animation plays at once
+        if (start.playAnimation >= 0 || start.scene >= 0) {  // the battle opens first, then the animation plays at once
             for (int frame = 0; frame < FF6_CAPTURE_MAX_STEP_FRAMES * 2 && game->menuPhase() != ff6::MenuPhase::Open; ++frame) {
                 game->tick({});
             }
             game->finishFade();
-            game->battle().playAnimation(start.playAnimation);
+            if (start.playAnimation >= 0) game->battle().playAnimation(start.playAnimation);
+            if (start.scene >= 0) game->battle().playScene(start.scene);
         }
     }
     if (music >= 0) sound.command(FF6_SOUND_PLAY_SONG, static_cast<uint8_t>(music), FF6_SOUND_FULL_VOLUME);  // over the song of the map
@@ -340,7 +346,7 @@ void writeAnimSheet(const std::string& packDir, int attack, int layer, const std
 }  // namespace
 
 int main(int argc, char** argv) {
-    const char* usage = "Usage: %s <data-pack-dir> [--map n] [--party terra,locke,...] [--battle n [--bg n]] [--play attack] [--stock 1] [--anim attack [--layer 0|1|2]] [--load save.json] [--save save.json] [--music song] [--new-game 1] [--cutscene title|opening --capture out.bmp --wait frames] [--capture out.bmp [--at x,y] [--wait frames] [--moves URDL...] [--talk frames] [--keys ABURDL.] [--after frames]]\n";
+    const char* usage = "Usage: %s <data-pack-dir> [--map n] [--party terra,locke,...] [--battle n [--bg n]] [--play attack] [--status bits] [--scene n] [--stock 1] [--anim attack [--layer 0|1|2]] [--load save.json] [--save save.json] [--music song] [--new-game 1] [--cutscene title|opening --capture out.bmp --wait frames] [--capture out.bmp [--at x,y] [--wait frames] [--moves URDL...] [--talk frames] [--keys ABURDL.] [--after frames]]\n";
     if (argc < 2) {
         std::fprintf(stderr, usage, argc > 0 ? argv[0] : "ff6");
         return 2;
@@ -351,6 +357,8 @@ int main(int argc, char** argv) {
         long music = -1;
         std::vector<int> party;
         int battle = -1, battleBackground = -1, animAttack = -1, animLayer = 0, playAnimation = -1;
+        unsigned partyStatus = 0;
+        int scene = -1;
         bool stock = false;
         bool mapGiven = false;
         bool forceNewGame = false;
@@ -380,6 +388,11 @@ int main(int argc, char** argv) {
             } else if (option == "--bg") {
                 battleBackground = std::stoi(argv[i + 1]);
                 if (battleBackground < 0 || battleBackground >= FF6_BG_COUNT) throw std::runtime_error("invalid --bg");
+            } else if (option == "--scene") {
+                scene = std::stoi(argv[i + 1]);
+                if (scene < 0 || scene >= FF6_BATTLE_EVENT_COUNT) throw std::runtime_error("invalid --scene");
+            } else if (option == "--status") {
+                partyStatus = static_cast<unsigned>(std::stoul(argv[i + 1], nullptr, 0));
             } else if (option == "--play") {
                 playAnimation = std::stoi(argv[i + 1]);
                 if (playAnimation < 0 || playAnimation >= FF6_ATTACK_PROP_COUNT) throw std::runtime_error("invalid --play");
@@ -443,6 +456,8 @@ int main(int argc, char** argv) {
         start.battle = battle;
         start.battleBackground = battleBackground;
         start.playAnimation = playAnimation;
+        start.partyStatus = partyStatus;
+        start.scene = scene;
         start.stock = stock;
         start.party = party;
         start.cutscene = cutscene;

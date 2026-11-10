@@ -31,14 +31,16 @@ CharacterStats calcStats(const GameRules& rules, const CharacterState& character
     int rightPower = actor[FF6_CHAR_PROP_ATTACK], leftPower = actor[FF6_CHAR_PROP_ATTACK];
     int defense = actor[FF6_CHAR_PROP_DEFENSE], magicDefense = actor[FF6_CHAR_PROP_MAGIC_DEFENSE];
     int evade = actor[FF6_CHAR_PROP_EVADE], magicBlock = actor[FF6_CHAR_PROP_MAGIC_BLOCK];
-    int relic1 = 0, relic3 = 0, relic4 = 0;
+    int relic1 = 0, relic2 = 0, relic3 = 0, relic4 = 0, relic5 = 0;
     int hands = 0;  // 1 weapon in the left hand, 2 in the right, 4 and 8 nothing in them
     for (int slot = FF6_MENU_EQUIP_SLOTS - 1; slot >= 0; --slot) {
         const int id = character.equipment[static_cast<size_t>(slot)] & 0xFF;
         const uint8_t* item = rules.item(id);
         relic1 |= item[FF6_ITEM_PROP_RELIC1];
+        relic2 |= item[FF6_ITEM_PROP_RELIC2];
         relic3 |= item[FF6_ITEM_PROP_RELIC3];
         relic4 |= item[FF6_ITEM_PROP_RELIC4];
+        relic5 |= item[FF6_ITEM_PROP_RELIC5];
         vigor += signedNibble(item[FF6_ITEM_PROP_STATS] & 0x0F);
         speed += signedNibble(item[FF6_ITEM_PROP_STATS] >> 4);
         stamina += signedNibble(item[FF6_ITEM_PROP_STATS + 1] & 0x0F);
@@ -82,9 +84,12 @@ CharacterStats calcStats(const GameRules& rules, const CharacterState& character
             gauntlet = twoHanded(leftItem);
         }
     }
+    bool copied = false, copiedFromRight = false;
     if (gauntlet) {
+        copied = true;
         if (rightPower != 0) {
             leftPower = rightPower;
+            copiedFromRight = true;
         } else {
             rightPower = leftPower;
         }
@@ -112,10 +117,20 @@ CharacterStats calcStats(const GameRules& rules, const CharacterState& character
     stats.magicBlock = magicBlock;
     stats.genjiGlove = (relic4 & FF6_RELIC4_GENJI_GLOVE) != 0;
     stats.relic1 = relic1;
+    stats.relic2 = relic2;
     stats.relic3 = relic3;
+    stats.relic5 = relic5;
     stats.relic4 = relic4;
     stats.handLongRange[0] = (rules.item(rightItem)[FF6_ITEM_PROP_WEAPON_FLAGS] & FF6_WEAPON_BACK_ROW) != 0;
     stats.handLongRange[1] = (rules.item(leftItem)[FF6_ITEM_PROP_WEAPON_FLAGS] & FF6_WEAPON_BACK_ROW) != 0;
+    for (int hand = 0; hand < 2; ++hand) {
+        const int source = copied ? (copiedFromRight ? rightItem : leftItem) : (hand == 0 ? rightItem : leftItem);
+        const uint8_t* weapon = rules.item(source);
+        if ((weapon[FF6_ITEM_PROP_TYPE] & FF6_ITEM_PROP_TYPE_MASK) != FF6_ITEM_TYPE_WEAPON) continue;
+        stats.handSpecial[hand] = weapon[FF6_ITEM_PROP_WEAPON_SPECIAL] >> 4;
+        const int cast = weapon[FF6_ITEM_PROP_SPELL_CAST];
+        if (cast & FF6_WEAPON_SPELL_RAND_CAST) stats.handSpell[hand] = cast & 0x3F;
+    }
     stats.equipAnything = (relic4 & FF6_RELIC4_EQUIP_ANY) != 0;
     stats.maxHp = boosted(character.maxHp, relic1 & FF6_RELIC1_HP_50, relic1 & FF6_RELIC1_HP_25, relic1 & FF6_RELIC1_HP_12, FF6_MAX_HP);
     stats.maxMp = boosted(character.maxMp, relic1 & FF6_RELIC1_MP_50, relic1 & FF6_RELIC1_MP_25, relic1 & FF6_RELIC1_MP_12, FF6_MAX_MP);

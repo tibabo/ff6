@@ -70,6 +70,9 @@ public:
     void call(uint32_t offset);
     void stop();
     bool running() const { return running_; }
+    // Where the event goes on, for the story that the world map runs and gives back.
+    uint32_t pc() const { return pc_; }
+    void setPc(uint32_t offset) { pc_ = offset; }
     // Call once per game frame.
     void update(EventHost& host);
 

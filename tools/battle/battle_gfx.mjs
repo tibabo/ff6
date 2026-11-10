@@ -1,6 +1,6 @@
 // src/gfx/monster_gfx.asm: the graphics of the monsters, which the battles draw as a grid of tiles chosen by a stencil.
 import { readBgGfx, readBgPal, readBgProp, readBgTiles } from './battle_bg.mjs';
-import { readCharActions, readCharGfx, readCharPal, readCharPalTable } from './battle_chars.mjs';
+import { readCharActions, readCharGfx, readCharPal, readCharPalTable, readStatusGfx, readStatusPal } from './battle_chars.mjs';
 
 export const BATTLE_GFX_MAGIC = 'FF6BGX01';
 
@@ -40,5 +40,5 @@ export function buildBattleGfx(rom, version) {
   const stencils = readStencils(rom);
   return Buffer.concat([header, readMonsterGfxProp(rom), readMonsterPal(rom), stencils.small, stencils.large,
     readMonsterGfx(rom), readBgProp(rom), readBgPal(rom), readBgGfx(rom), readBgTiles(rom), readCharGfx(rom),
-    readCharActions(rom), readCharPalTable(rom), readCharPal(rom)]);
+    readCharActions(rom), readCharPalTable(rom), readCharPal(rom), readStatusGfx(rom), readStatusPal(rom)]);
 }

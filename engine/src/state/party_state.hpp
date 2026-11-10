@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 
 #include "constants.hpp"
 
@@ -14,6 +15,7 @@ struct CharacterState {
     long experience = 0;
     int vigor = 0, speed = 0, stamina = 0, magicPower = 0;  // without the equipment
     std::array<int, FF6_MENU_EQUIP_SLOTS> equipment{};  // right hand to second relic; FF6_ITEM_EMPTY for nothing
+    unsigned status = 0;  // the statuses that outlast a battle (FF6_ST_PERSISTENT), $1614
     int esper = -1;  // the esper that it carries, which gives it the command Summon; -1 for none
 
     CharacterState() { equipment.fill(FF6_ITEM_EMPTY); }
@@ -33,6 +35,10 @@ struct PartyState {
     std::array<bool, FF6_ESPER_COUNT> espers{};  // the espers that the party has
     unsigned swordtechs = 0, blitzes = 0;  // a bit for each one that is known
     unsigned lores = 0;  // a bit for each lore that Strago knows
+    std::array<std::array<uint8_t, FF6_SPELL_COUNT>, FF6_CHAR_COUNT> spellLearn{};  // percent of each spell learned from espers and items
+    std::array<bool, FF6_RAGE_MONSTERS> rages{};  // the rages that Gau knows, a monster each
+    unsigned dances = 0;  // a bit for each dance that Mog knows
+    int morphCounter = 0;  // what Terra has gathered to stay morphed ($1cf6), 0 to 255
     std::array<bool, FF6_VELDT_BATTLE_COUNT> veldtBattles{};  // the battles that can come up on the veldt
     int veldtPointer = 0;  // where the search for the next one starts ($1fa5)
 };

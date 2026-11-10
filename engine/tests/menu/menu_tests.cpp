@@ -7,6 +7,7 @@
 #include "field/map.hpp"
 #include "menu/field_menu.hpp"
 #include "menu/menu_screen.hpp"
+#include "menu/colosseum_menu.hpp"
 #include "menu/shop_menu.hpp"
 #include "menu/window_style.hpp"
 
@@ -404,6 +405,40 @@ void testMenu() {
         field.update(cancel);
         field.update(cancel);
         CHECK(!field.inItems());
+    }
+
+    {  // the colosseum: the item to wager, then the character
+        ff6::MenuScreen screen(common, menu);
+        test::RecordingSound sound;
+        ff6::ColosseumMenu colosseum(screen, sound);
+        ff6::ColosseumHooks hooks;
+        hooks.items = [] { return std::vector<ff6::MenuItem>{{233, 3}, {234, 1}}; };
+        hooks.party = [] {
+            std::vector<ff6::MenuCharacter> party(2);
+            party[0].id = 0;
+            party[1].id = 5;
+            return party;
+        };
+        hooks.match = [](int item) {
+            ff6::ColosseumMatch match;
+            match.monster = item;
+            match.prize = 7;
+            return match;
+        };
+        colosseum.open(hooks);
+        colosseum.draw();
+        colosseum.update({ff6::Down, false});
+        colosseum.update({});
+        colosseum.update({FF6_NO_DIRECTION, true});
+        CHECK(colosseum.mode() == ff6::ColosseumMode::Challenger && colosseum.item() == 234 && colosseum.match().monster == 234);
+        colosseum.draw();
+        colosseum.update({ff6::Down, false});
+        colosseum.update({});
+        colosseum.update({FF6_NO_DIRECTION, true});
+        CHECK(colosseum.closed() && colosseum.chosen() && colosseum.character() == 5);
+        colosseum.open(hooks);
+        colosseum.update({FF6_NO_DIRECTION, false, true});
+        CHECK(colosseum.closed() && !colosseum.chosen());
     }
 
     {  // the shop: buy and sell, with the quantity limited by the gil and by 99

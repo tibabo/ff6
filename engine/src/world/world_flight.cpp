@@ -18,11 +18,13 @@ constexpr int kVramBackdropGfx = 0x5000;
 constexpr int kShadowFirstSprite = 2;
 constexpr int kShipFirstSprite = 20;
 constexpr int kParkedFirstSprite = 26;
+constexpr size_t kArrowFirstSprite = 40;
 constexpr int kTweenSteps = 32;
-constexpr int kMapPixels = 0x1000;
 constexpr int kDegrees = 360;
 constexpr int kFlightPivot = 0xD0;
 constexpr int kMaxSpeed = 0x800;
+constexpr int kChocoboSpeed = 0x100;
+constexpr unsigned kFlagNoInput = 0x01, kFlagNoTurn = 0x02, kFlagNoRotation = 0x08, kFlagNoHorizon = 0x10, kFlagMoveAngle = 0x20, kFlagNoAltitude = 0x40;  // $1e
 constexpr int kMaxRate = 0x200;
 constexpr int kMaxAltitude = 0x7E00;
 constexpr int kCannotLand = 0x0002;  // in the low byte of the properties of a tile
@@ -95,11 +97,16 @@ constexpr int kStrafeAngles[11] = {0, 270, 90, 0, 180, 225, 135, 0, 0, 315, 45};
 // The memory of the picture processor for the flights: the airship and its propellers, the sky of the second layer.
 void WorldScreen::loadFlightGraphics() {
     loadGraphics();
-    for (size_t i = 0; i + 1 < data_.backdropTiles.size(); i += 2) ppu_.vram[static_cast<size_t>(kVramBackdropMap) + i / 2] = static_cast<uint16_t>(data_.backdropTiles[i] | (data_.backdropTiles[i + 1] << 8));
-    for (size_t i = 0; i + 1 < data_.backdropGfx.size(); i += 2) ppu_.vram[static_cast<size_t>(kVramBackdropGfx) + i / 2] = static_cast<uint16_t>(data_.backdropGfx[i] | (data_.backdropGfx[i + 1] << 8));
+    if (vehicle_ == Vehicle::Chocobo) {  // the chocobo takes the place of the airship, and a sheet of sprites that goes with it
+        for (size_t i = 0; i + 1 < data_.chocoboGfx[0].size(); i += 2) ppu_.vram[0x6400 + i / 2] = static_cast<uint16_t>(data_.chocoboGfx[0][i] | (data_.chocoboGfx[0][i + 1] << 8));
+        for (size_t i = 0; i + 1 < data_.chocoboGfx[1].size(); i += 2) ppu_.vram[0x7400 + i / 2] = static_cast<uint16_t>(data_.chocoboGfx[1][i] | (data_.chocoboGfx[1][i + 1] << 8));
+    }
+    windowX_ = windowY_ = -1;
     ppu_.bgsc = {0x40, 0x45, 0};  // the first layer is the map and has nothing in the sky, the second is the sky: 64 x 32 tiles
     ppu_.nba12 = 0x55;
-    windowX_ = windowY_ = -1;
+    if (vehicle_ == Vehicle::Trench) return;  // under the water there is no sky
+    for (size_t i = 0; i + 1 < data_.backdropTiles.size(); i += 2) ppu_.vram[static_cast<size_t>(kVramBackdropMap) + i / 2] = static_cast<uint16_t>(data_.backdropTiles[i] | (data_.backdropTiles[i + 1] << 8));
+    for (size_t i = 0; i + 1 < data_.backdropGfx.size(); i += 2) ppu_.vram[static_cast<size_t>(kVramBackdropGfx) + i / 2] = static_cast<uint16_t>(data_.backdropGfx[i] | (data_.backdropGfx[i + 1] << 8));
 }
 
 void WorldScreen::hideSprites(size_t first, size_t count) {
@@ -163,13 +170,42 @@ void WorldScreen::drawAirship() {
     }
 }
 
+// UpdateSpriteAnim_02: the chocobo runs on the spot at the middle of the screen, faster as it goes faster.
+void WorldScreen::drawChocobo() {
+    const Flight& f = flight_;
+    const int turn = f.rate >= 0xAA ? 6 : f.rate < -0xAA ? 12 : 0;
+    drawAnimFrame(chocoboFrame_ + turn, 128, 184, kShipFirstSprite, ppu_.sprites.size() - kShipFirstSprite);
+    hideSprites(kShadowFirstSprite, 2);
+}
+
+// The arrows of the serpent trench blink at the side that the party has chosen: left or right.
+void WorldScreen::drawArrows() {
+    hideSprites(kArrowFirstSprite, ppu_.sprites.size() - kArrowFirstSprite);
+    if (!arrowsShown_) return;
+    const bool left = hooks_.bit && hooks_.bit(FF6_EVENT_BIT_TRENCH_LEFT);
+    const int frame = arrowCounter_ == 0 ? 0 : arrowCounter_ + (left ? 0x41 : 0x3E);
+    drawAnimFrame(frame, left ? 0x60 : 0x98, (0xFF - flight_.horizon) & 0xFF, kArrowFirstSprite, ppu_.sprites.size() - kArrowFirstSprite);
+}
+
+// B: the chocobo goes, and the party stands on the tile; on the veldt, the battles come back.
+void WorldScreen::dismount() {
+    const int prop = static_cast<int>(propAt(flight_.x >> 12, flight_.y >> 12));
+    if ((prop & kVeldtTile) && hooks_.setBit) hooks_.setBit(FF6_EVENT_BIT_VELDT, true);
+    flight_.speed = flight_.rate = 0;
+    mode_ = Mode::Dismount;
+    targetBrightness_ = 0;
+}
+
 // StartFlight: InitAirship, with the party over the tile that it was on.
 void WorldScreen::startFlight(int angle, int altitude, bool tween) {
     flight_ = Flight();
     flight_.angle = (angle % kDegrees) << 8;
+    flight_.moveAngle = angle % kDegrees;
     flight_.altitude = altitude;
-    flight_.x = pixelX() << 8;
-    flight_.y = pixelY() << 8;
+    // The chocobo stands in the middle of its tile, the airship and the boat at its corner.
+    const int center = vehicle_ == Vehicle::Chocobo ? 8 : 0;
+    flight_.x = (pixelX() + center) << 8;
+    flight_.y = (pixelY() + center) << 8;
     hidden_ = true;
     loadFlightGraphics();
     if (tween) {  // AirshipLiftOffAnim2
@@ -185,12 +221,40 @@ void WorldScreen::startFlight(int angle, int altitude, bool tween) {
     targetBrightness_ = 15;
     shipFrame_ = 0;
     shipCounter_ = shipRate_ = 1;
+    chocoboFrame_ = 0x25;
     buildWindow();
+    playVehicleMusic();
 }
 
 void WorldScreen::enterFlying(int world, int tileX, int tileY, int facing, const Lead& lead, int angle, int altitude) {
     enter(world, tileX, tileY, facing, lead);
+    vehicle_ = Vehicle::Airship;
     startFlight(angle, altitude, false);
+}
+
+// InitChoco: it starts facing north or south, whichever side the party looked at.
+void WorldScreen::enterRiding(int world, int tileX, int tileY, int facing, const Lead& lead) {
+    enter(world, tileX, tileY, facing, lead);
+    vehicle_ = Vehicle::Chocobo;
+    startFlight(facing >= 2 ? 180 : 0, 0, false);
+}
+
+// InitSnakeRoad.
+void WorldScreen::enterTrench(int tileX, int tileY, int facing, const Lead& lead) {
+    enter(FF6_TRENCH_MAP, tileX, tileY, facing, lead);
+    vehicle_ = Vehicle::Trench;
+    minimapShown_ = false;
+    startFlight(0, 0, false);
+}
+
+// The song of the vehicle, unless the story asked for the one that plays to go on.
+void WorldScreen::playVehicleMusic() {
+    if (hooks_.bit && hooks_.bit(FF6_EVENT_BIT_KEEP_SONG)) return;
+    int song = world_ == 0 ? FF6_SONG_BLACKJACK : FF6_SONG_SEARCHING_FOR_FRIENDS;
+    if (vehicle_ == Vehicle::Chocobo) song = FF6_SONG_TECHNO_DE_CHOCOBO;
+    if (vehicle_ == Vehicle::Trench) song = FF6_SONG_SERPENT_TRENCH;
+    if (vehicle_ != Vehicle::Trench && hooks_.bit && hooks_.bit(FF6_EVENT_BIT_VELDT)) song = FF6_SONG_VELDT;
+    sound_.command(FF6_SOUND_PLAY_SONG, static_cast<uint8_t>(song), FF6_SOUND_FULL_VOLUME);
 }
 
 // The party gets on board when it faces the airship that stands where it is: in the story it is a scene, else it takes off.
@@ -228,15 +292,22 @@ void WorldScreen::landAirship() {
 
 // The airship is on the ground: the party stands where it landed, the airship stays there.
 void WorldScreen::finishLanding() {
+    const bool airship = vehicle_ == Vehicle::Airship;
     mode_ = Mode::Walk;
+    vehicle_ = Vehicle::Airship;
     hidden_ = false;
-    airshipX_ = flight_.x >> 12;
-    airshipY_ = flight_.y >> 12;
-    dfx_ = static_cast<uint16_t>(airshipX_ << 8);
-    dfy_ = static_cast<uint16_t>(airshipY_ << 8);
+    const int tileX = flight_.x >> 12, tileY = flight_.y >> 12;
+    if (airship) {
+        airshipX_ = tileX;
+        airshipY_ = tileY;
+    }
+    dfx_ = static_cast<uint16_t>(tileX << 8);
+    dfy_ = static_cast<uint16_t>(tileY << 8);
     speedX_ = speedY_ = 0;
-    sectorX_ = airshipX_;
-    sectorY_ = airshipY_;
+    sectorX_ = tileX;
+    sectorY_ = tileY;
+    pivot_ = kFlightPivot;
+    playMusic();
     battleChecked_ = true;
     menuLocked_ = false;
     loadGraphics();
@@ -247,23 +318,84 @@ void WorldScreen::finishLanding() {
     targetBrightness_ = 15;
 }
 
+// UpdateVehiclePos: one frame of movement along a heading, at the speed of the vehicle.
+void WorldScreen::advance(int degrees) {
+    Flight& f = flight_;
+    const int base = degrees >= 180 ? degrees - 180 : degrees;
+    const int sine = sineMagnitude(base), cosine = sineMagnitude(base + 90);
+    const int north = (degrees < 90 || degrees >= 270) ? -1 : 1, west = degrees < 180 ? -1 : 1;
+    const int mask = mapSize() * 16 * 256 - 1;
+    f.y = (f.y + north * ((cosine * f.speed) >> 8)) & mask;
+    f.x = (f.x + west * ((sine * f.speed) >> 8)) & mask;
+}
+
+// The chocobo cannot go over the tiles that have the first bit of their properties.
+bool WorldScreen::chocoboBlocked() const { return (propAt(flight_.x >> 12, flight_.y >> 12) & 1) != 0; }
+
+// FixChocoboCollision: once the chocobo is back where it was, it tries to slide along the wall, to the side that the
+// heading is closer to first.
+void WorldScreen::fixChocoboCollision(int heading) {
+    if (heading % 90 == 0) return;
+    const int savedX = flight_.x, savedY = flight_.y;
+    const auto wrap = [](int degrees) { return ((degrees % kDegrees) + kDegrees) % kDegrees; };
+    const auto slide = [&](int degrees) {
+        advance(degrees);
+        if (!chocoboBlocked()) return true;
+        flight_.x = savedX;
+        flight_.y = savedY;
+        return false;
+    };
+    const bool plusFirst = heading < 45 || (heading >= 90 && heading < 135) || (heading >= 180 && heading < 225) || (heading >= 270 && heading < 315);
+    if (slide(wrap(heading + (plusFirst ? 90 : -90)))) return;
+    slide(wrap(heading + (plusFirst ? -90 : 90)));
+}
+
 // GetVehicleInput and MoveVehicle: the controls change the speed, the turn and the climb, which move the airship.
 void WorldScreen::moveFlight(const InputState& input) {
     Flight& f = flight_;
+    const bool chocobo = vehicle_ == Vehicle::Chocobo;
     if (input.start && !eventRunning_) minimapShown_ = !minimapShown_;
     autoHeld_ = 0;
     if (eventRunning_) execVehicleCmd();
     const unsigned held = eventRunning_ ? autoHeld_ : input.held;
-    const bool controlled = !f.landing && !entranceReady_;
-    if (controlled) {
+    if (arrowsInput_ && hooks_.setBit) {  // the choice at the forks of the trench
+        if (input.held & FF6_HELD_RIGHT) {
+            hooks_.setBit(FF6_EVENT_BIT_TRENCH_LEFT, false);
+        } else if (input.held & FF6_HELD_LEFT) {
+            hooks_.setBit(FF6_EVENT_BIT_TRENCH_LEFT, true);
+        }
+    }
+    if (arrowsShown_ && ++arrowTick_ >= 4) {
+        arrowTick_ = 0;
+        arrowCounter_ = (arrowCounter_ + 1) & 3;
+    }
+    const bool controlled = !f.landing && !entranceReady_ && !(f.flags & kFlagNoInput);
+    if (controlled && chocobo) {  // GetChocoInput: no climb, and it runs at the pace of a walk
+        if (held & FF6_HELD_RIGHT) {
+            if (f.rate - 0x20 >= -kMaxRate) f.rate -= 0x20;
+        } else if (held & FF6_HELD_LEFT) {
+            if (f.rate + 0x20 <= kMaxRate) f.rate += 0x20;
+        } else {
+            f.rate += f.rate > 0 ? -0x20 : f.rate < 0 ? 0x20 : 0;
+        }
+        if (held & (FF6_HELD_UP | FF6_HELD_A)) {
+            if (f.speed + 0x40 <= kChocoboSpeed) f.speed += 0x40;
+        } else {
+            f.speed = std::max(0, f.speed - 0x80);
+        }
+        if ((held & FF6_HELD_L) && (held & FF6_HELD_LEFT)) f.angle += 2 << 8;
+        if ((held & FF6_HELD_R) && (held & FF6_HELD_RIGHT)) f.angle -= 2 << 8;
+        if (!eventRunning_ && input.cancel) dismount();
+    } else if (controlled) {
         if (held & FF6_HELD_Y) {  // the Y button: the directions move the airship sideways while it slows down
             const unsigned directions = ((held & FF6_HELD_RIGHT) ? 1u : 0u) | ((held & FF6_HELD_LEFT) ? 2u : 0u) | ((held & FF6_HELD_DOWN) ? 4u : 0u) |
                                         ((held & FF6_HELD_UP) ? 8u : 0u);
             if (directions >= 1 && directions <= 10) {
                 const int heading = (kStrafeAngles[directions] + (f.angle >> 8)) % kDegrees;
                 const int part = heading >= 180 ? heading - 180 : heading;
-                f.y = (f.y + ((heading < 90 || heading >= 270) ? -1 : 1) * sineMagnitude(part + 90) * 2) & (kMapPixels * 256 - 1);
-                f.x = (f.x + (heading < 180 ? -1 : 1) * sineMagnitude(part) * 2) & (kMapPixels * 256 - 1);
+                const int mask = mapSize() * 16 * 256 - 1;
+                f.y = (f.y + ((heading < 90 || heading >= 270) ? -1 : 1) * sineMagnitude(part + 90) * 2) & mask;
+                f.x = (f.x + (heading < 180 ? -1 : 1) * sineMagnitude(part) * 2) & mask;
             }
             f.rate += f.rate > 0 ? -0x10 : f.rate < 0 ? 0x10 : 0;
             if (f.climb >= 0x10) f.climb -= 0x10;
@@ -295,15 +427,15 @@ void WorldScreen::moveFlight(const InputState& input) {
             }
             if ((held & FF6_HELD_L) && (held & FF6_HELD_LEFT)) f.angle += 2 << 8;
             if ((held & FF6_HELD_R) && (held & FF6_HELD_RIGHT)) f.angle -= 2 << 8;
-            if (!eventRunning_ && input.cancel) landAirship();
+            if (!eventRunning_ && input.cancel && vehicle_ == Vehicle::Airship) landAirship();
         }
-        if (!eventRunning_ && !f.landing && input.menu) {
+        if (!eventRunning_ && !f.landing && input.menu && vehicle_ == Vehicle::Airship) {
             deck_ = true;
             startEvent(kDeckEvent);
         }
     }
     // Doom Gaze: holding the engines over one of its places in the world of ruin brings the battle.
-    if (world_ == 1 && doomGaze_.active && (input.held & FF6_HELD_A) && !eventRunning_ && !f.landing && !doomGazeReady_) {
+    if (vehicle_ == Vehicle::Airship && world_ == 1 && doomGaze_.active && (input.held & FF6_HELD_A) && !eventRunning_ && !f.landing && !doomGazeReady_) {
         const int cellX = (f.x >> 14) & 0x3F, cellY = (f.y >> 14) & 0x3F;
         for (const std::array<int, 2>& cell : doomGaze_.cells) {
             if (cell[0] != cellX || cell[1] != cellY) continue;
@@ -312,20 +444,24 @@ void WorldScreen::moveFlight(const InputState& input) {
             break;
         }
     }
-    // The turn, then the movement along the heading.
-    f.angle += f.rate;
-    if (f.angle < 0) f.angle += kDegrees << 8;
-    if (f.angle >= kDegrees << 8) f.angle -= kDegrees << 8;
-    const int degrees = f.angle >> 8;
-    const int base = degrees >= 180 ? degrees - 180 : degrees;
-    const int sine = sineMagnitude(base), cosine = sineMagnitude(base + 90);
-    const int north = (degrees < 90 || degrees >= 270) ? -1 : 1, west = degrees < 180 ? -1 : 1;
-    f.y = (f.y + north * ((cosine * f.speed) >> 8)) & (kMapPixels * 256 - 1);
-    f.x = (f.x + west * ((sine * f.speed) >> 8)) & (kMapPixels * 256 - 1);
+    // The turn, then the movement along the heading, which a script can keep apart from the way that the camera looks.
+    if (!(f.flags & kFlagNoTurn)) {
+        f.angle += f.rate;
+        if (f.angle < 0) f.angle += kDegrees << 8;
+        if (f.angle >= kDegrees << 8) f.angle -= kDegrees << 8;
+    }
+    const int heading = (f.flags & kFlagMoveAngle) ? f.moveAngle : f.angle >> 8;
+    const int savedX = f.x, savedY = f.y;
+    advance(heading);
+    if (chocobo && chocoboBlocked()) {
+        f.x = savedX;
+        f.y = savedY;
+        fixChocoboCollision(heading);
+    }
     dfx_ = static_cast<uint16_t>((f.x >> 12) << 8);
     dfy_ = static_cast<uint16_t>((f.y >> 12) << 8);
     const int altitude = f.altitude + f.climb;
-    if (altitude >= 0 && altitude <= kMaxAltitude) f.altitude = altitude;
+    if (!(f.flags & kFlagNoAltitude) && altitude >= 0 && altitude <= kMaxAltitude) f.altitude = altitude;
     if (f.landing) {  // _ee1c56: the airship goes down at the pace of the climb, which it slows to a stop
         if (f.altitude + f.climb < 0 || f.altitude == 0) {
             f.climb = 0;
@@ -348,11 +484,15 @@ void WorldScreen::moveFlight(const InputState& input) {
     camera_.scale = f.altitude + 0x3000;
     camera_.divStart = (f.altitude >> 8) * 0x4F + 0x1800;
     camera_.divEnd = 0xFF00;
-    camera_.pivot = kFlightPivot;
-    const int climbPart = (((((absNot(f.climb) >> 3) * (f.speed >> 4)) >> 8) & 0xFF) * 0xF0) >> 8;
-    f.horizon = f.climb >= 0 ? 0x92 - climbPart : 0x92 + climbPart;
-    const int turnPart = (((((absNot(f.rate) >> 3) * (f.speed >> 4)) >> 8) & 0xFF) * 0xF0) >> 8;
-    f.rotation = f.rate >= 0 ? -turnPart : turnPart;
+    camera_.pivot = pivot_;
+    if (!(f.flags & kFlagNoHorizon)) {
+        const int climbPart = (((((absNot(f.climb) >> 3) * (f.speed >> 4)) >> 8) & 0xFF) * 0xF0) >> 8;
+        f.horizon = f.climb >= 0 ? 0x92 - climbPart : 0x92 + climbPart;
+    }
+    if (!(f.flags & kFlagNoRotation)) {
+        const int turnPart = (((((absNot(f.rate) >> 3) * (f.speed >> 4)) >> 8) & 0xFF) * 0xF0) >> 8;
+        f.rotation = f.rate >= 0 ? -turnPart : turnPart;
+    }
     camera_.lines = (absNot(f.rotation) >> 1) + f.horizon;
     if (mode_ == Mode::TweenOut) camera_.lines = camera_.horizon;
 }
@@ -393,10 +533,64 @@ void WorldScreen::execVehicleCmd() {
             continue;
         }
         switch (cmd) {
+            case 0xC0: flight_.flags = scriptByte(); break;
+            case 0xC1: flight_.angle = (scriptWord() % kDegrees) << 8; break;
+            case 0xC2: flight_.moveAngle = scriptWord() % kDegrees; break;
+            case 0xC3: flight_.rotation = static_cast<int16_t>(scriptWord()); break;
+            case 0xC4: flight_.horizon = scriptWord(); break;
+            case 0xC5: flight_.altitude = scriptWord(); break;
+            case 0xC6: flight_.speed = scriptWord(); break;
             case 0xC7:
                 airshipX_ = scriptByte();
                 airshipY_ = scriptByte();
                 break;
+            case 0xCA:
+            case 0xCB:
+            case 0xCC:
+            case 0xCD:
+            case 0xCE:
+            case 0xCF:  // a battle: the game picks the formation of the group, and goes on once it is over
+                scriptBattleGroup_ = scriptByte();
+                scriptBattleBackground_ = scriptByte();
+                scriptBattleReady_ = true;
+                return;
+            case 0xD0: vehicleHidden_ = false; break;
+            case 0xD1: vehicleHidden_ = true; break;
+            case 0xD4:
+            case 0xD5:
+            case 0xD6:
+            case 0xD7:
+            case 0xD8: targetBrightness_ = 15; break;
+            case 0xD9: targetBrightness_ = 0; break;
+            case 0xDA:
+                arrowsShown_ = arrowsInput_ = true;
+                arrowCounter_ = 0;
+                break;
+            case 0xDB: arrowsInput_ = false; break;
+            case 0xDC: arrowsShown_ = false; break;
+            case 0xDD:
+                minimapShown_ = false;
+                return;
+            case 0xDE:
+                pivotX_ = scriptByte();
+                pivot_ = scriptByte();
+                break;
+            case 0xDF: minimapShown_ = true; break;
+            case 0xE0: {  // pause: the first call reads the duration, then it counts frames
+                if (commandCount_ == 0) {
+                    commandCount_ = scriptByte();
+                    pauseCounter_ = 15;
+                    inCommand_ = true;
+                }
+                if (--pauseCounter_ == 0) {
+                    if (--commandCount_ == 0) {
+                        inCommand_ = false;
+                    } else {
+                        pauseCounter_ = 4;
+                    }
+                }
+                return;
+            }
             case 0xC8:
             case 0xC9: {
                 const int bit = scriptWord();
@@ -408,11 +602,13 @@ void WorldScreen::execVehicleCmd() {
             case 0xFE: break;
             case 0xFF:
                 eventRunning_ = false;
+                storyScript_ = false;
                 menuLocked_ = false;
                 return;
             default:
                 std::fprintf(stderr, "airship event: unsupported command 0x%02X, event ended\n", cmd);
                 eventRunning_ = false;
+                storyScript_ = false;
                 menuLocked_ = false;
                 return;
         }
@@ -425,6 +621,13 @@ void WorldScreen::tickFlight(const InputState& input) {
         if (brightness_ > 0) --brightness_;
         updateWater();
         if (brightness_ == 0) startFlight(0, 0, true);
+        return;
+    }
+    if (mode_ == Mode::Dismount) {
+        if (brightness_ > 0) --brightness_;
+        flight_.speed = 0;
+        if (brightness_ == 0) finishLanding();
+        updateWater();
         return;
     }
     if (mode_ == Mode::TweenIn || mode_ == Mode::TweenOut) {
@@ -449,13 +652,25 @@ void WorldScreen::tickFlight(const InputState& input) {
     } else {
         moveFlight(input);
     }
-    if (mode_ != Mode::Walk) {  // the propellers turn faster the faster the airship goes
+    if (mode_ != Mode::Walk && vehicle_ == Vehicle::Chocobo) {  // the steps of the chocobo are quicker the faster it goes
+        if (flight_.rate == 0 && flight_.speed == 0) {
+            chocoboFrame_ = 0x25;
+        } else {
+            const int period = 7 - (flight_.rate != 0 ? 0 : (flight_.speed * 4) >> 8);
+            if (--shipCounter_ < 0) {
+                if (++chocoboFrame_ >= 0x19) chocoboFrame_ = 0x13;
+                shipCounter_ = period;
+            }
+        }
+    } else if (mode_ != Mode::Walk) {  // the propellers turn faster the faster the airship goes
         const int rate = ((8 - (flight_.speed >> 8)) >> 1) + 1;
         if (--shipCounter_ <= 0) {
             --shipFrame_;
             shipCounter_ = rate;
         }
-        updateWater();
+    }
+    if (mode_ != Mode::Walk) {
+        if (vehicle_ != Vehicle::Trench) updateWater();
         buildWindow();
         if (brightness_ < targetBrightness_) ++brightness_;
         if (brightness_ > targetBrightness_) --brightness_;
@@ -507,12 +722,21 @@ void WorldScreen::renderFlight() {
         line.m7b = static_cast<int16_t>(sineSign * ((quotient * sine) >> 8));
         line.m7c = static_cast<int16_t>(-line.m7b);
     }
-    ppu_.m7x = static_cast<uint16_t>((flight_.x >> 8) & 0xFFF);
-    ppu_.m7y = static_cast<uint16_t>((flight_.y >> 8) & 0xFFF);
-    ppu_.m7hofs = static_cast<uint16_t>((ppu_.m7x - 0x80) & 0x1FFF);
+    ppu_.m7x = static_cast<uint16_t>((flight_.x >> 8) & (mapSize() * 16 - 1));
+    ppu_.m7y = static_cast<uint16_t>((flight_.y >> 8) & (mapSize() * 16 - 1));
+    ppu_.m7hofs = static_cast<uint16_t>((ppu_.m7x - pivotX_) & 0x1FFF);
     ppu_.m7vofs = static_cast<uint16_t>((ppu_.m7y - camera_.pivot) & 0x1FFF);
     drawMinimap();
-    drawAirship();
+    if (vehicle_ == Vehicle::Chocobo) {
+        drawChocobo();
+    } else {
+        drawAirship();
+        if (vehicleHidden_) {
+            hideSprites(kShadowFirstSprite, 2);
+            hideSprites(kShipFirstSprite, kArrowFirstSprite - kShipFirstSprite);
+        }
+    }
+    drawArrows();
     ppu_.tm = 0x13;
     ppu_.ts = 0x10;
 }
