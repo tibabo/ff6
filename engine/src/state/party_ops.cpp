@@ -384,6 +384,39 @@ bool equipItem(PartyState& party, const GameRules& rules, int character, int slo
     return true;
 }
 
+void optimizeEquipment(PartyState& party, const GameRules& rules, int character) {
+    if (!validSlot(character)) return;
+    for (int slot = FF6_EQUIP_RIGHT_HAND; slot <= FF6_EQUIP_BODY; ++slot) equipItem(party, rules, character, slot, FF6_ITEM_EMPTY);
+    static constexpr int kImpItems[] = FF6_IMP_ITEMS;
+    // The best of the items that fit a slot (type -1 for any): by attack or defense power, the first of the inventory among equals.
+    const auto best = [&](int slot, int type, bool twoHanded) {
+        std::vector<int> items;
+        for (const int item : equippableItems(party, rules, character, slot)) {
+            const bool imp = std::find(std::begin(kImpItems), std::end(kImpItems), item) != std::end(kImpItems);
+            if (!imp && (type < 0 || (rules.item(item)[FF6_ITEM_PROP_TYPE] & FF6_ITEM_PROP_TYPE_MASK) == type)) items.push_back(item);
+        }
+        std::stable_sort(items.begin(), items.end(), [&](int a, int b) {
+            return rules.item(a)[FF6_ITEM_PROP_ITEM_POWER] > rules.item(b)[FF6_ITEM_PROP_ITEM_POWER];
+        });
+        if (twoHanded) {
+            for (const int item : items) {
+                if (rules.item(item)[FF6_ITEM_PROP_WEAPON_FLAGS] & FF6_ITEM_TWO_HANDED) return item;
+            }
+        }
+        return items.empty() ? FF6_ITEM_EMPTY : items.front();
+    };
+    const CharacterStats stats = calcStats(rules, party.characters[static_cast<size_t>(character)]);
+    if (stats.relic4 & FF6_RELIC4_GAUNTLET) {
+        equipItem(party, rules, character, FF6_EQUIP_RIGHT_HAND, best(FF6_EQUIP_RIGHT_HAND, FF6_ITEM_TYPE_WEAPON, true));
+    } else {
+        equipItem(party, rules, character, FF6_EQUIP_RIGHT_HAND, best(FF6_EQUIP_RIGHT_HAND, FF6_ITEM_TYPE_WEAPON, false));
+        const bool second = stats.genjiGlove;
+        equipItem(party, rules, character, FF6_EQUIP_LEFT_HAND, best(FF6_EQUIP_LEFT_HAND, second ? FF6_ITEM_TYPE_WEAPON : FF6_ITEM_TYPE_SHIELD, false));
+    }
+    equipItem(party, rules, character, FF6_EQUIP_HEAD, best(FF6_EQUIP_HEAD, -1, false));
+    equipItem(party, rules, character, FF6_EQUIP_BODY, best(FF6_EQUIP_BODY, -1, false));
+}
+
 std::vector<int> shopStock(const GameRules& rules, int shop) {
     std::vector<int> stock;
     if (shop < 0 || shop >= FF6_SHOP_COUNT) return stock;

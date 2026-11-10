@@ -17,6 +17,13 @@ struct TitleData {
     std::array<std::vector<uint8_t>, FF6_TITLE_MAP_GFX_COUNT> mapGfx;
     std::vector<uint8_t> random;  // RNGTbl
     std::vector<uint8_t> sine;  // SineTbl8, signed bytes
+    std::vector<uint8_t> theEndGfx, theEndStars, theEndPal;  // the screen of THE END
+    std::vector<uint8_t> credits;
+    // The ground of the flights of the credits: graphics and maps, the palette and boxes tables, six palettes, the scripts of the camera,
+    // and the sine in 16 bits.
+    std::vector<uint8_t> flightGfx, flightTables, flightPalettes, flightScrolls, sine16, skyGfx, skyMap, skyPal;
+    std::vector<uint8_t> endingAnim, endingFont;  // the sprites of the big names (C2/8A70 on) and the font that they use
+    std::vector<uint8_t> ruinGfx, floatingGfx;  // the graphics of the cutscenes of the Ruin and of the floating continent
 
     // The byte, the word or the bytes at the address that the program has in the game ($7e5000 and up).
     uint8_t byteAt(uint32_t address) const;

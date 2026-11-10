@@ -145,6 +145,12 @@ void testSave() {
     CHECK(back.party.spellLearn[0][3] == 70 && back.party.spellLearn[0][4] == 0 && back.party.rages[0x19] && back.party.rages[255] &&
           !back.party.rages[0x1A] && back.party.dances == 0x81 && back.party.morphCounter == 123);
     CHECK(back.party.espers[3] && !back.party.espers[4] && back.party.swordtechs == 0x0F && back.party.blitzes == 0x81);
+    {  // the names that the player gave come back, with the quotes of the keyboard
+        ff6::SaveState named;
+        named.names = {"Terri", "", "A\"b'-"};
+        const ff6::SaveState again = ff6::saveFromJson(ff6::saveToJson(named));
+        CHECK(again.names == named.names);
+    }
     CHECK(!ff6::saveFromJson(ff6::saveToJson(ff6::SaveState())).hasParty);  // an older save has none
     {  // a save without config has the defaults of a new game
         std::string old = ff6::saveToJson(ff6::SaveState());

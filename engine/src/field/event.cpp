@@ -363,6 +363,33 @@ bool EventRunner::step(EventHost& host) {
         case FF6_EVENT_GIVE_SWDTECHS:
         case FF6_EVENT_GIVE_BUM_RUSH:
         case FF6_EVENT_MOVE_PARTY:
+        case FF6_EVENT_BG_COLORS:
+        case FF6_EVENT_BG_COLOR_RANGE:
+        case FF6_EVENT_OBJ_COLORS:
+        case FF6_EVENT_OBJ_COLOR_RANGE:
+        case FF6_EVENT_FIXED_OFF:
+        case FF6_EVENT_FLASH:
+        case FF6_EVENT_FIXED_ADD:
+        case FF6_EVENT_FIXED_SUB:
+        case FF6_EVENT_SHAKE:
+        case FF6_EVENT_SCROLL_BG1:
+        case FF6_EVENT_SCROLL_BG2:
+        case FF6_EVENT_SCROLL_BG3:
+        case FF6_EVENT_SCROLL_BG1_EXACT:
+        case FF6_EVENT_SCROLL_BG2_EXACT:
+        case FF6_EVENT_SCROLL_BG3_EXACT:
+        case FF6_EVENT_FILTER_COLORS:
+        case FF6_EVENT_MOSAIC:
+        case FF6_EVENT_FLASHLIGHT:
+        case FF6_EVENT_BG_ANIM_FRAME:
+        case FF6_EVENT_BG_ANIM_SPEED:
+        case FF6_EVENT_RESTORE_PARTY:
+        case FF6_EVENT_RESET_PARTY:
+        case FF6_EVENT_OPTIMIZE_EQUIP:
+        case FF6_EVENT_PORTRAIT:
+        case FF6_EVENT_CLEAR_OVERLAY:
+        case FF6_EVENT_PYRAMID_OFF:
+        case FF6_EVENT_PYRAMID_ON:
         case FF6_EVENT_SET_PARENT_MAP: {
             const size_t at = pc_ + 1;
             host.fieldCommand(op, at < script.size() ? &script[at] : nullptr,
@@ -371,6 +398,8 @@ bool EventRunner::step(EventHost& host) {
         }
         case FF6_EVENT_SHOP:  // the menu takes the screen, and the event goes on once it is closed
         case FF6_EVENT_COLOSSEUM_MENU:
+        case FF6_EVENT_NAME_MENU:
+        case FF6_EVENT_FINAL_ORDER:
         case FF6_EVENT_COLOSSEUM_BATTLE:
         case FF6_EVENT_PARTY_SELECT:
         case FF6_EVENT_BATTLE:  // so does the battle, and the title screen, the opening and the menu of saved games
@@ -378,6 +407,11 @@ bool EventRunner::step(EventHost& host) {
         case FF6_EVENT_RANDOM_BATTLE:
         case FF6_EVENT_BOX_BATTLE:
         case FF6_EVENT_TRAIN:
+        case FF6_EVENT_FLOATING_CONTINENT:
+        case FF6_EVENT_WORLD_OF_RUIN:
+        case FF6_EVENT_ENDING:
+        case FF6_EVENT_THE_END:
+        case FF6_EVENT_ENDING_AIRSHIP:
         case FF6_EVENT_TITLE_SCREEN:
         case FF6_EVENT_OPENING:
         case FF6_EVENT_LOAD_MENU:

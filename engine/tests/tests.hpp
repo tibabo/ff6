@@ -20,6 +20,7 @@ void testColor();
 void testSpriteData();
 void testAnim();
 void testScroll();
+void testStage();
 void testPlayer();
 void testObj();
 void testObjScript();

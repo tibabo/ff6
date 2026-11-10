@@ -13,6 +13,7 @@ struct ColorMath {
     uint8_t designation = 0;  // layers that get the color math; FF6_COLOR_MATH_HALF and _SUBTRACT select the operation
     uint8_t mainScreen = FF6_SCREEN_BG1;  // layers shown on the main screen (the first layer is always on)
     uint8_t subScreen = 0;  // layers that the main screen is blended with
+    uint8_t fixed[FF6_COLOR_CHANNELS] = {0, 0, 0};  // what a main pixel is blended with where the sub screen is empty
 };
 
 ColorMath decodeColorMath(const std::array<uint8_t, FF6_COLOR_MATH_BYTES>& bytes);

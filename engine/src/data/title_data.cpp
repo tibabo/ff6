@@ -31,6 +31,22 @@ TitleData loadTitleData(const std::string& packDir) {
     for (auto& gfx : data.mapGfx) gfx = reader.bytes(FF6_TITLE_MAP_GFX_BYTES);
     data.random = reader.bytes(FF6_TITLE_TABLE_BYTES);
     data.sine = reader.bytes(FF6_TITLE_TABLE_BYTES);
+    data.ruinGfx = reader.bytes(FF6_TITLE_RUIN_GFX_BYTES);
+    data.floatingGfx = reader.bytes(FF6_TITLE_FLOATING_GFX_BYTES);
+    data.theEndGfx = reader.bytes(FF6_TITLE_THE_END_GFX_BYTES);
+    data.theEndStars = reader.bytes(FF6_TITLE_THE_END_STARS_BYTES);
+    data.theEndPal = reader.bytes(FF6_TITLE_THE_END_PAL_BYTES);
+    data.credits = reader.bytes(FF6_TITLE_CREDITS_BYTES);
+    data.flightGfx = reader.bytes(FF6_TITLE_FLIGHT_GFX_BYTES);
+    data.flightTables = reader.bytes(FF6_TITLE_FLIGHT_TABLES_BYTES);
+    data.flightPalettes = reader.bytes(FF6_TITLE_FLIGHT_PALETTES_BYTES);
+    data.flightScrolls = reader.bytes(FF6_TITLE_FLIGHT_SCROLLS_BYTES);
+    data.sine16 = reader.bytes(FF6_TITLE_SINE_16_BYTES);
+    data.skyGfx = reader.bytes(FF6_TITLE_SKY_GFX_BYTES);
+    data.skyMap = reader.bytes(FF6_TITLE_SKY_MAP_BYTES);
+    data.skyPal = reader.bytes(FF6_TITLE_SKY_PAL_BYTES);
+    data.endingAnim = reader.bytes(FF6_TITLE_ENDING_ANIM_BYTES);
+    data.endingFont = reader.bytes(FF6_TITLE_ENDING_FONT_BYTES);
     if (reader.remaining() != 0) throw std::runtime_error("title data has trailing bytes");
     return data;
 }

@@ -16,6 +16,8 @@ void Scroll::init() {
     y_.fill(0);
     autoX_.fill(0);
     autoY_.fill(0);
+    driftX_.fill(0);
+    driftY_.fill(0);
 }
 
 void Scroll::update(const MapData& map, int playerPixelX, int playerPixelY) {
@@ -27,8 +29,8 @@ void Scroll::update(const MapData& map, int playerPixelX, int playerPixelY) {
                              (map.limitHeight() - FF6_CAMERA_MAX_MARGIN) * FF6_TILE_SIZE);
     }
     const int party = FF6_CAMERA_PARTY_TILE * FF6_TILE_SIZE;
-    x_[FF6_BG1] = cameraX - party;
-    y_[FF6_BG1] = cameraY - party;
+    x_[FF6_BG1] = cameraX - party + driftX_[FF6_BG1] / FF6_SCROLL_UNITS_PER_PIXEL;
+    y_[FF6_BG1] = cameraY - party + driftY_[FF6_BG1] / FF6_SCROLL_UNITS_PER_PIXEL;
     // bg2 and bg3: offset + multiplier * camera + automatic speed (see InitScrollPos and CalcScrollPos).
     for (int layer = FF6_BG2; layer <= FF6_BG3; ++layer) {
         const size_t slot = static_cast<size_t>(layer - FF6_BG2);
@@ -40,6 +42,10 @@ void Scroll::update(const MapData& map, int playerPixelX, int playerPixelY) {
             multX * (x_[FF6_BG1] + party) / FF6_PARALLAX_ONE - party + autoX_[slot] / FF6_SCROLL_UNITS_PER_PIXEL;
         y_[static_cast<size_t>(layer)] = map.layerOffsetY(layer) * FF6_TILE_SIZE +
             multY * (y_[FF6_BG1] + party) / FF6_PARALLAX_ONE - party + autoY_[slot] / FF6_SCROLL_UNITS_PER_PIXEL;
+    }
+    for (size_t layer = FF6_BG2; layer < driftX_.size(); ++layer) {
+        x_[layer] += driftX_[layer] / FF6_SCROLL_UNITS_PER_PIXEL;
+        y_[layer] += driftY_[layer] / FF6_SCROLL_UNITS_PER_PIXEL;
     }
 }
 

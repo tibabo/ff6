@@ -17,6 +17,7 @@ void composeScreen(const ColorMath& math, const uint8_t backdrop[FF6_COLOR_CHANN
     const size_t pixelCount = static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT;
     const bool subtract = (math.designation & FF6_COLOR_MATH_SUBTRACT) != 0;
     const bool half = (math.designation & FF6_COLOR_MATH_HALF) != 0;
+    const bool fixedColor = math.fixed[0] || math.fixed[1] || math.fixed[2];
     for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
         const size_t offset = pixel * FF6_BYTES_PER_PIXEL;
         const uint8_t* main = backdrop;
@@ -31,11 +32,12 @@ void composeScreen(const ColorMath& math, const uint8_t backdrop[FF6_COLOR_CHANN
             }
             if (layers[i].bit & math.subScreen) sub = color;
         }
-        const bool blend = (math.designation & source) != 0 && sub != nullptr;
+        const bool blend = (math.designation & source) != 0 && (sub != nullptr || fixedColor);
         for (int channel = 0; channel < FF6_COLOR_CHANNELS; ++channel) {
             int value = main[channel];
             if (blend) {
-                value = subtract ? value - sub[channel] : value + sub[channel];
+                const int other = sub ? sub[channel] : math.fixed[channel];
+                value = subtract ? value - other : value + other;
                 if (half) value >>= 1;
                 value = std::max(0, std::min(FF6_COLOR_MAX, value));
             }

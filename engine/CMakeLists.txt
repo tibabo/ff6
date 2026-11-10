@@ -18,6 +18,12 @@ add_library(ff6_core STATIC
   src/data/world_data.cpp
   src/cutscene/core.cpp
   src/cutscene/opening.cpp
+  src/cutscene/ending_card.cpp
+  src/cutscene/ending_names.cpp
+  src/cutscene/flight.cpp
+  src/cutscene/floating.cpp
+  src/cutscene/ruin.cpp
+  src/cutscene/the_end.cpp
   src/cutscene/ppu.cpp
   src/cutscene/title.cpp
   src/cutscene/train.cpp
@@ -33,6 +39,7 @@ add_library(ff6_core STATIC
   src/field/obj_script.cpp
   src/field/player.cpp
   src/field/scroll.cpp
+  src/field/stage.cpp
   src/field/sprite_data.cpp
   src/field/text.cpp
   src/field/window.cpp
@@ -40,9 +47,11 @@ add_library(ff6_core STATIC
   src/menu/colosseum_menu.cpp
   src/menu/config_menu.cpp
   src/menu/field_menu.cpp
+  src/menu/final_order_menu.cpp
   src/menu/item_menu.cpp
   src/menu/load_menu.cpp
   src/menu/menu_data.cpp
+  src/menu/name_menu.cpp
   src/menu/menu_screen.cpp
   src/menu/party_menu.cpp
   src/menu/shop_menu.cpp
@@ -116,6 +125,7 @@ if(BUILD_TESTING)
     tests/field/obj_party_tests.cpp
     tests/field/player_tests.cpp
     tests/field/scroll_tests.cpp
+    tests/field/stage_tests.cpp
     tests/field/sprite_data_tests.cpp
     tests/field/text_tests.cpp
     tests/menu/menu_tests.cpp

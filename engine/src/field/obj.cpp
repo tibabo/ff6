@@ -48,6 +48,8 @@ NpcProp decodeNpcProp(const uint8_t* bytes) {
     prop.noTurn = (bytes[8] & FF6_NPC_NO_TURN) != 0;
     prop.animFrame = bytes[8] >> FF6_NPC_ANIM_FRAME_SHIFT;
     prop.vehicle = (bytes[7] & FF6_VEHICLE_NPC_MASK) >> FF6_VEHICLE_SHIFT;
+    prop.vram = bytes[0] & 0x7F;
+    prop.large = (bytes[8] & FF6_NPC_NO_TURN) != 0;
     return prop;
 }
 

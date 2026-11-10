@@ -8,6 +8,8 @@
 #include "menu/field_menu.hpp"
 #include "menu/menu_screen.hpp"
 #include "menu/colosseum_menu.hpp"
+#include "menu/name_menu.hpp"
+#include "menu/final_order_menu.hpp"
 #include "menu/shop_menu.hpp"
 #include "menu/window_style.hpp"
 
@@ -54,6 +56,17 @@ void testMenu() {
     CHECK(ff6::menuCode('A') == 0x80 && ff6::menuCode('Z') == 0x99 && ff6::menuCode('a') == 0x9A && ff6::menuCode('z') == 0xB3);
     CHECK(ff6::menuCode('0') == 0xB4 && ff6::menuCode('9') == 0xBD && ff6::menuCode('!') == 0xBE && ff6::menuCode('/') == 0xC0);
     CHECK(ff6::menuCode(' ') == FF6_MENU_CODE_SPACE && ff6::menuCode('\n') == FF6_MENU_CODE_SPACE);
+
+    {  // a portrait is an image of its own, transparent where the color is 0
+        ff6::MenuData withPortrait = menu;
+        withPortrait.portraitTiles[static_cast<size_t>(FF6_MENU_PORTRAIT_TILES) * FF6_MENU_CURSOR_TILE_BYTES] = 0x80;  // the first pixel of portrait 1, color 1
+        withPortrait.portraitPalettes[FF6_MENU_PORTRAIT_COLORS + 1] = 0x001F;
+        const std::vector<uint8_t> image = ff6::buildPortraitImage(withPortrait, 1);
+        CHECK(image.size() == static_cast<size_t>(FF6_MENU_PORTRAIT_SIZE) * FF6_MENU_PORTRAIT_SIZE * FF6_BYTES_PER_PIXEL);
+        CHECK(image[0] == 255 && image[1] == 0 && image[2] == 0 && image[FF6_ALPHA_OFFSET] == 255);
+        CHECK(image[FF6_BYTES_PER_PIXEL + FF6_ALPHA_OFFSET] == 0);
+        CHECK(ff6::buildPortraitImage(withPortrait, -1).size() == image.size());
+    }
 
     {  // text is drawn tile by tile, with the colors of its palette, which are not the same on the two backgrounds
         ff6::MenuScreen screen(common, menu);
@@ -418,6 +431,51 @@ void testMenu() {
         field.update(cancel);
         field.update(cancel);
         CHECK(!field.inItems());
+    }
+
+    {  // the name of a character: letters from the grid, one taken away, and Start
+        ff6::MenuScreen screen(common, menu);
+        test::RecordingSound sound;
+        ff6::NameMenu names(screen, sound);
+        names.open(0, "Terra");
+        names.draw();
+        names.update({ff6::Right, false});
+        names.update({});
+        names.update({FF6_NO_DIRECTION, true});  // "B" goes after "Terra" (a sixth letter)
+        CHECK(names.name() == "TerraB");
+        names.update({FF6_NO_DIRECTION, true});  // no seventh
+        CHECK(names.name() == "TerraB");
+        names.update({FF6_NO_DIRECTION, false, true});
+        CHECK(names.name() == "Terra");
+        ff6::InputState start;
+        start.start = true;
+        names.update(start);
+        CHECK(names.closed());
+        ff6::setCharacterName(0, "Teri");
+        CHECK(ff6::characterName(0) == "Teri");
+        ff6::setCharacterName(0, "");
+        CHECK(ff6::characterName(0) == "Terra");
+    }
+
+    {  // the order for the end: two chosen, one taken back, then Start puts the others after
+        ff6::MenuScreen screen(common, menu);
+        test::RecordingSound sound;
+        ff6::FinalOrderMenu order(screen, sound);
+        order.open({0, 1, 2, 3});
+        order.draw();
+        order.update({ff6::Down, false});
+        order.update({});
+        order.update({FF6_NO_DIRECTION, true});  // the second one first
+        order.update({ff6::Up, false});
+        order.update({});
+        order.update({FF6_NO_DIRECTION, true});  // then the first one
+        CHECK(order.order() == std::vector<int>({1, 0}));
+        order.update({FF6_NO_DIRECTION, false, true});
+        CHECK(order.order() == std::vector<int>({1}));
+        ff6::InputState start;
+        start.start = true;
+        order.update(start);
+        CHECK(order.closed() && order.order() == std::vector<int>({1, 0, 2, 3}));
     }
 
     {  // the colosseum: the item to wager, then the character

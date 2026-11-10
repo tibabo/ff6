@@ -174,6 +174,16 @@ void testEquipping(const ff6::GameRules& rules) {
     CHECK(party.characters[0].hp > party.characters[0].maxHp);
     CHECK(ff6::equipItem(party, rules, 0, FF6_EQUIP_FIRST_RELIC, FF6_ITEM_EMPTY));
     CHECK(party.characters[0].hp == party.characters[0].maxHp);
+
+    // Optimum: the best of what the character can wear goes on, and what it wore goes back.
+    ff6::PartyState optimum;
+    ff6::setCharacterProperties(optimum, rules, 0, 0, 0);
+    for (const int item : {0, 1, 0x69, 0x5A}) ff6::giveItem(optimum, item);  // dirk, knife, leather hat, and the buckler
+    ff6::optimizeEquipment(optimum, rules, 0);
+    const auto power = [&](int item) { return rules.item(item)[FF6_ITEM_PROP_ITEM_POWER]; };
+    const int weapon = optimum.characters[0].equipment[FF6_EQUIP_RIGHT_HAND];
+    CHECK(weapon != FF6_ITEM_EMPTY && (weapon == 0 || weapon == 1) && power(weapon) >= power(weapon == 0 ? 1 : 0));
+    CHECK(optimum.characters[0].equipment[FF6_EQUIP_HEAD] == 0x69);
 }
 
 void testItemUse(const ff6::GameRules& rules) {

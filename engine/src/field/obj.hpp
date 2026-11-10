@@ -25,6 +25,8 @@ struct NpcProp {
     bool noTurn = false;  // does not turn toward the party when activated
     int animFrame = 0;
     int vehicle = 0;  // FF6_VEHICLE_MASK bits: none, chocobo, magitek or raft
+    int vram = 0;  // special npcs: where their graphics go, in steps of two tiles
+    bool large = false;  // special npcs: 32x32 pixels instead of 16x16
 };
 NpcProp decodeNpcProp(const uint8_t* bytes);
 

@@ -7,6 +7,7 @@ namespace ff6 {
 
 void MapAnim::init() {
     bgCounters_.fill(0);
+    overridden_.fill(false);
     bg3Counter_ = 0;
 }
 
@@ -15,7 +16,7 @@ void MapAnim::update(MapData& map, uint32_t frame) {
     if (map.bgAnimEnabled()) {
         for (size_t tile = 0; tile < FF6_BG_ANIM_TILES; ++tile) {
             const BgAnimTile& anim = map.bgAnim[tile];
-            bgCounters_[tile] = static_cast<uint16_t>(bgCounters_[tile] + anim.speed);
+            bgCounters_[tile] = static_cast<uint16_t>(bgCounters_[tile] + (overridden_[tile] ? speeds_[tile] : anim.speed));
             const size_t index = (bgCounters_[tile] >> FF6_BG_ANIM_FRAME_SHIFT) % FF6_BG_ANIM_FRAMES;
             std::memcpy(&map.vram[FF6_BG_ANIM_VRAM + tile * FF6_BG_ANIM_TILE_BYTES], anim.frames[index].data(),
                         FF6_BG_ANIM_TILE_BYTES);

@@ -9,7 +9,23 @@
 
 namespace ff6 {
 
+namespace {
+
+std::array<std::string, FF6_CHAR_COUNT>& customNames() {
+    static std::array<std::string, FF6_CHAR_COUNT> names;
+    return names;
+}
+
+}  // namespace
+
+void setCharacterName(int id, const std::string& name) {
+    if (id >= 0 && id < FF6_CHAR_COUNT) customNames()[static_cast<size_t>(id)] = name;
+}
+
+std::string customCharacterName(int id) { return id >= 0 && id < FF6_CHAR_COUNT ? customNames()[static_cast<size_t>(id)] : std::string(); }
+
 std::string characterName(int id) {
+    if (!customCharacterName(id).empty()) return customCharacterName(id);
     static const char* const kNames[] = FF6_CHARACTER_NAMES;
     std::string name = id >= 0 && id < FF6_CHAR_COUNT ? kNames[id] : "";
     if (!name.empty()) name[0] = static_cast<char>(name[0] - 'a' + 'A');
@@ -135,25 +151,38 @@ void MenuScreen::menuSprite(int x, int y, int tile, bool icon) {
     }
 }
 
-void MenuScreen::portrait(int x, int y, int portrait) {
-    if (portrait < 0 || portrait >= FF6_MENU_PORTRAIT_COUNT) return;
+std::vector<uint8_t> buildPortraitImage(const MenuData& menu, int portrait) {
+    std::vector<uint8_t> image(static_cast<size_t>(FF6_MENU_PORTRAIT_SIZE) * FF6_MENU_PORTRAIT_SIZE * FF6_BYTES_PER_PIXEL, 0);
+    if (portrait < 0 || portrait >= FF6_MENU_PORTRAIT_COUNT) return image;
     static constexpr int kOrder[FF6_MENU_PORTRAIT_TILES] = FF6_MENU_PORTRAIT_TILE_ORDER;
     uint8_t colors[FF6_MENU_PORTRAIT_COLORS][FF6_BYTES_PER_PIXEL];
     for (size_t i = 0; i < FF6_MENU_PORTRAIT_COLORS; ++i) {
-        colorToRgba(menu_.portraitPalettes[static_cast<size_t>(portrait) * FF6_MENU_PORTRAIT_COLORS + i], colors[i]);
+        colorToRgba(menu.portraitPalettes[static_cast<size_t>(portrait) * FF6_MENU_PORTRAIT_COLORS + i], colors[i]);
     }
     const size_t base = static_cast<size_t>(portrait) * FF6_MENU_PORTRAIT_TILES * FF6_MENU_CURSOR_TILE_BYTES;
     for (int cell = 0; cell < FF6_MENU_PORTRAIT_TILES; ++cell) {
-        const uint8_t* tile = &menu_.portraitTiles[base + static_cast<size_t>(kOrder[cell]) * FF6_MENU_CURSOR_TILE_BYTES];
+        const uint8_t* tile = &menu.portraitTiles[base + static_cast<size_t>(kOrder[cell]) * FF6_MENU_CURSOR_TILE_BYTES];
         for (int row = 0; row < FF6_MENU_TILE_SIZE; ++row) {
             for (int column = 0; column < FF6_MENU_TILE_SIZE; ++column) {
                 const int shift = FF6_MENU_TILE_SIZE - 1 - column;
                 const int value = ((tile[row * 2] >> shift) & 1) | (((tile[row * 2 + 1] >> shift) & 1) << 1) |
                                   (((tile[row * 2 + 16] >> shift) & 1) << 2) | (((tile[row * 2 + 17] >> shift) & 1) << 3);
                 if (value == 0) continue;
-                blendPixel(pixels_, x + (cell % FF6_MENU_PORTRAIT_COLUMNS) * FF6_MENU_TILE_SIZE + column,
-                           y + (cell / FF6_MENU_PORTRAIT_COLUMNS) * FF6_MENU_TILE_SIZE + row, colors[value]);
+                const int x = (cell % FF6_MENU_PORTRAIT_COLUMNS) * FF6_MENU_TILE_SIZE + column;
+                const int y = (cell / FF6_MENU_PORTRAIT_COLUMNS) * FF6_MENU_TILE_SIZE + row;
+                std::copy_n(colors[value], FF6_BYTES_PER_PIXEL, &image[(static_cast<size_t>(y) * FF6_MENU_PORTRAIT_SIZE + x) * FF6_BYTES_PER_PIXEL]);
             }
+        }
+    }
+    return image;
+}
+
+void MenuScreen::portrait(int x, int y, int portrait) {
+    const std::vector<uint8_t> image = buildPortraitImage(menu_, portrait);
+    for (int row = 0; row < FF6_MENU_PORTRAIT_SIZE; ++row) {
+        for (int column = 0; column < FF6_MENU_PORTRAIT_SIZE; ++column) {
+            const uint8_t* pixel = &image[(static_cast<size_t>(row) * FF6_MENU_PORTRAIT_SIZE + column) * FF6_BYTES_PER_PIXEL];
+            if (pixel[FF6_ALPHA_OFFSET] != 0) blendPixel(pixels_, x + column, y + row, pixel);
         }
     }
 }

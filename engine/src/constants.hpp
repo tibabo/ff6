@@ -126,7 +126,7 @@
 #define FF6_PACK_MAGIC_SIZE 8
 #define FF6_COMMON_MAGIC "FF6COMMN"
 #define FF6_MAP_MAGIC "FF6MAP01"
-#define FF6_PACK_VERSION 25
+#define FF6_PACK_VERSION 31
 #define FF6_COMMON_FILE "common.ff6data"
 #define FF6_MAP_DIR "maps"
 #define FF6_MAP_FILE_EXTENSION ".ff6map"
@@ -335,6 +335,49 @@
 #define FF6_EVENT_SET_PALETTE 0x60
 #define FF6_EVENT_PARTY_MAP 0x79
 #define FF6_EVENT_MOVE_PARTY 0x7E
+#define FF6_EVENT_BG_COLORS 0x50  // the commands that stage a scene (src/field/event.asm)
+#define FF6_EVENT_BG_COLORS_FIRST 4  // the colors that 0x50 changes: not the font and the window of the dialogs
+#define FF6_EVENT_BG_COLORS_LAST 120
+#define FF6_EVENT_BG_COLOR_RANGE 0x51
+#define FF6_EVENT_OBJ_COLORS 0x52
+#define FF6_EVENT_OBJ_COLOR_RANGE 0x53
+#define FF6_EVENT_FIXED_OFF 0x54
+#define FF6_EVENT_FLASH 0x55
+#define FF6_EVENT_FIXED_ADD 0x56
+#define FF6_EVENT_FIXED_SUB 0x57
+#define FF6_EVENT_SHAKE 0x58
+#define FF6_EVENT_SCROLL_BG1 0x5D
+#define FF6_EVENT_SCROLL_BG2 0x5E
+#define FF6_EVENT_SCROLL_BG3 0x5F
+#define FF6_EVENT_FILTER_COLORS 0x61
+#define FF6_EVENT_MOSAIC 0x62
+#define FF6_EVENT_FLASHLIGHT 0x63
+#define FF6_EVENT_BG_ANIM_FRAME 0x64
+#define FF6_EVENT_BG_ANIM_SPEED 0x65
+#define FF6_EVENT_SCROLL_BG1_EXACT 0x70  // the same speeds, a negative one rounded the other way
+#define FF6_EVENT_SCROLL_BG2_EXACT 0x71
+#define FF6_EVENT_SCROLL_BG3_EXACT 0x72
+#define FF6_EVENT_RESTORE_PARTY 0x7B
+#define FF6_EVENT_RESET_PARTY 0x82
+#define FF6_EVENT_OPTIMIZE_EQUIP 0x9C
+#define FF6_EVENT_PORTRAIT 0xE7  // the character whose portrait the special npcs without graphics show
+#define FF6_EVENT_BIT_PORTRAIT 0x1C6  // the portrait is set up when the map starts
+#define FF6_SPECIAL_SPRITE_Y_OFFSET 8  // a special npc has its upper left corner this far above its position
+#define FF6_MAP_SPRITE_NOTHING 101  // the graphics of the special npcs that show the portrait
+#define FF6_EVENT_FINAL_ORDER 0x9D
+#define FF6_EVENT_CLEAR_OVERLAY 0xA2
+#define FF6_FINAL_ORDER_CHARACTERS 14  // the characters before Banon
+#define FF6_EVENT_NAME_MENU 0x98  // the player names a character
+#define FF6_EVENT_PYRAMID_OFF 0xA6  // the spinning triangle of light around an object
+#define FF6_EVENT_PYRAMID_ON 0xA7
+#define FF6_EVENT_FLOATING_CONTINENT 0xA8  // the cinematics of the story
+#define FF6_EVENT_WORLD_OF_RUIN 0xAD
+#define FF6_EVENT_ENDING 0xBA
+#define FF6_EVENT_THE_END 0xBB
+#define FF6_EVENT_ENDING_AIRSHIP 0xBF
+#define FF6_CARD_FRAMES 300  // what a cinematic that is not ported lasts: a dark screen, then the story goes on
+#define FF6_CARD_MIN_FRAMES 60  // the button does not end a card before this
+#define FF6_FLASHLIGHT_LIFT 8  // the light is a little above the feet of the lead
 #define FF6_EVENT_OBJ_PASS_OFF 0x36
 #define FF6_EVENT_OBJ_GFX 0x37
 #define FF6_EVENT_OBJ_CREATE 0x3D
@@ -1027,6 +1070,7 @@
 #define FF6_CMD_LEAP 17
 #define FF6_CMD_DANCE 19
 #define FF6_ITEM_MITHRIL_PIKE 29  // the spears: a jump with one of them does three times the damage
+#define FF6_IMP_ITEMS {102, 130, 36, 101, 131, 155, 28, 18, 22, 51}  // cursed shield, thornlet, imp halberd, tortoise shield, titanium, imp armor, atma weapon, drainer, soul sabre, heal rod: not the best, only worn by imps
 #define FF6_ITEM_IMPERIAL 37  // the first weapon after them
 #define FF6_CMD_COUNT 32
 #define FF6_BATTLE_DEFEND_HALF 2  // a defending character takes half the damage of a physical attack
@@ -1700,6 +1744,22 @@
 #define FF6_TITLE_MAGIC "FF6TITL1"
 #define FF6_TITLE_PROGRAM_BYTES 11363  // the program of the cutscenes, which runs from $7e5000
 #define FF6_TITLE_PROGRAM_BASE 0x5000
+#define FF6_TITLE_RUIN_GFX_BYTES 9408  // the planet that breaks up, and the continent that rises: decompressed
+#define FF6_TITLE_FLOATING_GFX_BYTES 2304
+#define FF6_TITLE_THE_END_GFX_BYTES 0xD00  // the letters of the end, then the stars, then the palettes (0x100 bytes each)
+#define FF6_TITLE_THE_END_STARS_BYTES 0x100
+#define FF6_TITLE_THE_END_PAL_BYTES 0x100
+#define FF6_TITLE_FLIGHT_GFX_BYTES 0x74FB  // the ground of the flights of the credits, decompressed
+#define FF6_TITLE_FLIGHT_TABLES_BYTES 0x1C0
+#define FF6_TITLE_FLIGHT_PALETTES_BYTES 0xC0
+#define FF6_TITLE_FLIGHT_SCROLLS_BYTES 0xD5
+#define FF6_TITLE_SINE_16_BYTES 0x200
+#define FF6_TITLE_SKY_GFX_BYTES 0x1A20  // the sky of the flights: characters, map and palette
+#define FF6_TITLE_SKY_MAP_BYTES 0x400
+#define FF6_TITLE_SKY_PAL_BYTES 0x20
+#define FF6_TITLE_ENDING_ANIM_BYTES 0xE24  // the sprites of the big names of the ending, as the ROM has them (C2/8A70)
+#define FF6_TITLE_ENDING_FONT_BYTES 0x8A0
+#define FF6_TITLE_CREDITS_BYTES 0xDC6  // the pages of the credits and their words, as the ROM has them (C2/9894)
 #define FF6_TITLE_GFX_BYTES 44712  // what the game decompresses to $7f0000
 #define FF6_TITLE_MAP_GFX_COUNT 4  // the sealed gate, then three graphics of Narshe
 #define FF6_TITLE_MAP_GFX_BYTES 0x2000

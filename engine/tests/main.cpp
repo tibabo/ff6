@@ -23,6 +23,7 @@ int main() {
     testSpriteData();
     testAnim();
     testScroll();
+    testStage();
     testPlayer();
     testObj();
     testObjScript();

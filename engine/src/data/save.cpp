@@ -88,6 +88,11 @@ std::string saveToJson(const SaveState& state) {
     out << ",\n  \"airship\": {\"x\": " << state.airshipX << ", \"y\": " << state.airshipY << ", \"doomGaze\": " << state.doomGazeCounter << "}";
     out << ",\n  \"config\": ";
     appendList(out, std::vector<int>(state.config.begin(), state.config.end()));
+    if (!state.names.empty()) {
+        out << ",\n  \"names\": [";
+        for (size_t i = 0; i < state.names.size(); ++i) out << (i ? ", " : "") << jsonQuote(state.names[i]);
+        out << "]";
+    }
     if (state.hasColors) {
         out << ",\n  \"fontColor\": " << state.fontColor << ",\n  \"windowColors\": ";
         appendList(out, std::vector<int>(state.windowColors.begin(), state.windowColors.end()));
@@ -219,6 +224,13 @@ SaveState saveFromJson(const std::string& text) {
         if (colors.size() != state.windowColors.size()) throw std::runtime_error("save: there must be 56 window colors");
         std::copy(colors.begin(), colors.end(), state.windowColors.begin());
         state.hasColors = true;
+    }
+    if (const Json* names = root.find("names")) {
+        if (names->type != Json::Type::Array) throw std::runtime_error("save: bad names");
+        for (const Json& item : names->items) {
+            if (item.type != Json::Type::String) throw std::runtime_error("save: bad name");
+            state.names.push_back(item.text.substr(0, 6));
+        }
     }
     if (root.find("stats")) {
         PartyState& party = state.party;

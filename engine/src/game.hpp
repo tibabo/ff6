@@ -26,10 +26,13 @@
 #include "field/obj.hpp"
 #include "field/player.hpp"
 #include "field/scroll.hpp"
+#include "field/stage.hpp"
 #include "field/text.hpp"
 #include "input.hpp"
 #include "menu/field_menu.hpp"
 #include "menu/colosseum_menu.hpp"
+#include "menu/name_menu.hpp"
+#include "menu/final_order_menu.hpp"
 #include "menu/load_menu.hpp"
 #include "menu/party_menu.hpp"
 #include "menu/shop_menu.hpp"
@@ -37,6 +40,10 @@
 #include "sound.hpp"
 #include "state/party_ops.hpp"
 #include "cutscene/train.hpp"
+#include "cutscene/ending_card.hpp"
+#include "cutscene/floating.hpp"
+#include "cutscene/ruin.hpp"
+#include "cutscene/the_end.hpp"
 #include "world/world_screen.hpp"
 
 namespace ff6 {
@@ -137,6 +144,10 @@ private:
     void updateBrightness();
     void applyBrightness(std::vector<uint8_t>& image) const;
     int stripFor(int gfx, int palette);
+    bool stageCommand(uint8_t op, const uint8_t* bytes, size_t size);
+    void spritePaletteChanged();
+    void resetSpriteColors();
+    void applyStage(std::vector<uint8_t>& image);
     const std::vector<uint8_t>& vehicleSprite(int palette, uint16_t word);
     int stripOf(Npc& object);
     void startEvent(uint32_t offset);
@@ -158,6 +169,7 @@ private:
     void applyPartySelection();
     void startColosseumBattle();
     void startCutscene(bool opening);
+    void startCard(const std::vector<std::string>& lines, int frames, bool toTitle);
     void endCutscene();
     void openLoadMenu();
     void restoreSavedGame();
@@ -176,6 +188,7 @@ private:
     void composeDialogue();
     void composeTimer(int frames);
     void drawSprites(bool above);
+    void drawPortrait(uint8_t* screen, bool above);
 
     CommonData common_;
     std::string packDir_;
@@ -196,6 +209,11 @@ private:
     bool shopOpen_ = false;  // the menu that is open is a shop, not the field menu
     ColosseumMenu colosseum_;
     bool colosseumOpen_ = false;  // or the menu of the colosseum
+    NameMenu nameMenu_;
+    bool nameOpen_ = false;  // or the one that names a character
+    FinalOrderMenu finalOrderMenu_;
+    bool finalOrderOpen_ = false;  // or the one that orders them for the end of the game
+    std::vector<int> finalOrder_;  // what it chose: the characters that fill the empty places of a party
     int colosseumItem_ = FF6_ITEM_EMPTY, colosseumFighter_ = -1;  // what the menu chose
     ColosseumMatch colosseumMatch_;
     Battle::Colosseum colosseumBout_;  // set while the bout is fought
@@ -220,6 +238,7 @@ private:
     std::function<std::unique_ptr<SaveState>()> loadHandler_;
     TitleData titleData_;
     bool titleDataLoaded_ = false;
+    bool cardToTitle_ = false;  // the end of the game: the title screen comes back after the card
     TrainRide* train_ = nullptr;  // the cutscene, when it is the ride of the magitek train
     bool trainBattle_ = false;  // the battle that is open comes from the ride
     std::unique_ptr<Cutscene> cutscene_;  // the title screen or the opening, which take the screen like the menu does
@@ -267,6 +286,14 @@ private:
     std::array<std::array<std::vector<uint8_t>, 2>, FF6_LAYER_COUNT> layerPixels_;  // [layer][low, high priority]
     std::array<std::vector<uint8_t>, 2> spritePixels_;  // below and above the high priority layers
     std::vector<std::vector<uint8_t>> strips_;  // RGBA sprite strips
+    FieldStage stage_;  // what the events that stage a scene ask of the screen
+    std::array<uint16_t, FF6_MAP_PALETTE_COLORS> bgBase_{};  // the colors of the map before the events changed them
+    std::array<uint16_t, FF6_MAP_PALETTE_COLORS> spriteBase_{}, spriteColors_{};  // the eight palettes of the sprites, as they are and as they were
+    bool spriteModified_ = false;
+    int defaultParty_ = 1;  // the party that 0x7B gives back
+    int portrait_ = -1;  // the character of 0xE7
+    int portraitShown_ = -1;
+    std::vector<uint8_t> portraitImage_;
     std::map<std::pair<int, int>, int> stripIndex_;  // by graphics and palette
     std::map<std::pair<int, int>, std::vector<uint8_t>> vehicleSprites_;  // by palette and word of the tile
     std::vector<uint8_t> screenPixels_, overlayPixels_;

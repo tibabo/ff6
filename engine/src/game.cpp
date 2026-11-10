@@ -31,21 +31,21 @@ struct Drawable {
 Game::Game(CommonData common, std::string packDir, uint32_t startMap, Renderer& renderer, Sound& sound,
            const std::vector<int>& party)
     : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
-      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), colosseum_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
+      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), colosseum_(menuScreen_, sound_), nameMenu_(menuScreen_, sound_), finalOrderMenu_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
       loadMenu_(menuScreen_, sound_), partyMenu_(menuScreen_, sound_) {
     initialize(startMap, party, nullptr);
 }
 
 Game::Game(CommonData common, std::string packDir, const SaveState& save, Renderer& renderer, Sound& sound)
     : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
-      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), colosseum_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
+      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), colosseum_(menuScreen_, sound_), nameMenu_(menuScreen_, sound_), finalOrderMenu_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
       loadMenu_(menuScreen_, sound_), partyMenu_(menuScreen_, sound_) {
     initialize(static_cast<uint32_t>(save.map), {}, &save);
 }
 
 Game::Game(CommonData common, std::string packDir, NewGame, Renderer& renderer, Sound& sound)
     : common_(std::move(common)), packDir_(std::move(packDir)), renderer_(renderer), sound_(sound), event_(common_, bits_),
-      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), colosseum_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
+      menuScreen_(common_, menuData_), menu_(menuScreen_, sound_), shop_(menuScreen_, sound_), colosseum_(menuScreen_, sound_), nameMenu_(menuScreen_, sound_), finalOrderMenu_(menuScreen_, sound_), battleScreen_(menuScreen_, sound_),
       loadMenu_(menuScreen_, sound_), partyMenu_(menuScreen_, sound_) {
     initialize(FF6_GAME_START_MAP, {}, nullptr, true);
 }
@@ -58,8 +58,10 @@ void Game::initialize(uint32_t startMap, const std::vector<int>& party, const Sa
     battleGfx_ = loadBattleGfx(packDir_);
     battleScreen_.setGfx(&battleGfx_);
     attackAnim_ = loadAttackAnim(packDir_);
+    resetSpriteColors();
     battleScreen_.setAttackAnim(&attackAnim_);
     for (int i = 0; i < FF6_CHAR_COUNT; ++i) setCharacterProperties(state_, rules_, i, i, 0);
+    for (int i = 0; i < FF6_CHAR_COUNT; ++i) setCharacterName(i, std::string());
     config_.windowColors = menuData_.windowColors;
     const size_t screenBytes = static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL;
     for (auto& layer : layerPixels_) {
@@ -89,6 +91,7 @@ void Game::restore(const SaveState& save) {
     bits_.load(save.eventBits, save.battleFlags);
     bits_.loadVariables(save.variables, save.timers);
     if (save.hasParty) state_ = save.party;
+    for (int i = 0; i < FF6_CHAR_COUNT; ++i) setCharacterName(i, static_cast<size_t>(i) < save.names.size() ? save.names[static_cast<size_t>(i)] : std::string());
     std::array<Npc, FF6_CHAR_COUNT>& characters = objects_.characters();
     for (size_t i = 0; i < characters.size(); ++i) {
         const SaveCharacter& saved = save.characters[i];
@@ -107,6 +110,7 @@ void Game::restore(const SaveState& save) {
     }
     objects_.restoreParty(save.activeParty);
     for (size_t i = 0; i < spritePalette_.size(); ++i) spritePalette_[i] = save.spritePalettes[i];
+    resetSpriteColors();
     doomGazeCounter_ = save.doomGazeCounter;
     airshipX_ = save.airshipX;
     airshipY_ = save.airshipY;
@@ -166,6 +170,7 @@ SaveState Game::saveState() const {
     save.hasParty = true;
     save.party = state_;
     save.fontColor = config_.fontColor;
+    for (int i = 0; i < FF6_CHAR_COUNT; ++i) save.names.push_back(customCharacterName(i));
     for (size_t i = 0; i < save.windowColors.size(); ++i) {
         save.windowColors[i] = config_.windowColors[i / FF6_MENU_WINDOW_COLORS][i % FF6_MENU_WINDOW_COLORS];
     }
@@ -191,9 +196,39 @@ const std::vector<uint8_t>& Game::vehicleSprite(int palette, uint16_t word) {
 int Game::stripOf(Npc& object) {
     if (object.strip < 0) {
         const size_t slot = static_cast<size_t>(object.prop.palette) & (FF6_SPRITE_PALETTE_SLOTS - 1);
-        object.strip = stripFor(object.prop.gfx, spritePalette_[slot]);
+        if (spriteModified_) {  // an event changed the colors: the strip is built from them
+            const std::pair<int, int> key(object.prop.gfx, -1 - static_cast<int>(slot));
+            auto found = stripIndex_.find(key);
+            if (found == stripIndex_.end()) {
+                strips_.push_back(buildSpriteStripColors(common_, object.prop.gfx, &spriteColors_[slot * FF6_SPRITE_PAL_COLORS]));
+                found = stripIndex_.emplace(key, static_cast<int>(strips_.size() - 1)).first;
+            }
+            object.strip = found->second;
+        } else {
+            object.strip = stripFor(object.prop.gfx, spritePalette_[slot]);
+        }
     }
     return object.strip;
+}
+
+// The eight palettes of the sprites are the ones of the slots, as they were before the events changed their colors.
+void Game::resetSpriteColors() {
+    for (size_t slot = 0; slot < spritePalette_.size(); ++slot) {
+        for (size_t c = 0; c < FF6_SPRITE_PAL_COLORS; ++c) {
+            const size_t palette = static_cast<size_t>(spritePalette_[slot]);
+            spriteBase_[slot * FF6_SPRITE_PAL_COLORS + c] =
+                palette < common_.spritePaletteCount() ? common_.spritePalettes[palette * FF6_SPRITE_PAL_COLORS + c] : 0;
+        }
+    }
+    spriteColors_ = spriteBase_;
+    spritePaletteChanged();
+}
+
+void Game::spritePaletteChanged() {
+    spriteModified_ = spriteColors_ != spriteBase_;
+    strips_.clear();
+    stripIndex_.clear();
+    invalidateStrips();
 }
 
 void Game::invalidateStrips() {
@@ -247,6 +282,8 @@ bool Game::loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEven
     worldScript_ = false;
     const bool inEvent = event_.running();  // an event that loads a map goes on once it is loaded
     map_ = std::move(next);
+    bgBase_ = map_.palette;
+    stage_.reset();
     showOpenedTreasures();
     anim_.init();
     scroll_.init();
@@ -517,6 +554,52 @@ void Game::finishFade() {
 }
 
 // The brightness of the PPU: the colors are scaled by the level plus one, out of 16.
+// What the events do to the whole picture: the mosaic makes blocks of the pixel at their corner, and the flashlight leaves
+// only a circle around the lead (outside the window of the PPU, the screen is black).
+void Game::applyStage(std::vector<uint8_t>& image) {
+    const int block = stage_.mosaicSize();
+    if (block > 1) {
+        for (int y = 0; y < FF6_SCREEN_HEIGHT; ++y) {
+            for (int x = 0; x < FF6_SCREEN_WIDTH; ++x) {
+                const size_t from = (static_cast<size_t>(y / block * block) * FF6_SCREEN_WIDTH + static_cast<size_t>(x / block * block)) * FF6_BYTES_PER_PIXEL;
+                const size_t to = (static_cast<size_t>(y) * FF6_SCREEN_WIDTH + static_cast<size_t>(x)) * FF6_BYTES_PER_PIXEL;
+                for (size_t c = 0; c < FF6_BYTES_PER_PIXEL; ++c) image[to + c] = image[from + c];
+            }
+        }
+    }
+    if (stage_.pyramidOn()) {
+        const Npc* object = objects_.object(stage_.pyramidObject());
+        int corners[3][2];
+        stage_.pyramidCorners(corners);
+        const int centerX = object ? object->pixelX() - scroll_.x(FF6_BG1) : FF6_SCREEN_WIDTH / 2;
+        const int centerY = object ? object->pixelY() - scroll_.y(FF6_BG1) : FF6_SCREEN_HEIGHT / 2;
+        const auto side = [&](int a, int b, int x, int y) {
+            return (corners[b][0] - corners[a][0]) * (y - centerY - corners[a][1]) - (corners[b][1] - corners[a][1]) * (x - centerX - corners[a][0]);
+        };
+        for (int y = 0; y < FF6_SCREEN_HEIGHT; ++y) {
+            for (int x = 0; x < FF6_SCREEN_WIDTH; ++x) {
+                const int a = side(0, 1, x, y), b = side(1, 2, x, y), c = side(2, 0, x, y);
+                if ((a >= 0 && b >= 0 && c >= 0) || (a <= 0 && b <= 0 && c <= 0)) continue;
+                uint8_t* pixel = &image[(static_cast<size_t>(y) * FF6_SCREEN_WIDTH + static_cast<size_t>(x)) * FF6_BYTES_PER_PIXEL];
+                pixel[0] = pixel[1] = pixel[2] = 0;
+            }
+        }
+    }
+    const int radius = stage_.flashlightRadius();
+    if (radius >= 0) {
+        const Npc* lead = objects_.lead();
+        const int centerX = (lead ? lead->pixelX() : player_.pixelX()) - scroll_.x(FF6_BG1);
+        const int centerY = (lead ? lead->pixelY() : player_.pixelY()) - scroll_.y(FF6_BG1) - FF6_FLASHLIGHT_LIFT;
+        for (int y = 0; y < FF6_SCREEN_HEIGHT; ++y) {
+            for (int x = 0; x < FF6_SCREEN_WIDTH; ++x) {
+                if ((x - centerX) * (x - centerX) + (y - centerY) * (y - centerY) <= radius * radius) continue;
+                uint8_t* pixel = &image[(static_cast<size_t>(y) * FF6_SCREEN_WIDTH + static_cast<size_t>(x)) * FF6_BYTES_PER_PIXEL];
+                pixel[0] = pixel[1] = pixel[2] = 0;
+            }
+        }
+    }
+}
+
 void Game::applyBrightness(std::vector<uint8_t>& image) const {
     const int level = brightness_ >> FF6_BRIGHTNESS_SHIFT;
     if (level >= FF6_BRIGHTNESS_LEVELS - 1) return;
@@ -571,7 +654,70 @@ unsigned Game::characterMask(uint8_t op) const {
     return mask;
 }
 
+// The commands that stage a scene: the colors of the map and of the sprites, the fixed color, the shake, the scrolls, the
+// filter, the mosaic, the flashlight, the animated tiles and the default party. False for the other commands.
+bool Game::stageCommand(uint8_t op, const uint8_t* bytes, size_t size) {
+    const auto byteAt = [&](size_t n) { return n < size ? static_cast<int>(bytes[n]) : 0; };
+    // A scroll speed is a byte of 1/16 pixel for each frame; the commands 0x5D to 0x5F round a negative one the other way.
+    const auto speed = [&](int value, bool exact) {
+        const int signedValue = static_cast<int8_t>(value);
+        return exact || signedValue >= 0 ? signedValue * 16 : (signedValue + 1) * 16 - 1;
+    };
+    switch (op) {
+        case FF6_EVENT_BG_COLORS: modifyColors(byteAt(0), map_.palette.data(), bgBase_.data(), FF6_EVENT_BG_COLORS_FIRST, FF6_EVENT_BG_COLORS_LAST); return true;
+        case FF6_EVENT_BG_COLOR_RANGE: modifyColors(byteAt(0), map_.palette.data(), bgBase_.data(), byteAt(1), byteAt(2) + 1); return true;
+        case FF6_EVENT_OBJ_COLORS:
+        case FF6_EVENT_OBJ_COLOR_RANGE:
+            if (op == FF6_EVENT_OBJ_COLORS) {
+                modifyColors(byteAt(0), spriteColors_.data(), spriteBase_.data(), 0, FF6_MAP_PALETTE_COLORS);
+            } else {
+                modifyColors(byteAt(0), spriteColors_.data(), spriteBase_.data(), byteAt(1), byteAt(2) + 1);
+            }
+            spritePaletteChanged();
+            return true;
+        case FF6_EVENT_FIXED_OFF: stage_.fixedOff(); return true;
+        case FF6_EVENT_FLASH: stage_.flash(byteAt(0)); return true;
+        case FF6_EVENT_FIXED_ADD: stage_.fixedColor(false, byteAt(0)); return true;
+        case FF6_EVENT_FIXED_SUB: stage_.fixedColor(true, byteAt(0)); return true;
+        case FF6_EVENT_SHAKE: stage_.shake(byteAt(0)); return true;
+        case FF6_EVENT_SCROLL_BG1:
+        case FF6_EVENT_SCROLL_BG2:
+        case FF6_EVENT_SCROLL_BG3:
+        case FF6_EVENT_SCROLL_BG1_EXACT:
+        case FF6_EVENT_SCROLL_BG2_EXACT:
+        case FF6_EVENT_SCROLL_BG3_EXACT: {
+            const bool exact = op >= FF6_EVENT_SCROLL_BG1_EXACT;
+            const int layer = (exact ? op - FF6_EVENT_SCROLL_BG1_EXACT : op - FF6_EVENT_SCROLL_BG1);
+            stage_.scrollSpeed(layer, speed(byteAt(0), exact), speed(byteAt(1), exact));
+            return true;
+        }
+        case FF6_EVENT_FILTER_COLORS: {  // the colors of a range become the gray of the colors that the filter keeps
+            static constexpr uint16_t kFilters[8] = {0x0000, 0x001F, 0x03E0, 0x03FF, 0x7C00, 0x7C1F, 0x7FE0, 0x7FFF};
+            for (int i = byteAt(1); i <= byteAt(2) && i < FF6_MAP_PALETTE_COLORS; ++i) {
+                const uint16_t color = bgBase_[static_cast<size_t>(i)];
+                const int gray = ((color & 31) + ((color >> 5) & 31) + ((color >> 10) & 31)) / 3;
+                map_.palette[static_cast<size_t>(i)] = static_cast<uint16_t>((gray | (gray << 5) | (gray << 10)) & kFilters[byteAt(0) & 7]);
+            }
+            return true;
+        }
+        case FF6_EVENT_MOSAIC: stage_.mosaic(byteAt(0)); return true;
+        case FF6_EVENT_FLASHLIGHT: stage_.flashlight(byteAt(0)); return true;
+        case FF6_EVENT_BG_ANIM_FRAME: anim_.setFrame(static_cast<size_t>(byteAt(0)), byteAt(1)); return true;
+        case FF6_EVENT_BG_ANIM_SPEED: anim_.setSpeed(static_cast<size_t>(byteAt(0)), static_cast<int8_t>(byteAt(1)) * 16); return true;
+        case FF6_EVENT_PYRAMID_OFF: stage_.pyramid(false, 0); return true;
+        case FF6_EVENT_PYRAMID_ON: stage_.pyramid(true, byteAt(0)); return true;
+        case FF6_EVENT_OPTIMIZE_EQUIP: optimizeEquipment(state_, rules_, byteAt(0)); return true;
+        case FF6_EVENT_PORTRAIT: portrait_ = byteAt(0); return true;
+        case FF6_EVENT_RESET_PARTY: defaultParty_ = 1; return true;
+        case FF6_EVENT_RESTORE_PARTY:
+            if (objects_.activeParty() != defaultParty_) objects_.activateParty(defaultParty_);
+            return true;
+        default: return false;
+    }
+}
+
 void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
+    if (stageCommand(op, bytes, size)) return;
     const auto byteAt = [&](size_t n) { return n < size ? static_cast<int>(bytes[n]) : 0; };
     switch (op) {
         case FF6_EVENT_LOCK_SCREEN:
@@ -604,7 +750,7 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
         case FF6_EVENT_SET_PALETTE:
             if (static_cast<size_t>(byteAt(1)) < common_.spritePaletteCount()) {
                 spritePalette_[static_cast<size_t>(byteAt(0)) & (FF6_SPRITE_PALETTE_SLOTS - 1)] = byteAt(1);
-                invalidateStrips();
+                resetSpriteColors();
             }
             break;
         case FF6_EVENT_PARTY_MAP:
@@ -663,6 +809,24 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
         case FF6_EVENT_COLOSSEUM_MENU:
             openColosseum();
             break;
+        case FF6_EVENT_FINAL_ORDER: {  // the twelve that can fight at the end are the ones that have joined and are in a party
+            std::vector<int> characters;
+            for (int i = 0; i < FF6_FINAL_ORDER_CHARACTERS; ++i) {
+                const Npc& character = objects_.characters()[static_cast<size_t>(i)];
+                if (bits_.get(FF6_EVENT_BIT_CHAR_AVAILABLE + i) && character.party != 0) characters.push_back(i);
+            }
+            finalOrderMenu_.open(characters);
+            finalOrderOpen_ = true;
+            menuPhase_ = MenuPhase::FadingOut;
+            startFade(false, FF6_BRIGHTNESS_STEP);
+            break;
+        }
+        case FF6_EVENT_NAME_MENU:
+            nameMenu_.open(byteAt(0), characterName(byteAt(0)));
+            nameOpen_ = true;
+            menuPhase_ = MenuPhase::FadingOut;
+            startFade(false, FF6_BRIGHTNESS_STEP);
+            break;
         case FF6_EVENT_COLOSSEUM_BATTLE:
             startColosseumBattle();
             break;
@@ -716,6 +880,55 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
             break;
         case FF6_EVENT_TRAIN:
             startTrain();
+            break;
+        case FF6_EVENT_WORLD_OF_RUIN:
+            if (!titleDataLoaded_) {
+                titleData_ = loadTitleData(packDir_);
+                titleDataLoaded_ = true;
+            }
+            cutscene_ = std::make_unique<RuinScene>(titleData_, sound_);
+            brightness_ = 0;
+            fade_ = 0;
+            fadeInPending_ = false;
+            break;
+        case FF6_EVENT_FLOATING_CONTINENT:
+            if (!titleDataLoaded_) {
+                titleData_ = loadTitleData(packDir_);
+                titleDataLoaded_ = true;
+            }
+            cutscene_ = std::make_unique<FloatingScene>(titleData_, sound_);
+            brightness_ = 0;
+            fade_ = 0;
+            fadeInPending_ = false;
+            break;
+        case FF6_EVENT_ENDING: {
+            std::vector<std::string> names;
+            for (const int id : endingCharacters(byteAt(0))) names.push_back(characterName(id));
+            const int frames = endingFrames(byteAt(0));
+            if (!titleDataLoaded_) {
+                titleData_ = loadTitleData(packDir_);
+                titleDataLoaded_ = true;
+            }
+            cutscene_ = std::make_unique<EndingCard>(menuScreen_, names, frames > 0 ? frames : FF6_CARD_FRAMES,
+                                                     creditsPages(creditsScene(byteAt(0)), titleData_.credits),
+                                                     endingCharacters(byteAt(0)), makeFlightBackdrop(titleData_, byteAt(0)), makeEndingNames(titleData_, byteAt(0)));
+            brightness_ = 0;
+            fade_ = 0;
+            fadeInPending_ = false;
+            break;
+        }
+        case FF6_EVENT_ENDING_AIRSHIP:
+            break;  // the loop of the Falcon scene ends at its first frame, with the screen blank
+        case FF6_EVENT_THE_END:
+            if (!titleDataLoaded_) {
+                titleData_ = loadTitleData(packDir_);
+                titleDataLoaded_ = true;
+            }
+            cutscene_ = std::make_unique<TheEndScene>(titleData_, sound_);
+            cardToTitle_ = true;
+            brightness_ = 0;
+            fade_ = 0;
+            fadeInPending_ = false;
             break;
         case FF6_EVENT_LOAD_MENU:
             openLoadMenu();
@@ -928,6 +1141,8 @@ void Game::tick(const InputState& input) {
         return;
     }
     anim_.update(map_, frame_);
+    stage_.update(static_cast<int>(frame_));
+    for (int layer = 0; layer < FF6_LAYER_COUNT; ++layer) scroll_.drift(layer, stage_.speedX(layer), stage_.speedY(layer));
     updateBrightness();
     bits_.tickTimers(false);
     if (leaving_ && !fading()) {
@@ -1169,6 +1384,46 @@ void Game::startCutscene(bool opening) {
     fadeInPending_ = false;
 }
 
+namespace {
+
+// A cinematic that is not ported takes the screen for a while: black, with the lines of text that it has, until its time is up
+// or (with no time) the button is pressed.
+class CardScene : public Cutscene {
+public:
+    CardScene(MenuScreen& screen, std::vector<std::string> lines, int frames) : screen_(screen), lines_(std::move(lines)), frames_(frames) {}
+    void tick(const InputState& input) override {
+        ++frame_;
+        if (frames_ > 0 ? frame_ >= frames_ : (input.confirm && frame_ >= FF6_CARD_MIN_FRAMES)) done_ = true;
+    }
+    void draw(uint8_t* rgba) override {
+        screen_.clear();
+        screen_.setTextOffset(0);
+        int row = FF6_SCREEN_HEIGHT / FF6_MENU_TILE_SIZE / 2 - static_cast<int>(lines_.size()) / 2;
+        for (const std::string& line : lines_) {
+            screen_.text((FF6_SCREEN_WIDTH / FF6_MENU_TILE_SIZE - static_cast<int>(line.size())) / 2, row++, line, MenuScreen::Layer::Bg3, FF6_MENU_BG3_DEFAULT);
+        }
+        std::copy(screen_.pixels().begin(), screen_.pixels().end(), rgba);
+    }
+    bool finished() const override { return done_; }
+    bool skipped() const override { return false; }
+
+private:
+    MenuScreen& screen_;
+    std::vector<std::string> lines_;
+    int frames_ = 0, frame_ = 0;
+    bool done_ = false;
+};
+
+}  // namespace
+
+void Game::startCard(const std::vector<std::string>& lines, int frames, bool toTitle) {
+    cutscene_ = std::make_unique<CardScene>(menuScreen_, lines, frames);
+    cardToTitle_ = toTitle;
+    brightness_ = 0;
+    fade_ = 0;
+    fadeInPending_ = false;
+}
+
 // Event command 0xAE: the ride of the magitek train, which asks for battles and gives the event back when the way ends.
 void Game::startTrain() {
     if (!worldDataLoaded_) {
@@ -1193,6 +1448,11 @@ void Game::endCutscene() {
     cutscene_.reset();
     brightness_ = 0;
     fade_ = 0;
+    if (cardToTitle_) {  // after "THE END" the game starts over
+        cardToTitle_ = false;
+        event_.stop();
+        startCutscene(false);
+    }
 }
 
 // Event command 0xAB: the choice between a new game and a saved one; the bit says whether the player chose to go on.
@@ -1337,6 +1597,12 @@ void Game::launchBattle(int battle, int background, bool veldt) {
         for (const int id : objects_.partySlots()) {
             if (id >= 0 && characters.size() < FF6_BATTLE_PARTY_SLOTS) characters.push_back(id);
         }
+        // InitParty: the places that stay empty are filled, once each, from the order that the player gave for the end.
+        for (size_t at = 0; at < finalOrder_.size() && characters.size() < FF6_BATTLE_PARTY_SLOTS;) {
+            const int next = finalOrder_[at];
+            finalOrder_.erase(finalOrder_.begin() + static_cast<std::ptrdiff_t>(at));
+            if (std::find(characters.begin(), characters.end(), next) == characters.end()) characters.push_back(next);
+        }
     }
     if (characters.empty()) return;
     battleSeed_ = battleSeed_ * FF6_BATTLE_SEED_STEP + frame_ + 1;
@@ -1469,7 +1735,7 @@ void Game::tickMenu(const InputState& input) {
     updateBrightness();
     if (fading()) return;
     if (menuPhase_ == MenuPhase::FadingOut) {
-        if (!shopOpen_ && !battleOpen_ && !loadMenuOpen_ && !colosseumOpen_ && !partyOpen_) menu_.open(menuStatus(), config_);
+        if (!shopOpen_ && !battleOpen_ && !loadMenuOpen_ && !colosseumOpen_ && !nameOpen_ && !finalOrderOpen_ && !partyOpen_) menu_.open(menuStatus(), config_);
         menuPhase_ = MenuPhase::Open;
         startFade(true, FF6_BRIGHTNESS_STEP);
     } else if (menuPhase_ == MenuPhase::Open && loadMenuOpen_) {
@@ -1495,6 +1761,18 @@ void Game::tickMenu(const InputState& input) {
     } else if (menuPhase_ == MenuPhase::Open && partyOpen_) {
         partyMenu_.update(input);
         if (partyMenu_.closed()) {
+            menuPhase_ = MenuPhase::Leaving;
+            startFade(false, FF6_BRIGHTNESS_STEP);
+        }
+    } else if (menuPhase_ == MenuPhase::Open && finalOrderOpen_) {
+        finalOrderMenu_.update(input);
+        if (finalOrderMenu_.closed()) {
+            menuPhase_ = MenuPhase::Leaving;
+            startFade(false, FF6_BRIGHTNESS_STEP);
+        }
+    } else if (menuPhase_ == MenuPhase::Open && nameOpen_) {
+        nameMenu_.update(input);
+        if (nameMenu_.closed()) {
             menuPhase_ = MenuPhase::Leaving;
             startFade(false, FF6_BRIGHTNESS_STEP);
         }
@@ -1530,6 +1808,14 @@ void Game::tickMenu(const InputState& input) {
         if (partyOpen_) {
             partyOpen_ = false;
             applyPartySelection();
+        }
+        if (finalOrderOpen_) {
+            finalOrderOpen_ = false;
+            finalOrder_ = finalOrderMenu_.order();
+        }
+        if (nameOpen_) {  // an empty name keeps the one that the character had
+            nameOpen_ = false;
+            if (!nameMenu_.name().empty()) setCharacterName(nameMenu_.character(), nameMenu_.name());
         }
         if (colosseumOpen_) {
             colosseumOpen_ = false;
@@ -1610,13 +1896,42 @@ void Game::composeTimer(int frames) {
     }
 }
 
+// InitPortrait: the special npcs with no graphics of their own show the portrait that is in the sprite memory.
+void Game::drawPortrait(uint8_t* screen, bool above) {
+    if (portrait_ < 0 || !bits_.get(FF6_EVENT_BIT_PORTRAIT)) return;
+    if (portraitShown_ != portrait_) {
+        portraitImage_ = buildPortraitImage(menuData_, portrait_);
+        portraitShown_ = portrait_;
+    }
+    for (const Npc& npc : objects_.npcs()) {
+        if (!npc.enabled || !npc.visible || !npc.prop.special || npc.prop.gfx != FF6_MAP_SPRITE_NOTHING) continue;
+        if (npc.topIsAbove() != above) continue;
+        const int layer = npc.prop.scrollBg2 ? FF6_BG2 : FF6_BG1;
+        const int x = npc.pixelX() - scroll_.x(layer);
+        const int y = npc.pixelY() - FF6_SPECIAL_SPRITE_Y_OFFSET - npc.jumpHeight - scroll_.y(layer) - stage_.shakeOffset(3);
+        const int tile = npc.prop.vram * 2;  // the characters of the sprite memory are 16 to a row
+        const int size = npc.prop.large ? 4 : 2;
+        for (int row = 0; row < size * FF6_MENU_TILE_SIZE; ++row) {
+            const int sourceY = (tile >> 4) * FF6_MENU_TILE_SIZE + row, screenY = y + row;
+            if (sourceY >= FF6_MENU_PORTRAIT_SIZE || screenY < 0 || screenY >= FF6_SCREEN_HEIGHT) continue;
+            for (int column = 0; column < size * FF6_MENU_TILE_SIZE; ++column) {
+                const int sourceX = (tile & 15) * FF6_MENU_TILE_SIZE + column, screenX = x + column;
+                if (sourceX >= FF6_MENU_PORTRAIT_SIZE || screenX < 0 || screenX >= FF6_SCREEN_WIDTH) continue;
+                const uint8_t* source = &portraitImage_[(static_cast<size_t>(sourceY) * FF6_MENU_PORTRAIT_SIZE + sourceX) * FF6_BYTES_PER_PIXEL];
+                if (source[FF6_ALPHA_OFFSET] == 0) continue;
+                std::copy_n(source, FF6_BYTES_PER_PIXEL, screen + (static_cast<size_t>(screenY) * FF6_SCREEN_WIDTH + screenX) * FF6_BYTES_PER_PIXEL);
+            }
+        }
+    }
+}
+
 // Paints the sprites that are drawn below (above = false) or above the high priority layers.
 void Game::drawSprites(bool above) {
     std::vector<Drawable> drawables;
     const auto add = [&](Npc& object) {
         const int layer = object.prop.scrollBg2 ? FF6_BG2 : FF6_BG1;
         Drawable drawable{object.pixelY(), stripOf(object), object.frame, object.pixelX() - scroll_.x(layer),
-                          object.pixelY() - FF6_SPRITE_Y_OFFSET - object.jumpHeight - scroll_.y(layer),
+                          object.pixelY() - FF6_SPRITE_Y_OFFSET - object.jumpHeight - scroll_.y(layer) - stage_.shakeOffset(3),
                           object.topIsAbove(), object.bottomIsAbove()};
         if ((object.vehicle & FF6_VEHICLE_MASK) != 0) {
             // The steps come from the position along the axis that it moves on, and the lead is moved by the player.
@@ -1637,6 +1952,7 @@ void Game::drawSprites(bool above) {
     std::stable_sort(drawables.begin(), drawables.end(),
                      [](const Drawable& a, const Drawable& b) { return a.sortY < b.sortY; });
     uint8_t* screen = spritePixels_[above ? 1 : 0].data();
+    drawPortrait(screen, above);
     for (const Drawable& sprite : drawables) {
         const std::vector<uint8_t>& strip = strips_[static_cast<size_t>(sprite.strip)];
         if (sprite.onVehicle) {
@@ -1678,6 +1994,10 @@ void Game::draw() {
             loadMenu_.draw();
         } else if (shopOpen_) {
             shop_.draw();
+        } else if (finalOrderOpen_) {
+            finalOrderMenu_.draw();
+        } else if (nameOpen_) {
+            nameMenu_.draw();
         } else if (colosseumOpen_) {
             colosseum_.draw();
         } else if (partyOpen_) {
@@ -1708,7 +2028,7 @@ void Game::draw() {
     for (auto& pixels : spritePixels_) std::fill(pixels.begin(), pixels.end(), 0);
     for (int layer = 0; layer < FF6_LAYER_COUNT; ++layer) {
         auto& pixels = layerPixels_[static_cast<size_t>(layer)];
-        renderBg(map_, layer, scroll_.x(layer), scroll_.y(layer), pixels[0].data(), pixels[1].data());
+        renderBg(map_, layer, scroll_.x(layer), scroll_.y(layer) + stage_.shakeOffset(layer), pixels[0].data(), pixels[1].data());
     }
     drawSprites(false);
     drawSprites(true);
@@ -1720,8 +2040,16 @@ void Game::draw() {
         {FF6_SCREEN_OBJ, spritePixels_[1].data()},         {FF6_SCREEN_BG3, layerPixels_[FF6_BG3][1].data()}};
     uint8_t backdrop[FF6_BYTES_PER_PIXEL];
     colorToRgba(map_.palette[0], backdrop);
-    composeScreen(decodeColorMath(map_.colorMath), backdrop, layers, sizeof(layers) / sizeof(layers[0]),
-                  screenPixels_.data());
+    ColorMath math = decodeColorMath(map_.colorMath);
+    if (stage_.fixedActive()) {  // the fixed color is added to (or taken from) the three layers of bg, with no sub screen
+        int rgb[3];
+        stage_.fixedRgb(rgb);
+        math.designation = static_cast<uint8_t>(FF6_SCREEN_BG1 | FF6_SCREEN_BG2 | FF6_SCREEN_BG3 | (stage_.fixedSubtract() ? FF6_COLOR_MATH_SUBTRACT : 0));
+        math.subScreen = 0;
+        for (int channel = 0; channel < FF6_COLOR_CHANNELS; ++channel) math.fixed[channel] = static_cast<uint8_t>(rgb[channel]);
+    }
+    composeScreen(math, backdrop, layers, sizeof(layers) / sizeof(layers[0]), screenPixels_.data());
+    applyStage(screenPixels_);
     renderer_.beginFrame();
     applyBrightness(screenPixels_);
     renderer_.updateTexture(screen_, screenPixels_.data());

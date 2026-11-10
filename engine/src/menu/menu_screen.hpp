@@ -78,7 +78,12 @@ private:
 uint8_t menuCode(char character);
 // The name of a character of the game, from 0 for Terra; empty for a number that is not one.
 std::string characterName(int id);
+// The name that the player gave to a character (an event asked for it), empty for the one of the game.
+void setCharacterName(int id, const std::string& name);
+std::string customCharacterName(int id);
 // The portrait of a character of the game, from 0 for Terra.
 int menuPortrait(int character);
+// A portrait as an RGBA image of FF6_MENU_PORTRAIT_SIZE square pixels, transparent where its color is 0.
+std::vector<uint8_t> buildPortraitImage(const MenuData& menu, int portrait);
 
 }  // namespace ff6

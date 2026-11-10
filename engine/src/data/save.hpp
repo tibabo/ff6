@@ -40,6 +40,7 @@ struct SaveState {
     // The statistics, the inventory and the gil; a save without them starts the characters from their properties.
     bool hasParty = false;
     PartyState party;
+    std::vector<std::string> names;  // what the player named the characters, "" for the names of the game; empty when none
 };
 
 std::string saveToJson(const SaveState& state);

@@ -56,14 +56,17 @@ int moveFrame(int facing, int position) {
 }
 
 std::vector<uint8_t> buildSpriteStrip(const CommonData& common, int gfx, int palette) {
+    if (palette < 0 || static_cast<size_t>(palette) >= common.spritePaletteCount()) {
+        return std::vector<uint8_t>(static_cast<size_t>(FF6_FRAME_WIDTH * FF6_FRAME_COUNT) * FF6_FRAME_HEIGHT * FF6_BYTES_PER_PIXEL, 0);
+    }
+    return buildSpriteStripColors(common, gfx, &common.spritePalettes[static_cast<size_t>(palette) * FF6_SPRITE_PAL_COLORS]);
+}
+
+std::vector<uint8_t> buildSpriteStripColors(const CommonData& common, int gfx, const uint16_t* colors) {
     const int stripWidth = FF6_FRAME_WIDTH * FF6_FRAME_COUNT;
     std::vector<uint8_t> strip(static_cast<size_t>(stripWidth) * FF6_FRAME_HEIGHT * FF6_BYTES_PER_PIXEL, 0);
-    if (gfx < 0 || static_cast<size_t>(gfx) >= common.spriteGfxCount() || palette < 0 ||
-        static_cast<size_t>(palette) >= common.spritePaletteCount()) {
-        return strip;
-    }
+    if (gfx < 0 || static_cast<size_t>(gfx) >= common.spriteGfxCount()) return strip;
     const uint8_t* sheet = &common.spriteGfx[static_cast<size_t>(gfx) * FF6_SPRITE_SHEET_BYTES];
-    const uint16_t* colors = &common.spritePalettes[static_cast<size_t>(palette) * FF6_SPRITE_PAL_COLORS];
     for (int frame = 0; frame < FF6_FRAME_COUNT; ++frame) {
         for (int y = 0; y < FF6_FRAME_HEIGHT; ++y) {
             for (int x = 0; x < FF6_FRAME_WIDTH; ++x) {

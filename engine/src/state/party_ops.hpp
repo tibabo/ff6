@@ -43,6 +43,10 @@ std::vector<int> equippableItems(const PartyState& party, const GameRules& rules
 // Puts an item of the inventory in a slot, or nothing with FF6_ITEM_EMPTY, and the old item goes back to the inventory.
 // False, and nothing changed, when the item is not there or the old one would have no place.
 bool equipItem(PartyState& party, const GameRules& rules, int character, int slot, int item);
+// EquipOptimum (event command 0x9C): the equipment of the four slots goes back to the inventory, and the best weapon (a
+// two-handed one with the gauntlet), shield (or second weapon with the genji glove), helmet and armor that the character
+// can wear take its place. The relics stay.
+void optimizeEquipment(PartyState& party, const GameRules& rules, int character);
 
 // Items that the menu can use: the ones that restore hp or mp, and the fenix down. The rest needs the status effects of
 // the characters, a save point or a battle.

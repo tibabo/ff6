@@ -15,6 +15,8 @@ int moveFrame(int facing, int position);
 
 // All FF6_FRAME_COUNT frames of a map sprite side by side as one RGBA image, painted with a sprite palette.
 std::vector<uint8_t> buildSpriteStrip(const CommonData& common, int gfx, int palette);
+// The same with the 16 colors given (an event may have changed them).
+std::vector<uint8_t> buildSpriteStripColors(const CommonData& common, int gfx, const uint16_t* colors);
 
 // Copies `height` rows of a frame from the strip to the screen at (x, y), skipping transparent pixels and
 // anything outside the screen. The screen is RGBA, FF6_SCREEN_WIDTH x FF6_SCREEN_HEIGHT.

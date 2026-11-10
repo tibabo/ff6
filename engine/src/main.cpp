@@ -14,7 +14,11 @@
 
 #include "audio/audio_data.hpp"
 #include "audio/sound_program.hpp"
+#include "cutscene/ending_card.hpp"
+#include "cutscene/floating.hpp"
 #include "cutscene/opening.hpp"
+#include "cutscene/ruin.hpp"
+#include "cutscene/the_end.hpp"
 #include "cutscene/title.hpp"
 #include "data/attack_anim.hpp"
 #include "data/save.hpp"
@@ -221,12 +225,29 @@ void captureCutscene(const std::string& packDir, const std::string& name, const 
     const ff6::TitleData data = ff6::loadTitleData(packDir);
     ff6::NoSound sound;
     std::unique_ptr<ff6::Cutscene> scene;
-    if (name == "title") {
+    // "ending" and the state of the `ending` command: that scene of the ending.
+    const ff6::CommonData common = ff6::loadCommonData(packDir);
+    const ff6::MenuData menuData = ff6::loadMenuData(packDir);
+    ff6::MenuScreen menuScreen(common, menuData);
+    if (name.rfind("ending", 0) == 0) {
+        const int state = std::atoi(name.c_str() + 6);
+        std::vector<std::string> names;
+        for (const int id : ff6::endingCharacters(state)) names.push_back(ff6::characterName(id));
+        scene = std::make_unique<ff6::EndingCard>(menuScreen, names, std::max(ff6::endingFrames(state), 1),
+                                                  ff6::creditsPages(ff6::creditsScene(state), data.credits), ff6::endingCharacters(state),
+                                                  ff6::makeFlightBackdrop(data, state), ff6::makeEndingNames(data, state));
+    } else if (name == "title") {
         scene = std::make_unique<ff6::TitleScene>(data, sound);
     } else if (name == "opening") {
         scene = std::make_unique<ff6::OpeningScene>(data, sound);
+    } else if (name == "floating") {
+        scene = std::make_unique<ff6::FloatingScene>(data, sound);
+    } else if (name == "end") {
+        scene = std::make_unique<ff6::TheEndScene>(data, sound);
+    } else if (name == "ruin") {
+        scene = std::make_unique<ff6::RuinScene>(data, sound);
     } else {
-        throw std::runtime_error("--cutscene takes title or opening");
+        throw std::runtime_error("--cutscene takes title, opening, ruin, floating, end or endingN");
     }
     for (int frame = 0; frame < capture.waitFrames && !scene->finished(); ++frame) scene->tick({});
     std::vector<uint8_t> pixels(static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL);
@@ -346,7 +367,7 @@ void writeAnimSheet(const std::string& packDir, int attack, int layer, const std
 }  // namespace
 
 int main(int argc, char** argv) {
-    const char* usage = "Usage: %s <data-pack-dir> [--map n] [--party terra,locke,...] [--battle n [--bg n]] [--play attack] [--status bits] [--scene n] [--stock 1] [--anim attack [--layer 0|1|2]] [--load save.json] [--save save.json] [--music song] [--new-game 1] [--cutscene title|opening --capture out.bmp --wait frames] [--capture out.bmp [--at x,y] [--wait frames] [--moves URDL...] [--talk frames] [--keys ABURDL.] [--after frames]]\n";
+    const char* usage = "Usage: %s <data-pack-dir> [--map n] [--party terra,locke,...] [--battle n [--bg n]] [--play attack] [--status bits] [--scene n] [--stock 1] [--anim attack [--layer 0|1|2]] [--load save.json] [--save save.json] [--music song] [--new-game 1] [--cutscene title|opening|ruin|floating|end --capture out.bmp --wait frames] [--capture out.bmp [--at x,y] [--wait frames] [--moves URDL...] [--talk frames] [--keys ABURDL.] [--after frames]]\n";
     if (argc < 2) {
         std::fprintf(stderr, usage, argc > 0 ? argv[0] : "ff6");
         return 2;

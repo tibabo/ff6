@@ -155,6 +155,25 @@ Pick frontPixel(int mask, int x, int mode, bool bg3Front, const std::array<Row, 
 
 int channel(uint16_t color, int shift) { return color >> shift & 31; }
 
+// Takes away the pixels that the windows hide on the main screen.
+void applyWindows(const PpuLine& line, std::array<Row, 3>& bg, Row& objects, int tm) {
+    const auto hide = [&](int select, int layerBit, Row& row) {
+        if (!(line.tmw & layerBit) || !(tm & layerBit) || !(select & 0xA)) return;
+        for (int x = 0; x < kWidth; ++x) {
+            bool inside = false;
+            for (int window = 0; window < 2; ++window) {
+                if (!(select & (2 << window * 2))) continue;
+                const bool within = x >= line.window[static_cast<size_t>(window) * 2] && x <= line.window[static_cast<size_t>(window) * 2 + 1];
+                inside = inside || (within != ((select & (1 << window * 2)) != 0));
+            }
+            if (inside) row[static_cast<size_t>(x)].on = false;
+        }
+    };
+    hide(line.w12sel & 15, 1, bg[0]);
+    hide(line.w12sel >> 4, 2, bg[1]);
+    hide(line.wobjsel & 15, 0x10, objects);
+}
+
 }  // namespace
 
 Ppu::Ppu() : vram(kVramWords, 0) {
@@ -187,6 +206,7 @@ void Ppu::render(uint8_t* rgba) const {
             if ((tm | ts) & 4) drawBg(*this, kBg3, y, false, bg[2]);
         }
         drawSprites(*this, y, objects);
+        applyWindows(line, bg, objects, tm);
         const bool subScreen = (line.cgwsel & 2) != 0;
         const uint16_t fixed = static_cast<uint16_t>(line.fixed[0] | line.fixed[1] << 5 | line.fixed[2] << 10);
         for (int x = 0; x < kWidth; ++x) {

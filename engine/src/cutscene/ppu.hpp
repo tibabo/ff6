@@ -25,6 +25,10 @@ struct PpuLine {
     uint8_t cgwsel = 0, cgadsub = 0;  // color math: bit 1 of CGWSEL picks the sub screen, then CGADSUB as the console has it
     std::array<uint8_t, 3> fixed{};  // the fixed color, 5 bits for red, green and blue
     bool bg2Columns = false;  // offset per tile in mode 2: bg2 has its own vertical scroll in each column of 8 pixels
+    // The windows that hide layers of the main screen (W12SEL, WOBJSEL and TMW; the positions are left 1, right 1, left 2,
+    // right 2): per layer, bit 0 and 2 invert a window and bit 1 and 3 turn it on. A layer shows only what no window hides.
+    uint8_t w12sel = 0, wobjsel = 0, tmw = 0;
+    std::array<uint8_t, 4> window{};
     std::array<uint8_t, 33> bg2ColumnVofs{};  // the column 0 is the one that the scroll of the register gives
 };
 

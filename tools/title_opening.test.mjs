@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import {
-  CUTSCENE_MAP_GFX, CUTSCENE_PROG_BYTES, MAP_GFX_BYTES, TABLE_BYTES, TITLE_MAGIC, TITLE_OPENING_GFX_BYTES, buildTitleData,
+  CUTSCENE_MAP_GFX, CUTSCENE_PROG_BYTES, MAP_GFX_BYTES, TABLE_BYTES, TITLE_MAGIC, RUIN_GFX_BYTES, FLOATING_GFX_BYTES, TITLE_OPENING_GFX_BYTES, THE_END_GFX_BYTES, THE_END_GFX_2_BYTES, THE_END_PAL_BYTES, CREDITS_BYTES, FLIGHT_GFX_BYTES, FLIGHT_TABLES_BYTES, FLIGHT_PALETTES_BYTES, FLIGHT_SCROLLS_BYTES, SINE_16_BYTES, SKY_GFX_BYTES, SKY_MAP_BYTES, SKY_PAL_BYTES, ENDING_ANIM_BYTES, ENDING_FONT_BYTES, buildTitleData,
   readCutsceneProgram, readTitleOpeningGfx,
 } from './cutscene/title_opening.mjs';
 import { requireSupportedRom } from './rom.mjs';
@@ -31,8 +31,10 @@ test('the title data holds the program, the graphics, the map graphics and two t
   const data = buildTitleData(loadRom(), 11);
   assert.equal(data.subarray(0, 8).toString('ascii'), TITLE_MAGIC);
   assert.equal(data.readUInt32LE(8), 11);
-  assert.equal(data.length, 12 + CUTSCENE_PROG_BYTES + TITLE_OPENING_GFX_BYTES + CUTSCENE_MAP_GFX.length * MAP_GFX_BYTES + 2 * TABLE_BYTES);
-  const tables = data.subarray(data.length - 2 * TABLE_BYTES);
+  const theEnd = THE_END_GFX_BYTES + THE_END_GFX_2_BYTES + THE_END_PAL_BYTES + CREDITS_BYTES + FLIGHT_GFX_BYTES + FLIGHT_TABLES_BYTES + FLIGHT_PALETTES_BYTES + FLIGHT_SCROLLS_BYTES + SINE_16_BYTES + SKY_GFX_BYTES + SKY_MAP_BYTES + SKY_PAL_BYTES + ENDING_ANIM_BYTES + ENDING_FONT_BYTES;
+  assert.equal(data.length, 12 + CUTSCENE_PROG_BYTES + TITLE_OPENING_GFX_BYTES + CUTSCENE_MAP_GFX.length * MAP_GFX_BYTES + 2 * TABLE_BYTES + RUIN_GFX_BYTES + FLOATING_GFX_BYTES + theEnd);
+  const after = RUIN_GFX_BYTES + FLOATING_GFX_BYTES + theEnd;
+  const tables = data.subarray(data.length - 2 * TABLE_BYTES - after, data.length - after);
   assert.equal(tables[0], 0x07);  // the table of random numbers
   assert.equal(tables[TABLE_BYTES + 64], 0x7f);  // sin(90 degrees) of the sine table
   assert.equal(tables[TABLE_BYTES + 192], 0x81);  // and -sin
