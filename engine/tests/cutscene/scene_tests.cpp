@@ -6,14 +6,20 @@
 #include "../test_helpers.hpp"
 #include "../tests.hpp"
 #include "cutscene/opening.hpp"
+#include "cutscene/ending_book.hpp"
 #include "cutscene/ending_card.hpp"
-#include "cutscene/ending_names.hpp"
+#include "cutscene/ending_stage.hpp"
+#include "cutscene/falcon.hpp"
+#include "cutscene/ending_tasks.hpp"
 #include "cutscene/flight.hpp"
 #include "cutscene/floating.hpp"
 #include "cutscene/ruin.hpp"
 #include "cutscene/the_end.hpp"
 #include "cutscene/title.hpp"
 #include "data/title_data.hpp"
+#include "data/world_data.hpp"
+#include "menu/menu_data.hpp"
+#include "menu/menu_screen.hpp"
 
 namespace {
 
@@ -141,7 +147,7 @@ void testCutsceneScenes() {
         CHECK(ff6::endingFrames(50) > 840 && ff6::endingCharacters(100).size() == 2 && ff6::endingFrames(3) == 0);
     }
     {  // the ground of the flights: land, sea and clouds seen by the camera of the script, with a sky above the horizon for some
-        for (const int state : {2, 4, 9, 12, 16, 20, 24, 28}) {
+        for (const int state : {2, 4, 5, 9, 12, 16, 20, 24, 28, 32}) {
             const std::unique_ptr<ff6::FlightBackdrop> ground = ff6::makeFlightBackdrop(data, state);
             CHECK(ground != nullptr);
             if (!ground) continue;
@@ -157,22 +163,145 @@ void testCutsceneScenes() {
         CHECK(sea->ppu().lines[10].bgMode == 1 && sea->ppu().lines[100].bgMode == 7);  // the sky above the horizon
         CHECK(sea->ppu().lines[200].m7a != 0 && sea->ppu().lines[100].m7a != sea->ppu().lines[200].m7a);  // the scale changes down the screen
     }
-    {  // the big letters of a name: nothing for five seconds, then they rise in and the palette fades in; Edgar, then Sabin
-        const auto lit = [](const ff6::EndingNames& names) {
+    {  // the book: closed on the table, its pages turn after twelve seconds, and "and you" comes with letters
+        const std::unique_ptr<ff6::EndingBook> book = ff6::makeEndingBook(data, 45);
+        CHECK(book != nullptr && ff6::makeEndingBook(data, 50) == nullptr);
+        const auto picture = [](const ff6::EndingBook& scene) {
             std::vector<uint8_t> pixels(static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL);
-            names.draw(pixels.data());
+            scene.draw(pixels.data());
+            return pixels;
+        };
+        for (int i = 0; i < 300; ++i) book->tick();
+        const std::vector<uint8_t> closed = picture(*book);
+        size_t lit = 0;
+        for (size_t i = 0; i < closed.size(); i += FF6_BYTES_PER_PIXEL) lit += closed[i] > 20 || closed[i + 1] > 20 || closed[i + 2] > 20;
+        CHECK(lit > 3000);  // the book and the table
+        for (int i = 0; i < 470; ++i) book->tick();
+        CHECK(picture(*book) != closed);  // a page turns
+        const std::unique_ptr<ff6::EndingBook> you = ff6::makeEndingBook(data, 74);
+        for (int i = 0; i < 100; ++i) you->tick();
+        const std::vector<uint8_t> before = picture(*you);
+        for (int i = 0; i < 500; ++i) you->tick();
+        CHECK(picture(*you) != before);
+        const std::vector<uint8_t> shut = picture(*you);
+        for (int i = 0; i < 100; ++i) you->tick();
+        const std::vector<uint8_t> later = picture(*you);
+        // The book stays shut once it has closed (only the letters below move).
+        const size_t bookBytes = static_cast<size_t>(FF6_SCREEN_WIDTH) * 150 * FF6_BYTES_PER_PIXEL;
+        CHECK(std::equal(shut.begin(), shut.begin() + static_cast<std::ptrdiff_t>(bookBytes), later.begin()));
+    }
+    {  // the palettes fade as the game has it: a color climbs for the last steps only, and goes down from the first one
+        std::array<uint16_t, 256> cgram{};
+        ff6::EndingTasks tasks(data, cgram);
+        std::vector<ff6::PpuSprite> sprites;
+        std::array<uint16_t, 16> target{};
+        target[1] = 0x7FFF;  // 31 in each color
+        target[2] = 0x000F;  // 15 in red only
+        cgram[3] = 0x7FFF;
+        tasks.fadePalette(0, target, 1);
+        for (int i = 0; i < 16; ++i) tasks.exec(sprites);
+        CHECK((cgram[1] & 31) == 15 && (cgram[2] & 31) == 0 && (cgram[3] & 31) == 16);  // 15 steps: the first color climbs from the start, the second has waited
+        for (int i = 0; i < 20; ++i) tasks.exec(sprites);
+        CHECK(cgram[1] == 0x7FFF && cgram[2] == 0x000F && cgram[3] == 0 && tasks.active() == 0);
+    }
+    {  // the scenes of the characters last what the waits of the game add up to, with the sprites that they start
+        ff6::CommonData common = ff6::loadCommonData(pack);
+        const ff6::MenuData menuData = ff6::loadMenuData(pack);
+        ff6::MenuScreen menuScreen(common, menuData);
+        struct Expected {
+            int state, frames;
+        };
+        for (const Expected& scene : {Expected{40, 961}, Expected{50, 961}, Expected{60, 961}, Expected{64, 1321}, Expected{70, 961}, Expected{80, 961},
+                                      Expected{90, 961}, Expected{100, 1321}, Expected{110, 961}, Expected{120, 961}, Expected{130, 961},
+                                      Expected{135, 961}}) {
+            CHECK(ff6::EndingStage::handles(scene.state));
+            ff6::EndingStage stage(data, menuScreen, scene.state, {"Terra", "Locke"});
+            int frames = 0;
+            while (!stage.finished() && frames < 3000) {
+                stage.tick();
+                ++frames;
+            }
+            CHECK(frames == scene.frames);
+        }
+        CHECK(!ff6::EndingStage::handles(45) && !ff6::EndingStage::handles(41));
+        // what each scene puts over its picture, with the data of the ROM: the apple, the sparkles, the coin, the mini-moogles...
+        for (const int state : {40, 50, 60, 64, 70, 80, 90, 110, 130, 135}) {
+            ff6::EndingStage stage(data, menuScreen, state, {"Terra"});
+            for (int i = 0; i < (state == 80 ? 560 : 380); ++i) stage.tick();  // the eyes of Gau open after three seconds more
+            CHECK(!stage.ppu().sprites.empty());
+        }
+        ff6::EndingStage coin(data, menuScreen, 64, {"Edgar", "Sabin"});
+        for (int i = 0; i < 150; ++i) coin.tick();
+        const auto isCoin = [](const ff6::PpuSprite& sprite) { return sprite.x == 93 && sprite.y == 101; };
+        CHECK(std::any_of(coin.ppu().sprites.begin(), coin.ppu().sprites.end(), isCoin));  // the coin, half a pixel a frame from 0x10
+        // Cyan: the table and the sword from the start, the sparkles on its blade after six seconds, the name once its palette is in
+        ff6::EndingStage cyan(data, menuScreen, 50, {"Cyan"});
+        const auto picture = [](ff6::EndingStage& stage) {
+            std::vector<uint8_t> pixels(static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL);
+            stage.draw(pixels.data());
+            return pixels;
+        };
+        const auto litIn = [](const std::vector<uint8_t>& pixels, int y0, int y1) {
             size_t count = 0;
-            for (size_t i = 0; i < pixels.size(); i += FF6_BYTES_PER_PIXEL) count += pixels[i] > 20 || pixels[i + 1] > 20 || pixels[i + 2] > 20;
+            for (int y = y0; y < y1; ++y) {
+                for (int x = 0; x < FF6_SCREEN_WIDTH; ++x) {
+                    const size_t at = (static_cast<size_t>(y) * FF6_SCREEN_WIDTH + static_cast<size_t>(x)) * FF6_BYTES_PER_PIXEL;
+                    count += pixels[at] > 20 || pixels[at + 1] > 20 || pixels[at + 2] > 20;
+                }
+            }
             return count;
         };
-        const std::unique_ptr<ff6::EndingNames> cyan = ff6::makeEndingNames(data, 50);
-        CHECK(cyan != nullptr && ff6::makeEndingNames(data, 45) == nullptr);
-        for (int i = 0; i < 100; ++i) cyan->tick();
-        CHECK(lit(*cyan) == 0);  // the letters wait, and the palette is still black
-        for (int i = 0; i < 600; ++i) cyan->tick();
-        CHECK(lit(*cyan) > 300);
-        const std::unique_ptr<ff6::EndingNames> brothers = ff6::makeEndingNames(data, 64);
-        for (int i = 0; i < 1150; ++i) brothers->tick();
-        CHECK(lit(*brothers) > 300);
+        for (int i = 0; i < 80; ++i) cyan.tick();
+        CHECK(litIn(picture(cyan), 100, 176) > 1000 && litIn(picture(cyan), 176, 224) == 0);  // the name is not there yet
+        for (int i = 80; i < 250; ++i) cyan.tick();
+        CHECK(litIn(picture(cyan), 176, 190) > 20 && litIn(picture(cyan), 192, 210) > 10);  // the name, on its palette, and the "as" under it
+        const size_t before = litIn(picture(cyan), 84, 112);
+        for (int i = 250; i < 372; ++i) cyan.tick();
+        CHECK(litIn(picture(cyan), 84, 112) > before);  // a sparkle over the sword
+        for (int i = 372; i < 600; ++i) cyan.tick();
+        CHECK(litIn(picture(cyan), 176, 224) > 100 && litIn(picture(cyan), 224 - 8, 224) == 0);  // the name and the "as" are gone, the letters of the full name have risen
+    }
+    {  // the sprites of the flights: the birds and the airship of the sea, the tiny airship that comes after sixteen seconds, the boat
+        const auto count = [&](int state, int frames) {
+            const std::unique_ptr<ff6::FlightBackdrop> ground = ff6::makeFlightBackdrop(data, state);
+            for (int i = 0; i < frames; ++i) ground->tick();
+            return ground->ppu().sprites.size();
+        };
+        CHECK(count(16, 5) >= 12 && count(20, 5) >= 12 && count(28, 5) >= 5);
+        CHECK(count(9, 5) == 0 && count(9, 15) > 0);  // the words of the credits are sprites, and the first page comes at frame 10
+        {
+            const std::unique_ptr<ff6::FlightBackdrop> tiny = ff6::makeFlightBackdrop(data, 9);
+            for (int i = 0; i < 20; ++i) tiny->tick();
+            bool font = !tiny->ppu().sprites.empty();
+            for (const ff6::PpuSprite& sprite : tiny->ppu().sprites) font = font && (sprite.attr == 0x09 || sprite.attr == 0x0B) && sprite.tile >= 0x100;
+            CHECK(font);  // the big font on the palette 4, the small one on the 5, in the second table of the tiles
+            bool bigTile = false;
+            for (size_t row = 0; row < 8; ++row) bigTile = bigTile || tiny->ppu().vram[0x7000 + 0x40 * 16 + row] != 0;
+            CHECK(bigTile);  // the first letter of the big font is in its sheet
+        }
+        CHECK(count(12, 5) >= 6 && count(12, 1200) > count(12, 1000));
+        CHECK(count(24, 100) == 0);
+        const std::unique_ptr<ff6::FlightBackdrop> sea = ff6::makeFlightBackdrop(data, 16);
+        sea->tick();
+        CHECK(sea->ppu().lines[10].wobjsel == 0x33 && sea->ppu().lines[10].cgwsel == 0x80 && sea->ppu().lines[100].cgwsel == 0x82);  // the color window
+    }
+    {  // the airship above the clouds and the jet: the scales go on their own, and the jet is the only thing on the sky of its plane
+        const std::unique_ptr<ff6::FlightBackdrop> airship = ff6::makeFlightBackdrop(data, 5);
+        for (int i = 0; i < 100; ++i) airship->tick();
+        CHECK(airship->ppu().lines[10].m7Own && !airship->ppu().lines[150].m7Own && airship->ppu().lines[10].m7a == 0x10 + 50);
+        const std::unique_ptr<ff6::FlightBackdrop> jet = ff6::makeFlightBackdrop(data, 32);
+        for (int i = 0; i < 10; ++i) jet->tick();
+        CHECK(jet->ppu().m7sel == 0x80 && jet->ppu().lines[0].m7a == 1 + 2 * 10 && jet->ppu().lines[200].m7a == jet->ppu().lines[0].m7a);
+    }
+    {  // the flight of the Falcon: the ground in perspective, one sprite that crosses the screen, and a fade at each end
+        const ff6::WorldData world = ff6::loadWorldData(pack);
+        ff6::FalconScene falcon(data, world);
+        for (int i = 0; i < 100; ++i) falcon.tick({});
+        CHECK(!falcon.ppu().sprites.empty() && falcon.ppu().brightness == 15 && falcon.ppu().lines[0].m7a > falcon.ppu().lines[200].m7a);
+        CHECK(falcon.ppu().sprites.size() == 15);  // the Falcon alone: the particles have nothing to show once the first ones are gone
+        CHECK(falcon.ppu().lines[0].fixed[2] == 18 && falcon.ppu().lines[150].fixed[2] == 0);  // the haze, blue first
+        ff6::FalconScene whole(data, world);
+        const int frames = tickUntilFinished(whole, 1000);
+        CHECK(frames > 260 && frames < 300);  // 254 frames for the Falcon to leave, 15 of fade out
     }
 }

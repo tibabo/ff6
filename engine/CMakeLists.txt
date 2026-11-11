@@ -19,7 +19,10 @@ add_library(ff6_core STATIC
   src/cutscene/core.cpp
   src/cutscene/opening.cpp
   src/cutscene/ending_card.cpp
-  src/cutscene/ending_names.cpp
+  src/cutscene/ending_book.cpp
+  src/cutscene/falcon.cpp
+  src/cutscene/ending_stage.cpp
+  src/cutscene/ending_tasks.cpp
   src/cutscene/flight.cpp
   src/cutscene/floating.cpp
   src/cutscene/ruin.cpp

@@ -22,6 +22,9 @@ struct PpuLine {
     uint8_t bgMode = 1;  // BGMODE: bits 0-2 the mode (1, 2 or 7), bit 3 gives bg3 the highest priority
     std::array<uint16_t, 3> hofs{}, vofs{};  // bg1 to bg3
     int16_t m7a = 0, m7b = 0, m7c = 0, m7d = 0;
+    // The center and the scroll of mode 7 that this line has when the game changes them from line to line (HDMA).
+    bool m7Own = false;
+    uint16_t m7x = 0, m7y = 0, m7hofs = 0, m7vofs = 0;
     uint8_t cgwsel = 0, cgadsub = 0;  // color math: bit 1 of CGWSEL picks the sub screen, then CGADSUB as the console has it
     std::array<uint8_t, 3> fixed{};  // the fixed color, 5 bits for red, green and blue
     bool bg2Columns = false;  // offset per tile in mode 2: bg2 has its own vertical scroll in each column of 8 pixels
@@ -54,6 +57,7 @@ public:
     uint8_t tm = 0, ts = 0;  // the layers of the main screen and of the sub screen: bg1 to bg4 in bits 0-3, objects in 4
     uint16_t m7x = 0, m7y = 0;  // the center of mode 7
     uint16_t m7hofs = 0, m7vofs = 0;
+    uint8_t m7sel = 0;  // bits 6 and 7: what is outside the plane (0 and 1 repeat it, 2 is transparent, 3 shows the first character)
     uint8_t brightness = 0;  // 0 to 15
     bool forceBlank = true;
 };

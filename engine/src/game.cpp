@@ -909,16 +909,26 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
                 titleData_ = loadTitleData(packDir_);
                 titleDataLoaded_ = true;
             }
-            cutscene_ = std::make_unique<EndingCard>(menuScreen_, names, frames > 0 ? frames : FF6_CARD_FRAMES,
-                                                     creditsPages(creditsScene(byteAt(0)), titleData_.credits),
-                                                     endingCharacters(byteAt(0)), makeFlightBackdrop(titleData_, byteAt(0)), makeEndingNames(titleData_, byteAt(0)));
+            cutscene_ = makeEndingCard(menuScreen_, titleData_, byteAt(0), names, frames > 0 ? frames : FF6_CARD_FRAMES);
             brightness_ = 0;
             fade_ = 0;
             fadeInPending_ = false;
             break;
         }
         case FF6_EVENT_ENDING_AIRSHIP:
-            break;  // the loop of the Falcon scene ends at its first frame, with the screen blank
+            if (!titleDataLoaded_) {
+                titleData_ = loadTitleData(packDir_);
+                titleDataLoaded_ = true;
+            }
+            if (!worldDataLoaded_) {
+                worldData_ = loadWorldData(packDir_);
+                worldDataLoaded_ = true;
+            }
+            cutscene_ = std::make_unique<FalconScene>(titleData_, worldData_);
+            brightness_ = 0;
+            fade_ = 0;
+            fadeInPending_ = false;
+            break;
         case FF6_EVENT_THE_END:
             if (!titleDataLoaded_) {
                 titleData_ = loadTitleData(packDir_);

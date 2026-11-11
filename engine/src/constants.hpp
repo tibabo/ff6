@@ -126,7 +126,7 @@
 #define FF6_PACK_MAGIC_SIZE 8
 #define FF6_COMMON_MAGIC "FF6COMMN"
 #define FF6_MAP_MAGIC "FF6MAP01"
-#define FF6_PACK_VERSION 31
+#define FF6_PACK_VERSION 36
 #define FF6_COMMON_FILE "common.ff6data"
 #define FF6_MAP_DIR "maps"
 #define FF6_MAP_FILE_EXTENSION ".ff6map"
@@ -1759,6 +1759,17 @@
 #define FF6_TITLE_SKY_PAL_BYTES 0x20
 #define FF6_TITLE_ENDING_ANIM_BYTES 0xE24  // the sprites of the big names of the ending, as the ROM has them (C2/8A70)
 #define FF6_TITLE_ENDING_FONT_BYTES 0x8A0
+#define FF6_TITLE_ENDING_GFX_1_BYTES 0x5040  // the backgrounds of the scenes of the ending, decompressed
+#define FF6_TITLE_ENDING_ANIM_2_BYTES 0x4C0  // the sprites of the characters, the birds and "and you" (CF/F450)
+#define FF6_TITLE_ENDING_GFX_2_BYTES 0x380  // the graphics of the sprites of the scenes of the characters, decompressed
+#define FF6_TITLE_ENDING_GFX_3_BYTES 0xEB0
+#define FF6_TITLE_ENDING_GFX_4_BYTES 0x800
+#define FF6_TITLE_ENDING_GFX_5_BYTES 0xC0
+#define FF6_TITLE_CREDITS_SMALL_FONT_BYTES 0x220  // the letters of the small font of the credits, then its period and its space (C4/7FC0)
+#define FF6_TITLE_FALCON_FRAMES_BYTES 0x308  // the frames of the particles of the Falcon, and the bytes after them that the game reads (EE/5196 and $FD00 on)
+#define FF6_TITLE_ENDING_AIRSHIP_PAL_BYTES 0x100  // the colors of the ground in the scene of the Falcon (EF/FAC8)
+#define FF6_TITLE_ENDING_PHASE_BYTES 0x80  // the bytes of the code that the birds start their phase from (C3/CB68)
+#define FF6_TITLE_ENDING_COIN_BYTES 0x1B4  // the coin of Edgar, from the data of the menus (D8/EC93)
 #define FF6_TITLE_CREDITS_BYTES 0xDC6  // the pages of the credits and their words, as the ROM has them (C2/9894)
 #define FF6_TITLE_GFX_BYTES 44712  // what the game decompresses to $7f0000
 #define FF6_TITLE_MAP_GFX_COUNT 4  // the sealed gate, then three graphics of Narshe

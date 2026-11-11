@@ -41,6 +41,7 @@
 #include "state/party_ops.hpp"
 #include "cutscene/train.hpp"
 #include "cutscene/ending_card.hpp"
+#include "cutscene/falcon.hpp"
 #include "cutscene/floating.hpp"
 #include "cutscene/ruin.hpp"
 #include "cutscene/the_end.hpp"

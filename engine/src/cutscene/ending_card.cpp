@@ -2,13 +2,13 @@
 
 #include <algorithm>
 #include <map>
+#include <tuple>
 
 namespace ff6 {
 namespace {
 
 constexpr int kFadeIn = 30, kFadeOut = 15;
 constexpr int kCreditsBase = 0x9894, kCreditsEnd = 0x9C44;  // where the data starts in its bank, and where the pages stop
-constexpr int kWordFrames = 420, kWordRise = 64, kWordFadeIn = 32, kWordFadeOut = 128;
 
 struct PageAt {
     int scene, page, address;
@@ -27,7 +27,7 @@ struct WordTables {
 constexpr WordTables kTables[7] = {{0x9DC0, 0x04, 0x9C44, 0x08}, {0x9DC4, 0x28, 0x9C4C, 0x60}, {0x9DEC, 0x18, 0x9CAC, 0x40}, {0x9E04, 0x20, 0x9CEC, 0x64},
                                    {0x9E24, 0x24, 0x9D50, 0x70}, {0x9E48, 0xE4, 0, 0},         {0x9F2C, 0x6C, 0, 0}};
 
-// A letter of the credits font: the big capitals are 16x16 tiles of a sheet, the small letters take one tile each.
+// A letter of the credits font: the big capitals are 8x16 tiles of a sheet, the small letters take one tile each.
 char creditsLetter(uint8_t code) {
     if (code >= 0xE0) return code <= 0xF9 ? static_cast<char>('a' + code - 0xE0) : code == 0xFA ? '.' : ' ';
     return static_cast<char>('A' + (code - 0x40) / 0x20 * 8 + (code - 0x40) % 0x20 / 2);
@@ -70,13 +70,20 @@ std::vector<CreditsPage> creditsPages(int scene, const std::vector<uint8_t>& dat
     const auto byteAt = [&](int address) { return address >= kCreditsBase && address - kCreditsBase < static_cast<int>(data.size()) ? data[static_cast<size_t>(address - kCreditsBase)] : 0; };
     const auto wordAt = [&](int address) { return byteAt(address) | byteAt(address + 1) << 8; };
     // Each word is where its table puts it in the memory of the game, which the pages ask for.
-    std::map<int, std::string> words;
+    struct Text {
+        std::string text, codes;
+        bool big;
+    };
+    std::map<int, Text> words;
     const WordTables& tables = kTables[scene - 1];
-    for (const auto& [address, bytes] : {std::pair{tables.small, tables.smallBytes}, std::pair{tables.big, tables.bigBytes}}) {
+    for (const auto& [address, bytes, big] : {std::tuple{tables.small, tables.smallBytes, false}, std::tuple{tables.big, tables.bigBytes, true}}) {
         for (int i = 0; i < bytes; i += 4) {
-            std::string text;
-            for (int at = wordAt(address + i); byteAt(at) != 0; ++at) text += creditsLetter(byteAt(at));
-            words[wordAt(address + i + 2)] = text;
+            Text word{"", "", big};
+            for (int at = wordAt(address + i); byteAt(at) != 0; ++at) {
+                word.text += creditsLetter(byteAt(at));
+                word.codes += static_cast<char>(byteAt(at));
+            }
+            words[wordAt(address + i + 2)] = word;
         }
     }
     for (size_t i = 0; i < sizeof(kPages) / sizeof(kPages[0]); ++i) {
@@ -86,7 +93,7 @@ std::vector<CreditsPage> creditsPages(int scene, const std::vector<uint8_t>& dat
         page.start = pageStart(scene, kPages[i].page);
         for (int at = kPages[i].address; at < end; at += 4) {
             const auto found = words.find(wordAt(at));
-            if (found != words.end()) page.words.push_back({byteAt(at + 2), byteAt(at + 3), found->second});
+            if (found != words.end()) page.words.push_back({byteAt(at + 2), byteAt(at + 3), found->second.text, found->second.codes, found->second.big});
         }
         pages.push_back(std::move(page));
     }
@@ -120,47 +127,43 @@ std::vector<int> endingCharacters(int state) {
     return {};
 }
 
+std::unique_ptr<EndingCard> makeEndingCard(MenuScreen& screen, const TitleData& data, int state, const std::vector<std::string>& names, int frames) {
+    return std::make_unique<EndingCard>(screen, names, frames > 0 ? frames : 1, endingCharacters(state),
+                                        makeFlightBackdrop(data, state), makeEndingBook(data, state),
+                                        EndingStage::handles(state) ? std::make_unique<EndingStage>(data, screen, state, names) : nullptr);
+}
+
 void EndingCard::draw(uint8_t* rgba) {
     const int level = std::max(0, std::min({frame_ * 16 / kFadeIn, (frames_ - frame_) * 16 / kFadeOut, 16}));
-    if (!pages_.empty() || backdrop_) {  // the credits on the ground of the flight, or on a sky that gets lighter toward the horizon
-        if (backdrop_) {
-            backdrop_->draw(rgba);
-            for (size_t i = 0; i < static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL; ++i) {
-                if (i % FF6_BYTES_PER_PIXEL != FF6_ALPHA_OFFSET) rgba[i] = static_cast<uint8_t>(rgba[i] * level / 16);
-            }
+    if (stage_) {
+        stage_->draw(rgba);
+        for (size_t i = 0; i < static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL; ++i) {
+            if (i % FF6_BYTES_PER_PIXEL != FF6_ALPHA_OFFSET) rgba[i] = static_cast<uint8_t>(rgba[i] * level / 16);
         }
-        for (int y = 0; y < FF6_SCREEN_HEIGHT && !backdrop_; ++y) {
-            for (int x = 0; x < FF6_SCREEN_WIDTH; ++x) {
-                uint8_t* pixel = rgba + (static_cast<size_t>(y) * FF6_SCREEN_WIDTH + x) * FF6_BYTES_PER_PIXEL;
-                pixel[0] = static_cast<uint8_t>((8 + y / 8) * level / 16);
-                pixel[1] = static_cast<uint8_t>((16 + y / 4) * level / 16);
-                pixel[2] = static_cast<uint8_t>((48 + y / 2) * level / 16);
-                pixel[FF6_ALPHA_OFFSET] = 255;
-            }
+        return;
+    }
+    if (book_) {
+        book_->draw(rgba);
+        for (size_t i = 0; i < static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL; ++i) {
+            if (i % FF6_BYTES_PER_PIXEL != FF6_ALPHA_OFFSET) rgba[i] = static_cast<uint8_t>(rgba[i] * level / 16);
         }
-        for (const CreditsPage& page : pages_) {
-            const int age = frame_ - page.start;
-            if (age < 0 || age >= kWordFrames) continue;
-            screen_.clear();
-            const int rise = std::max(0, (kWordRise - age) / 2);
-            for (const CreditsWord& word : page.words) {
-                screen_.setTextOffset(word.y % FF6_MENU_TILE_SIZE + rise);
-                screen_.text((word.x + FF6_MENU_TILE_SIZE / 2) / FF6_MENU_TILE_SIZE, word.y / FF6_MENU_TILE_SIZE, word.text, MenuScreen::Layer::Bg3, FF6_MENU_BG3_DEFAULT);
-            }
-            const int shown = std::min({age * 16 / kWordFadeIn, (kWordFrames - age) * 16 / kWordFadeOut, 16}) * level / 16;
-            const std::vector<uint8_t>& text = screen_.pixels();
-            for (size_t i = 0; i + FF6_BYTES_PER_PIXEL <= text.size(); i += FF6_BYTES_PER_PIXEL) {
-                if (text[i] == 0 && text[i + 1] == 0 && text[i + 2] == 0) continue;
-                if (backdrop_ && backdrop_->light()) {
-                    static constexpr int kGold[3] = {240, 184, 40};
-                    const int strength = std::max({text[i], text[i + 1], text[i + 2]});
-                    for (int c = 0; c < FF6_ALPHA_OFFSET; ++c) rgba[i + static_cast<size_t>(c)] = static_cast<uint8_t>(kGold[c] * strength / 255 * shown / 16);
-                    continue;
+        return;
+    }
+    if (backdrop_) {  // the ground of the flight, with its credits
+        backdrop_->draw(rgba);
+        for (size_t i = 0; i < static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL; ++i) {
+            if (i % FF6_BYTES_PER_PIXEL != FF6_ALPHA_OFFSET) rgba[i] = static_cast<uint8_t>(rgba[i] * level / 16);
+        }
+        {  // the color window that blacks out the eight pixels at each side, on the lines where the game has it on
+            for (int y = 0; y < FF6_SCREEN_HEIGHT; ++y) {
+                if ((backdrop_->ppu().lines[static_cast<size_t>(y)].cgwsel >> 6) != 2) continue;
+                uint8_t* line = rgba + static_cast<size_t>(y) * FF6_SCREEN_WIDTH * FF6_BYTES_PER_PIXEL;
+                for (int x = 0; x < FF6_SCREEN_WIDTH; ++x) {
+                    if (x >= 8 && x < FF6_SCREEN_WIDTH - 8) continue;
+                    std::fill(line + x * FF6_BYTES_PER_PIXEL, line + x * FF6_BYTES_PER_PIXEL + FF6_ALPHA_OFFSET, uint8_t{0});
                 }
-                for (int c = 0; c < FF6_ALPHA_OFFSET; ++c) rgba[i + static_cast<size_t>(c)] = static_cast<uint8_t>(text[i + static_cast<size_t>(c)] * shown / 16);
             }
         }
-        screen_.setTextOffset(0);
         return;
     }
     screen_.clear();
@@ -175,14 +178,6 @@ void EndingCard::draw(uint8_t* rgba) {
     }
     for (size_t i = 0; i < screen_.pixels().size(); ++i) {
         rgba[i] = (i % FF6_BYTES_PER_PIXEL) == FF6_ALPHA_OFFSET ? screen_.pixels()[i] : static_cast<uint8_t>(screen_.pixels()[i] * level / 16);
-    }
-    if (names_) {
-        std::vector<uint8_t> letters(screen_.pixels().size());
-        names_->draw(letters.data());
-        for (size_t i = 0; i + FF6_BYTES_PER_PIXEL <= letters.size(); i += FF6_BYTES_PER_PIXEL) {
-            if (letters[i] == 0 && letters[i + 1] == 0 && letters[i + 2] == 0) continue;
-            for (int c = 0; c < FF6_ALPHA_OFFSET; ++c) rgba[i + static_cast<size_t>(c)] = static_cast<uint8_t>(letters[i + static_cast<size_t>(c)] * level / 16);
-        }
     }
 }
 

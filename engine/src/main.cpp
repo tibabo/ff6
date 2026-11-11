@@ -15,6 +15,7 @@
 #include "audio/audio_data.hpp"
 #include "audio/sound_program.hpp"
 #include "cutscene/ending_card.hpp"
+#include "cutscene/falcon.hpp"
 #include "cutscene/floating.hpp"
 #include "cutscene/opening.hpp"
 #include "cutscene/ruin.hpp"
@@ -220,35 +221,113 @@ std::unique_ptr<ff6::Game> makeGame(ff6::CommonData common, const std::string& p
     return game;
 }
 
-// Plays one scene (the title screen or the opening) without a window for `--wait` frames, then saves the screen.
-void captureCutscene(const std::string& packDir, const std::string& name, const Capture& capture, ff6::SdlRenderer& renderer) {
-    const ff6::TitleData data = ff6::loadTitleData(packDir);
-    ff6::NoSound sound;
-    std::unique_ptr<ff6::Cutscene> scene;
-    // "ending" and the state of the `ending` command: that scene of the ending.
-    const ff6::CommonData common = ff6::loadCommonData(packDir);
-    const ff6::MenuData menuData = ff6::loadMenuData(packDir);
-    ff6::MenuScreen menuScreen(common, menuData);
+// What a scene needs to be built.
+struct CutsceneKit {
+    ff6::TitleData data;
+    ff6::CommonData common;
+    ff6::MenuData menuData;
+    ff6::MenuScreen menuScreen;
+    ff6::WorldData world;
+    explicit CutsceneKit(const std::string& packDir)
+        : data(ff6::loadTitleData(packDir)), common(ff6::loadCommonData(packDir)), menuData(ff6::loadMenuData(packDir)), menuScreen(common, menuData),
+          world(ff6::loadWorldData(packDir)) {}
+};
+
+std::unique_ptr<ff6::Cutscene> makeCutscene(const std::string& name, CutsceneKit& kit, ff6::Sound& sound);
+
+// All the scenes of the ending one after the other, in the order of the event of the game (FinalBattle_proc): the book and the
+// characters, "and you", the flights of the credits, then the Falcon, the last flight and THE END.
+class EndingChain : public ff6::Cutscene {
+public:
+    EndingChain(CutsceneKit& kit, ff6::Sound& sound) : kit_(kit), sound_(sound) { next(); }
+
+    void tick(const ff6::InputState& input) override {
+        if (!current_) return;
+        current_->tick(input);
+        if (current_->finished()) next();
+    }
+    void draw(uint8_t* rgba) override {
+        if (current_) current_->draw(rgba);
+    }
+    bool finished() const override { return !current_; }
+    bool skipped() const override { return false; }
+
+private:
+    void next() {
+        static const char* const kScenes[] = {"ending45", "ending50", "ending130", "ending64", "ending60", "ending135", "ending70",
+                                              "ending80", "ending100", "ending90", "ending110", "ending40", "ending120", "ending74",
+                                              "ending2",  "ending4",  "ending5",  "ending9",  "ending12", "ending16", "ending20",
+                                              "ending24", "ending28", "falcon",   "ending32", "end"};
+        current_.reset();
+        if (index_ < sizeof(kScenes) / sizeof(kScenes[0])) current_ = makeCutscene(kScenes[index_++], kit_, sound_);
+    }
+
+    CutsceneKit& kit_;
+    ff6::Sound& sound_;
+    std::unique_ptr<ff6::Cutscene> current_;
+    size_t index_ = 0;
+};
+
+// "ending" and the state of the `ending` command: that scene of the ending.
+std::unique_ptr<ff6::Cutscene> makeCutscene(const std::string& name, CutsceneKit& kit, ff6::Sound& sound) {
+    const ff6::TitleData& data = kit.data;
     if (name.rfind("ending", 0) == 0) {
         const int state = std::atoi(name.c_str() + 6);
         std::vector<std::string> names;
         for (const int id : ff6::endingCharacters(state)) names.push_back(ff6::characterName(id));
-        scene = std::make_unique<ff6::EndingCard>(menuScreen, names, std::max(ff6::endingFrames(state), 1),
-                                                  ff6::creditsPages(ff6::creditsScene(state), data.credits), ff6::endingCharacters(state),
-                                                  ff6::makeFlightBackdrop(data, state), ff6::makeEndingNames(data, state));
-    } else if (name == "title") {
-        scene = std::make_unique<ff6::TitleScene>(data, sound);
-    } else if (name == "opening") {
-        scene = std::make_unique<ff6::OpeningScene>(data, sound);
-    } else if (name == "floating") {
-        scene = std::make_unique<ff6::FloatingScene>(data, sound);
-    } else if (name == "end") {
-        scene = std::make_unique<ff6::TheEndScene>(data, sound);
-    } else if (name == "ruin") {
-        scene = std::make_unique<ff6::RuinScene>(data, sound);
-    } else {
-        throw std::runtime_error("--cutscene takes title, opening, ruin, floating, end or endingN");
+        return ff6::makeEndingCard(kit.menuScreen, data, state, names, std::max(ff6::endingFrames(state), 1));
     }
+    if (name == "all") return std::make_unique<EndingChain>(kit, sound);
+    if (name == "title") return std::make_unique<ff6::TitleScene>(data, sound);
+    if (name == "opening") return std::make_unique<ff6::OpeningScene>(data, sound);
+    if (name == "floating") return std::make_unique<ff6::FloatingScene>(data, sound);
+    if (name == "end") return std::make_unique<ff6::TheEndScene>(data, sound);
+    if (name == "ruin") return std::make_unique<ff6::RuinScene>(data, sound);
+    if (name == "falcon") return std::make_unique<ff6::FalconScene>(data, kit.world);
+    throw std::runtime_error("--cutscene takes title, opening, ruin, floating, falcon, end, all or endingN");
+}
+
+// Plays one scene in a window, with its sound, until it ends or Escape.
+void playCutscene(const std::string& packDir, const std::string& name, ff6::SdlRenderer& renderer) {
+    CutsceneKit kit(packDir);
+    const ff6::AudioData audio = ff6::loadAudioData(packDir);
+    ff6::SoundProgram program(audio);
+    ff6::SdlAudio sound(program);
+    const std::unique_ptr<ff6::Cutscene> scene = makeCutscene(name, kit, sound);
+    ff6::SdlInput input;
+    const ff6::TextureId texture = renderer.createTexture(FF6_SCREEN_WIDTH, FF6_SCREEN_HEIGHT, nullptr, ff6::TextureUsage::Dynamic);
+    const ff6::Rect screen{0, 0, FF6_SCREEN_WIDTH, FF6_SCREEN_HEIGHT};
+    std::vector<uint8_t> pixels(static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL);
+    const double ticksPerFrame = static_cast<double>(SDL_GetPerformanceFrequency()) / FF6_FRAMES_PER_SECOND;
+    Uint64 previous = SDL_GetPerformanceCounter();
+    double accumulator = 0;
+    bool running = true;
+    while (running && !scene->finished()) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            input.handle(event);
+            if (event.type == SDL_QUIT || (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE)) running = false;
+        }
+        const Uint64 now = SDL_GetPerformanceCounter();
+        accumulator = std::min(accumulator + static_cast<double>(now - previous), ticksPerFrame * FF6_MAX_CATCHUP_FRAMES);
+        previous = now;
+        while (accumulator >= ticksPerFrame) {
+            accumulator -= ticksPerFrame;
+            scene->tick(input.sample());
+        }
+        scene->draw(pixels.data());
+        renderer.beginFrame();
+        renderer.updateTexture(texture, pixels.data());
+        renderer.draw(texture, screen, screen);
+        renderer.endFrame();
+    }
+}
+
+// Plays one scene (the title screen or the opening) without a window for `--wait` frames, then saves the screen.
+void captureCutscene(const std::string& packDir, const std::string& name, const Capture& capture, ff6::SdlRenderer& renderer) {
+    CutsceneKit kit(packDir);
+    ff6::NoSound sound;
+    const std::unique_ptr<ff6::Cutscene> scene = makeCutscene(name, kit, sound);
     for (int frame = 0; frame < capture.waitFrames && !scene->finished(); ++frame) scene->tick({});
     std::vector<uint8_t> pixels(static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL);
     scene->draw(pixels.data());
@@ -268,6 +347,10 @@ int run(const std::string& packDir, const Start& start, const std::string& saveP
     ff6::SdlRenderer renderer(capture != nullptr);
     if (capture && !start.cutscene.empty()) {
         captureCutscene(packDir, start.cutscene, *capture, renderer);
+        return 0;
+    }
+    if (!capture && !start.cutscene.empty()) {
+        playCutscene(packDir, start.cutscene, renderer);
         return 0;
     }
     if (capture) {  // no sound device for a capture
@@ -367,7 +450,7 @@ void writeAnimSheet(const std::string& packDir, int attack, int layer, const std
 }  // namespace
 
 int main(int argc, char** argv) {
-    const char* usage = "Usage: %s <data-pack-dir> [--map n] [--party terra,locke,...] [--battle n [--bg n]] [--play attack] [--status bits] [--scene n] [--stock 1] [--anim attack [--layer 0|1|2]] [--load save.json] [--save save.json] [--music song] [--new-game 1] [--cutscene title|opening|ruin|floating|end --capture out.bmp --wait frames] [--capture out.bmp [--at x,y] [--wait frames] [--moves URDL...] [--talk frames] [--keys ABURDL.] [--after frames]]\n";
+    const char* usage = "Usage: %s <data-pack-dir> [--map n] [--party terra,locke,...] [--battle n [--bg n]] [--play attack] [--status bits] [--scene n] [--stock 1] [--anim attack [--layer 0|1|2]] [--load save.json] [--save save.json] [--music song] [--new-game 1] [--cutscene title|opening|ruin|floating|falcon|end|all|endingN [--capture out.bmp --wait frames]] [--capture out.bmp [--at x,y] [--wait frames] [--moves URDL...] [--talk frames] [--keys ABURDL.] [--after frames]]\n";
     if (argc < 2) {
         std::fprintf(stderr, usage, argc > 0 ? argv[0] : "ff6");
         return 2;
@@ -466,7 +549,6 @@ int main(int argc, char** argv) {
         if (capture.path.empty() && (!capture.moves.empty() || capture.talkFrames >= 0 || capture.menuCursor >= 0 || capture.waitFrames > 0 || capture.atX >= 0 || !capture.keys.empty() || capture.afterFrames > 0)) {
             throw std::runtime_error("--at, --wait, --moves, --talk, --keys and --after require --capture");
         }
-        if (!cutscene.empty() && capture.path.empty()) throw std::runtime_error("--cutscene requires --capture");
         if (animAttack >= 0) {
             if (capture.path.empty()) throw std::runtime_error("--anim requires --capture");
             writeAnimSheet(argv[1], animAttack, animLayer, capture.path);

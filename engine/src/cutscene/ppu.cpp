@@ -87,15 +87,22 @@ void drawMode7(const Ppu& ppu, int y, Row& out) {
     const auto signed13 = [](int value) { return (value & 0x1000) ? (value & 0x1FFF) - 0x2000 : value & 0x1FFF; };
     const auto clip = [](int value) { return (value & 0x2000) ? (value | ~1023) : (value & 1023); };
     const int a = line.m7a, b = line.m7b, c = line.m7c, d = line.m7d;
-    const int centerX = signed13(ppu.m7x), centerY = signed13(ppu.m7y);
-    const int offsetX = clip(signed13(ppu.m7hofs) - centerX), offsetY = clip(signed13(ppu.m7vofs) - centerY);
+    const int centerX = signed13(line.m7Own ? line.m7x : ppu.m7x), centerY = signed13(line.m7Own ? line.m7y : ppu.m7y);
+    const int offsetX = clip(signed13(line.m7Own ? line.m7hofs : ppu.m7hofs) - centerX);
+    const int offsetY = clip(signed13(line.m7Own ? line.m7vofs : ppu.m7vofs) - centerY);
     const int originX = ((a * offsetX) & ~63) + ((b * offsetY) & ~63) + ((b * y) & ~63) + (centerX << 8);
     const int originY = ((c * offsetX) & ~63) + ((d * offsetY) & ~63) + ((d * y) & ~63) + (centerY << 8);
     for (int x = 0; x < kWidth; ++x) {
-        const int px = ((originX + a * x) >> 8) & 1023, py = ((originY + c * x) >> 8) & 1023;
-        const int tile = ppu.vram[static_cast<size_t>(((py >> 3) * 128 + (px >> 3)) & kVramMask)] & 0xFF;
-        const int color = ppu.vram[static_cast<size_t>((tile * 64 + (py & 7) * 8 + (px & 7)) & kVramMask)] >> 8;
+        const int rawX = (originX + a * x) >> 8, rawY = (originY + c * x) >> 8;
+        const int px = rawX & 1023, py = rawY & 1023;
+        const bool outside = rawX < 0 || rawX > 1023 || rawY < 0 || rawY > 1023;
         Px& pixel = out[static_cast<size_t>(x)];
+        if (outside && (ppu.m7sel >> 6) == 2) {
+            pixel.on = false;
+            continue;
+        }
+        const int tile = outside && (ppu.m7sel >> 6) == 3 ? 0 : ppu.vram[static_cast<size_t>(((py >> 3) * 128 + (px >> 3)) & kVramMask)] & 0xFF;
+        const int color = ppu.vram[static_cast<size_t>((tile * 64 + (py & 7) * 8 + (px & 7)) & kVramMask)] >> 8;
         pixel.on = color != 0;
         if (pixel.on) pixel.color = ppu.cgram[static_cast<size_t>(color)];
         pixel.priority = 0;
@@ -155,18 +162,23 @@ Pick frontPixel(int mask, int x, int mode, bool bg3Front, const std::array<Row, 
 
 int channel(uint16_t color, int shift) { return color >> shift & 31; }
 
+// Whether the pixel x is in the area that the two windows of `select` (bit 0 and 2 invert, 1 and 3 turn on) make.
+bool insideWindows(const PpuLine& line, int select, int x) {
+    bool inside = false;
+    for (int window = 0; window < 2; ++window) {
+        if (!(select & (2 << window * 2))) continue;
+        const bool within = x >= line.window[static_cast<size_t>(window) * 2] && x <= line.window[static_cast<size_t>(window) * 2 + 1];
+        inside = inside || (within != ((select & (1 << window * 2)) != 0));
+    }
+    return inside;
+}
+
 // Takes away the pixels that the windows hide on the main screen.
 void applyWindows(const PpuLine& line, std::array<Row, 3>& bg, Row& objects, int tm) {
     const auto hide = [&](int select, int layerBit, Row& row) {
         if (!(line.tmw & layerBit) || !(tm & layerBit) || !(select & 0xA)) return;
         for (int x = 0; x < kWidth; ++x) {
-            bool inside = false;
-            for (int window = 0; window < 2; ++window) {
-                if (!(select & (2 << window * 2))) continue;
-                const bool within = x >= line.window[static_cast<size_t>(window) * 2] && x <= line.window[static_cast<size_t>(window) * 2 + 1];
-                inside = inside || (within != ((select & (1 << window * 2)) != 0));
-            }
-            if (inside) row[static_cast<size_t>(x)].on = false;
+            if (insideWindows(line, select, x)) row[static_cast<size_t>(x)].on = false;
         }
     };
     hide(line.w12sel & 15, 1, bg[0]);
@@ -213,6 +225,9 @@ void Ppu::render(uint8_t* rgba) const {
             Pick main = frontPixel(tm, x, mode, bg3Front, bg, objects, cgram[0]);
             const int enabled = main.source == kBackdrop ? 0x20 : main.source == kObj ? (main.math ? 0x10 : 0) : 1 << main.source;
             uint16_t color = main.color;
+            // The color window blacks out the main screen (bits 6 and 7 of CGWSEL: never, outside, inside, always) before the math.
+            const int clip = line.cgwsel >> 6 & 3;
+            if (clip == 3 || (clip != 0 && insideWindows(line, line.wobjsel >> 4, x) == (clip == 2))) color = 0;
             if (line.cgadsub & enabled) {
                 bool subIsBackdrop = !subScreen;
                 uint16_t other = fixed;

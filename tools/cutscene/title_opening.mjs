@@ -37,6 +37,23 @@ const ENDING_ANIM = 0x028a70;  // C2/8A70: the animations and sprites of the end
 export const ENDING_ANIM_BYTES = 0xe24;
 const ENDING_FONT = 0x04ba00;  // C4/BA00, compressed: 2 bits per pixel, the letters of the names
 export const ENDING_FONT_BYTES = 0x8a0;
+const ENDING_GFX_1 = 0x04c008;  // C4/C008, compressed: the characters and the maps of the backgrounds of the scenes of the characters and of the book
+export const ENDING_GFX_1_BYTES = 0x5040;
+const ENDING_ANIM_2 = 0x0ff450;  // CF/F450: the animations and sprites of the characters, the birds, the boat and "and you" (whose count reads 12 sprites too many, as the game does)
+export const ENDING_ANIM_2_BYTES = 0x4c0;
+const ENDING_PHASE = 0x03cb68;  // C3/CB68: the code of the birds, whose bytes the game reads as the first phase of each one (an error of the game)
+export const ENDING_PHASE_BYTES = 0x80;
+const ENDING_AIRSHIP_PAL = 0x2ffac8;  // EF/FAC8: the colors of the ground in the scene of the Falcon
+export const ENDING_AIRSHIP_PAL_BYTES = 0x100;
+const FALCON_FRAMES = 0x2f4e96;  // EE/5196 + $FD00: the table of the frames of the particles, which the game reads past its end for the first one of each frame
+export const FALCON_FRAMES_BYTES = 0x308;
+const CREDITS_SMALL_FONT = [[0x0487c0, 0x200], [0x048c10, 0x10], [0x048fb0, 0x10]];  // C4/7FC0 + $800, + $C50 and + $FF0: the letters, the period and the space
+export const CREDITS_SMALL_FONT_BYTES = 0x220;
+const ENDING_COIN = 0x18ec93;  // D8/EC93: the animation and the sprites of the coin of Edgar, in the data of the menus
+export const ENDING_COIN_BYTES = 0x1b4;
+// The graphics of the sprites of the scenes of the characters (C4/F477, C4/F6FB, D9/9D4B and D9/A4E5, compressed), decompressed.
+const ENDING_SPRITE_GFX = [[0x04f477, 0x380], [0x04f6fb, 0xeb0], [0x199d4b, 0x800], [0x19a4e5, 0xc0]];
+export const ENDING_SPRITE_GFX_BYTES = ENDING_SPRITE_GFX.reduce((total, [, bytes]) => total + bytes, 0);
 const SINE_16 = 0x02fc6d;  // C2/FC6D: 256 signed words
 export const SINE_16_BYTES = 0x200;
 const MAP_GFX_PTRS = 0x1fda00;
@@ -84,6 +101,20 @@ export function readEndingFont(rom) {
   return font;
 }
 
+export function readEndingSpriteGfx(rom) {
+  return Buffer.concat(ENDING_SPRITE_GFX.map(([offset, bytes]) => {
+    const gfx = decompressLzss(rom, offset, 0x20000);
+    if (gfx.length !== bytes) throw new Error('Unexpected ending sprite graphics size.');
+    return gfx;
+  }));
+}
+
+export function readEndingGfx1(rom) {
+  const gfx = decompressLzss(rom, ENDING_GFX_1, 0x20000);
+  if (gfx.length !== ENDING_GFX_1_BYTES) throw new Error('Unexpected ending graphics size.');
+  return gfx;
+}
+
 export function readCutsceneMapGfx(rom) {
   return Buffer.concat(CUTSCENE_MAP_GFX.map(index => (
     slice(rom, MAP_GFX + read24(rom, MAP_GFX_PTRS + index * 3), MAP_GFX_BYTES, `Map graphics ${index}`)
@@ -118,5 +149,13 @@ export function buildTitleData(rom, version) {
     slice(rom, SKY_PAL, SKY_PAL_BYTES, 'Sky palette'),
     slice(rom, ENDING_ANIM, ENDING_ANIM_BYTES, 'Ending animations'),
     readEndingFont(rom),
+    readEndingGfx1(rom),
+    slice(rom, ENDING_ANIM_2, ENDING_ANIM_2_BYTES, 'Ending animations 2'),
+    readEndingSpriteGfx(rom),
+    slice(rom, ENDING_COIN, ENDING_COIN_BYTES, 'Ending coin'),
+    slice(rom, ENDING_PHASE, ENDING_PHASE_BYTES, 'Ending bird phases'),
+    slice(rom, ENDING_AIRSHIP_PAL, ENDING_AIRSHIP_PAL_BYTES, 'Ending airship palette'),
+    slice(rom, FALCON_FRAMES, FALCON_FRAMES_BYTES, 'Falcon particle frames'),
+    ...CREDITS_SMALL_FONT.map(([offset, bytes]) => slice(rom, offset, bytes, 'Credits small font')),
   ]);
 }
