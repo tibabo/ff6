@@ -15,7 +15,11 @@ const CHAR_PAL = 0x2d6300;  // ED/6300
 
 const table = (rom, start, length) => Buffer.from(rom.subarray(start, start + length));
 
-export const STATUS_GFX_BYTES = 0x1000;  // the sprites of the statuses (poison to sleep): 4 frames of 16 x 16 pixels for each, 16 tiles wide
+// The sprites of the statuses (poison to sleep): 4 frames of 16 x 16 pixels for each, 16 tiles wide (the first 0x1000 bytes); then, from 0x1800,
+// the word Miss (two tiles) and the ten digits of the numbers of damage (a tile each, from 0x1840), which the battle draws as sprites.
+export const STATUS_GFX_BYTES = 0x1980;
+export const STATUS_NUMERAL_MISS = 0x1800;
+export const STATUS_NUMERAL_DIGITS = 0x1840;
 const STATUS_GFX = 0x12e000;  // D2/E000, compressed
 export const STATUS_PAL_BYTES = 32;  // four palettes of the colors 12 to 15
 const STATUS_PAL = 0x02c689;  // C2/C689

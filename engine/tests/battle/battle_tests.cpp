@@ -171,11 +171,14 @@ void testBattle() {
     }
     CHECK(lit > 1000);
     view.start(data, rules, played, {0}, 0, 1, FF6_BATTLE_SPEED_DEFAULT, true);
-    bool sawCommand = false, sawTarget = false, sawPopup = false, drew = false, sawLate = false;
+    bool sawCommand = false, sawTarget = false, sawPopup = false, drew = false, sawLate = false, silent = true, numbers = false, fewNumbers = true;
     for (int frame = 0; frame < 60000 && !view.finished(); ++frame) {
         sawCommand = sawCommand || view.mode() == ff6::BattleMode::Command;
         sawTarget = sawTarget || view.mode() == ff6::BattleMode::Target;
         sawPopup = sawPopup || (view.popupTarget() >= 0 && view.popupDamage() > 0);
+        numbers = numbers || view.numeralCount() > 0;  // the number that jumps over the target
+        fewNumbers = fewNumbers && view.numeralCount() <= 4;
+        silent = silent && !(view.popupTarget() >= 0 && view.popupDamage() >= 0 && !view.message().empty());  // the damage has no text: only its number
         sawLate = sawLate || (view.battle()->outcome() == ff6::BattleOutcome::Won && !view.resolved());
         if (frame % 50 == 0 || view.mode() == ff6::BattleMode::Command) {
             view.draw();
@@ -184,7 +187,7 @@ void testBattle() {
         view.update(press);
     }
     CHECK(view.finished() && view.outcome() == ff6::BattleOutcome::Won);
-    CHECK(sawCommand && sawTarget && sawPopup && drew);
+    CHECK(sawCommand && sawTarget && sawPopup && drew && silent && numbers && fewNumbers);
     CHECK(sawLate);  // the blow that wins is shown before the victory
     CHECK(played.gil == party.gil + view.battle()->reward().gil && played.characters[0].experience >= party.characters[0].experience);
     bool selected = false;

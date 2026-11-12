@@ -349,9 +349,14 @@ Limites actuelles :
   le fond de combat de la carte, les monstres a la place que donne la formation
   et les personnages debout, a genoux ou a terre sont dessines avec leurs vraies
   images et palettes (`battlegfx.ff6data`), et les degats s'affichent au-dessus
-  de la cible. Le champ ondule dans le desert, le brasier et sous l'eau
+  de la cible comme dans le jeu : le jeu ne dit rien des coups, des degats, des soins ni
+  des monstres vaincus, il fait sauter des chiffres (sprites de 8 x 8 pixels des graphismes
+  de statut, blancs, verts pour un soin, le mot Miss pour un coup manque) qui rebondissent
+  selon `DmgNumBounceTbl` et durent 64 images, ou jusqu'a la disparition du monstre. Le champ ondule dans le desert, le brasier et sous l'eau
   (d'un cote et de l'autre) et, vers le haut et le bas seulement, dans le reve de
-  Cyan et chez les tentacules ; les monstres qui tombent se dissolvent, et un
+  Cyan et chez les tentacules ; les monstres qui tombent deviennent violets et s'estompent
+  en 32 images (la palette de `MonsterDeathPal`, qui perd un cran de chaque couleur a chaque image,
+  ajoutee au fond ; elle commence 6 images apres le chiffre) ; un
   personnage qui fuit court vers le bord de l'ecran ; les monstres sont retournes lors
   d'une attaque dans le dos ou, ceux dont le bord droit passe x = 0x68, d'une
   attaque en tenaille (`CalcMonsterPos` : le groupe est alors au milieu du champ,
@@ -359,8 +364,8 @@ Limites actuelles :
   se tourne vers sa cible ; dans une
   attaque de cote, les deux derniers sont de l'autre cote), et les
   actions ont leur effet : le personnage avance et frappe, lance un sort, se
-  protege ou grimace, le monstre touche clignote puis s'efface, le champ
-  s'eclaire de la couleur de l'element, et le groupe leve les bras a la
+  protege ou grimace, le monstre touche (sans animation du jeu) clignote puis s'efface, le champ
+  ne s'eclaire plus que pour un coup critique, et le groupe leve les bras a la
   victoire. Les sorts, les techniques et les coups d'arme jouent les vraies
   animations du jeu (`battle/attack_anim_player.cpp` execute leurs scripts de
   sprites, un fil par cible, avec les couches bg1 et bg3, les vecteurs, les
@@ -383,7 +388,11 @@ Limites actuelles :
   par ligne de bg1 et de bg3 (lune, quasar, vents, tentacules, souffle mental), l'echange de palette de la
   cible et les mouvements polaires et sinusoidaux de `$80`, la perle, la tornade, la course des personnages et les echos. Un trait blanc, un anneau ou des etincelles dessines a la main
   remplacent l'animation d'une attaque qui n'en a pas. `--anim n --capture`
-  ecrit la planche des images d'une attaque.
+  ecrit la planche des images d'une attaque. L'animation d'un coup est l'entree de la table des armes qui suit
+  le numero de l'objet en main (la premiere, pour les poings) ; un monstre frappe avec l'objet que nomme
+  l'octet 26 de ses proprietes (le garde de Narshe : un trait horizontal). Les couches bg1 et bg3 des animations ont des tuiles de 16 x 16
+  sur une carte de 32 x 32 : elles font le tour tous les 512 pixels, et un rayon (256 pixels de large)
+  ne revient pas de l'autre cote.
   Les noms des poses ne sont pas dans le jeu : elles sont choisies sur la planche
   des personnages. Defilement des fonds (nuages, cascade, trains, voiture Magitek, a chaque image comme UpdateBattleBG) et palettes qui tournent (radeau, cascade, monde du reve de Cyan). Le dernier Kefka tremble de 0 a 2 pixels pendant sa mort comme le fond 36. Ne sont pas dessines : les
   animations des esprits et des attaques a vecteurs, les images des esprits ;

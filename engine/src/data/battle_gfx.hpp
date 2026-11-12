@@ -25,12 +25,15 @@ struct BattleGfx {
     std::vector<uint8_t> bgProp, bgPal, bgGfx, bgTiles;  // the backgrounds of the battlefield
     std::vector<uint8_t> charGfx, charActions, charPalTable, charPal;  // the characters, in their poses
     std::vector<uint8_t> magitekGfx;  // FF6_MAGITEK_FRAMES of FF6_MAGITEK_FRAME_BYTES, the armor of the characters in a magitek battle
-    std::vector<uint8_t> statusGfx, statusPal;  // the sprites of the statuses (FF6_STATUS_GFX_BYTES) and their four palettes of the colors 12 to 15
+    std::vector<uint8_t> statusGfx, statusPal;  // the sprites of the statuses and the digits of the damage (FF6_STATUS_GFX_BYTES), and their four palettes of the colors 12 to 15
 
     // The picture of a monster from the top left tile of its stencil; empty for a number that has none. Decoded once.
     const BattleImage& monster(int id) const;
     // The same with the first 8 colors of its palette replaced (BGR555, the first one stays transparent); not kept.
     BattleImage monsterWith(int id, const std::array<uint16_t, 8>& colors) const;
+    // A monster in the purple of its death, `step` frames into the fade (0 to FF6_BATTLE_DEATH_FRAMES - 1): every color of its palette is
+    // the purple of the same number, and each frame takes one step of red, green and blue from it. Not kept.
+    BattleImage monsterFading(int id, int step) const;
     // The battlefield behind the monsters, FF6_SCREEN_WIDTH wide, one with no pixel for a background that has none. `step` is
     // the turn of the palette of the fields whose colors run (see backgroundStep). `palette` (3 of 16 BGR555 words) replaces the
     // colors of the field, `variant` (1 and up) telling the replacements apart.
@@ -51,10 +54,13 @@ struct BattleGfx {
     const BattleImage& statusSprite(int kind, int frame) const;
     // The magitek armor at one of its frames, 32 x 32.
     const BattleImage& magitekArmor(int frame) const;
+    // A number of damage as the game draws it: its digits one after the other (8 x 8 each, white with a dark outline, or green for what
+    // heals), or for a negative value the word Miss (16 x 8).
+    const BattleImage& numeral(int value, bool green) const;
 
 private:
-    BattleImage decodeMonster(int id, const std::array<uint16_t, 8>* replace) const;
-    mutable std::map<int, BattleImage> monsters_, backgrounds_, characters_, statuses_, armors_;
+    BattleImage decodeMonster(int id, const uint16_t* replace, size_t count) const;
+    mutable std::map<int, BattleImage> monsters_, backgrounds_, characters_, statuses_, armors_, numerals_;
     mutable std::map<int, std::vector<uint8_t>> characterColors_;  // the numbers of the colors of each pixel, 0 for none
 };
 

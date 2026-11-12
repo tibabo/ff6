@@ -69,6 +69,8 @@ public:
     // The combatant over which the damage of the message is shown, and the damage; -1 when there is none.
     int popupTarget() const { return popupTarget_; }
     int popupDamage() const { return popupDamage_; }
+    // How many numbers of damage are jumping over the combatants (the game keeps four at most).
+    size_t numeralCount() const { return numerals_.size(); }
     // Whether everything that happened has been shown: no message, animation or number is left to come.
     bool resolved() const { return messages_.empty() && messageTimer_ == 0 && pendingPopup_.target < 0 && !animating(); }
     // Ends the battle and lets go of it: the party keeps what it won.
@@ -183,6 +185,7 @@ private:
         bool leftHand = false;  // a blow: the weapon is the one in the left hand; `attack` is its animation
         bool instant = false;  // it has no text and takes no time: the next message comes at once
         bool moves = false;  // the characters stay where the animation leaves them, in the pose that it gives them (as after a scene)
+        int wait = -1;  // how many frames it stays once its number shows, -1 for the usual time
     };
     void trigger(const Message& message);
     void startAnimation(const Message& message);
@@ -251,8 +254,16 @@ private:
     int popupTarget_ = -1, popupDamage_ = -1;
     // The damage and the hit points show when the animation of the blow is over, not when the battle has worked them out.
     struct PendingPopup {
-        int target = -1, damage = -1, hp = -1;
+        int target = -1, damage = -1, hp = -1, wait = -1;
+        bool green = false;  // the number is a recovery
     } pendingPopup_;
+    // The numbers of damage that show over the combatants, as sprites that jump and fall (the game keeps four at most).
+    struct Numeral {
+        int target = -1, value = 0, frame = 0;  // a negative value is the word Miss
+        bool green = false;
+    };
+    std::vector<Numeral> numerals_;
+    void addNumeral(int target, int damage, bool green);
     std::array<int, FF6_BATTLE_COMBATANTS> prevHp_{}, heldHp_{}, queuedHp_{};  // before the action, shown until its message, after the queued messages
     int shownHp(int combatant) const;
     bool monsterListed(int combatant) const;

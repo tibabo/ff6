@@ -277,5 +277,13 @@ void testAttackAnimPlayer() {
     }
     CHECK(firstGlow > 10);
     CHECK(player.shift(false, 0).armor == 2 && player.shift(false, 0).x < -40);
+    // The init function of the beams copies the thread of the flare twice, 8 frames apart: the flares overlap.
+    size_t flares = 0;
+    while (player.tick()) {
+        size_t now = 0;
+        for (const ff6::AnimSprite& sprite : player.sprites()) now += sprite.layer == 0;
+        flares = std::max(flares, now);
+    }
+    CHECK(flares >= 2);
     player.setMagitek(false);
 }

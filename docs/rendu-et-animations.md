@@ -41,7 +41,7 @@ ROM ──tools/battle/attack_anim.mjs──> output/pack/attackanim.ff6data
 | Sort ou attaque | son numéro d'attaque |
 | Outil (Tools) | 328 + (objet − 163) ; Chain Saw qui tue : 336 |
 | Bio Blaster, Flash | attaques 125 et 126 |
-| Coup d'arme | table à part (`weapon(objet)`), un script par main |
+| Coup d'arme | table à part (`weapon(n)`, un script par main) : 0 pour les poings, numéro de l'objet + 1 pour une arme, octet 26 des propriétés + 1 pour un monstre (0xFF donne les poings) |
 
 ## 2. Composition de l'écran de combat
 
@@ -55,13 +55,16 @@ fenêtres du bas, hautes de 8 rangées (de la ligne 152 à la 216), sont dessin�
    dès la ligne 151).
 2. **Les monstres puis les personnages**, avec leurs teintes, leurs poses, leurs
    déplacements et masquages demandés par un script ; ils vont dans
-   `objectPixels_` (RGBA avec transparence), puis sur l'écran.
-3. **L'éclair** de couleur d'un élément (`flashTimer_`).
+   `objectPixels_` (RGBA avec transparence), puis sur l'écran. Un monstre qui tombe est
+   peint à part, en violet (`monsterFading`) et additionné au fond, comme le fait le jeu.
+3. **L'éclair** blanc d'un coup critique (`flashTimer_`).
 4. **L'animation** (`drawAnimation`) : l'esprit au milieu du champ, puis les
    couches dans l'ordre bg3, bg1, sprites. Pour chaque couche : teinte,
-   rotation de palette, ondes, fenêtre, mélange (§5).
+   rotation de palette, ondes, fenêtre, mélange (§5). bg1 et bg3 ont des tuiles de 16×16 sur une carte
+   de 32×32 : elles font le tour tous les 512 pixels, pas tous les 256.
 5. **Les effets dessinés à la main** (`drawFx` : trait, anneau, étincelles) pour
-   les attaques sans animation, puis les nombres de dégâts.
+   les attaques sans animation, puis les nombres de dégâts (`drawPopup` : des sprites de 8×8 pixels
+   qui rebondissent).
 
 En mode 7 (§6 bis) la composition change sur les 151 lignes du champ : ni fond, ni bg3 ; les fenêtres du bas restent.
 

@@ -27,13 +27,24 @@ void decodeTile(const uint8_t* tile, bool threePlanes, const uint8_t palette[][F
 const BattleImage& BattleGfx::monster(int id) const {
     const auto found = monsters_.find(id);
     if (found != monsters_.end()) return found->second;
-    return monsters_[id] = decodeMonster(id, nullptr);
+    return monsters_[id] = decodeMonster(id, nullptr, 0);
 }
 
-BattleImage BattleGfx::monsterWith(int id, const std::array<uint16_t, 8>& colors) const { return decodeMonster(id, &colors); }
+BattleImage BattleGfx::monsterWith(int id, const std::array<uint16_t, 8>& colors) const { return decodeMonster(id, colors.data(), colors.size()); }
 
-// `replace` takes the place of the first 8 colors of the palette of the monster.
-BattleImage BattleGfx::decodeMonster(int id, const std::array<uint16_t, 8>* replace) const {
+BattleImage BattleGfx::monsterFading(int id, int step) const {
+    static constexpr uint16_t kPurples[16] = FF6_MONSTER_DEATH_PALETTE;
+    uint16_t faded[16];
+    for (size_t i = 0; i < 16; ++i) {
+        const int red = std::max((kPurples[i] & 31) - step, 0), green = std::max(((kPurples[i] >> 5) & 31) - step, 0),
+                  blue = std::max(((kPurples[i] >> 10) & 31) - step, 0);
+        faded[i] = static_cast<uint16_t>(red | (green << 5) | (blue << 10));
+    }
+    return decodeMonster(id, faded, 16);
+}
+
+// `replace` takes the place of the first `count` colors of the palette of the monster, but for the first.
+BattleImage BattleGfx::decodeMonster(int id, const uint16_t* replace, size_t count) const {
     BattleImage image;
     if (id < 0 || id >= FF6_MONSTER_GFX_COUNT) return image;
     const uint8_t* prop = &monsterProp[static_cast<size_t>(id) * FF6_MONSTER_GFX_PROP_BYTES];
@@ -52,7 +63,7 @@ BattleImage BattleGfx::decodeMonster(int id, const std::array<uint16_t, 8>* repl
         colorToRgba(static_cast<uint16_t>(monsterPal[at] | (monsterPal[at + 1] << 8)), colors[i]);
     }
     if (replace) {
-        for (size_t i = 1; i < replace->size(); ++i) colorToRgba((*replace)[i], colors[i]);
+        for (size_t i = 1; i < count && i < 16; ++i) colorToRgba(replace[i], colors[i]);
     }
     const int side = cells * FF6_MENU_TILE_SIZE;
     std::vector<uint8_t> grid(static_cast<size_t>(side) * side * FF6_BYTES_PER_PIXEL, 0);
@@ -258,6 +269,32 @@ const BattleImage& BattleGfx::statusSprite(int kind, int frame) const {
         const int column = 2 * (kind - 1) + part % 2, row = 2 * frame + part / 2;
         decodeTile(&statusGfx[static_cast<size_t>(row * 16 + column) * FF6_TILE_4BPP_BYTES], false, colors, image.rgba.data(), image.width,
                    part % 2 * FF6_MENU_TILE_SIZE, part / 2 * FF6_MENU_TILE_SIZE);
+    }
+    return image;
+}
+
+const BattleImage& BattleGfx::numeral(int value, bool green) const {
+    const int key = (value + 1) * 2 + (green ? 1 : 0);
+    const auto found = numerals_.find(key);
+    if (found != numerals_.end()) return found->second;
+    BattleImage& image = numerals_[key];
+    // The tiles use the colors 12 to 15 of the palette of the sprites: white numbers have the first of the four palettes of the statuses.
+    uint8_t colors[16][FF6_BYTES_PER_PIXEL] = {};
+    for (int c = 12; c < 16; ++c) {
+        const size_t at = static_cast<size_t>((green ? 4 : 0) + c - 12) * 2;
+        if (at + 1 >= statusPal.size()) return image;
+        colorToRgba(static_cast<uint16_t>(statusPal[at] | (statusPal[at + 1] << 8)), colors[c]);
+    }
+    const std::string digits = value < 0 ? std::string() : std::to_string(std::min(value, FF6_BATTLE_NUMERAL_MAX));
+    const int tiles = value < 0 ? 2 : static_cast<int>(digits.size());
+    image.width = tiles * FF6_MENU_TILE_SIZE;
+    image.height = FF6_MENU_TILE_SIZE;
+    image.rgba.assign(static_cast<size_t>(image.width) * image.height * FF6_BYTES_PER_PIXEL, 0);
+    for (int tile = 0; tile < tiles; ++tile) {
+        const size_t at = value < 0 ? static_cast<size_t>(FF6_BATTLE_MISS_TILE + tile * FF6_TILE_4BPP_BYTES)
+                                    : static_cast<size_t>(FF6_BATTLE_NUMERAL_TILE + (digits[static_cast<size_t>(tile)] - '0') * FF6_TILE_4BPP_BYTES);
+        if (at + FF6_TILE_4BPP_BYTES > statusGfx.size()) continue;
+        decodeTile(&statusGfx[at], false, colors, image.rgba.data(), image.width, tile * FF6_MENU_TILE_SIZE, 0);
     }
     return image;
 }

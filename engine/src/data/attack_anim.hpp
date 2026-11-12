@@ -40,7 +40,8 @@ struct AttackAnim {
         mode7Map, rng, rowSpeeds, lights, eventPal;  // the random numbers, the steps toward each row, the palettes of the lights of Chadarnook, the sparkles of the frozen esper
 
     AttackAnimProp prop(int attack) const;
-    // The animation of the blows of a weapon (the item) or of an attack of a monster (FF6_ATTACK_WEAPON_FISTS + the index).
+    // The animation of a blow: the entry for bare hands (FF6_ATTACK_WEAPON_FISTS), a weapon (its item number plus one) or, from
+    // FF6_ATTACK_WEAPON_ENTRIES, a special attack of a monster.
     WeaponAnimProp weapon(int index) const;
     AttackGfxProp gfx(int script) const;
     // The script from its header, or null; `length` is what the data holds from there.

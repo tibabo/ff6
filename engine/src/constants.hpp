@@ -127,7 +127,7 @@
 #define FF6_PACK_MAGIC_SIZE 8
 #define FF6_COMMON_MAGIC "FF6COMMN"
 #define FF6_MAP_MAGIC "FF6MAP01"
-#define FF6_PACK_VERSION 40
+#define FF6_PACK_VERSION 41
 #define FF6_COMMON_FILE "common.ff6data"
 #define FF6_MAP_DIR "maps"
 #define FF6_MAP_FILE_EXTENSION ".ff6map"
@@ -1257,7 +1257,8 @@
 #define FF6_ESPER_CRUSADER_DARK 29  // the same graphics with the palette that follows, for the dark figure
 #define FF6_ESPER_SHEET_PALETTE 1000  // stands for the palette of a frame that is cut from the picture of an esper, plus its order
 #define FF6_ATTACK_PROBE_FRAMES 900  // how far a copy of an animation is run to find what it shows first
-#define FF6_ATTACK_WEAPON_FISTS 0x5D  // the entry of a character that fights with bare hands; the monsters start here too
+#define FF6_ATTACK_WEAPON_FISTS 0  // the entry of the table of blows for bare hands; the weapons follow, one entry after their item number
+#define FF6_ATTACK_WEAPON_ENTRIES 0x5D  // the entries for the fists and the weapons (the attacks of monsters follow them)
 #define FF6_ATTACK_WEAPON_HIT_SPRITE 0x80  // of the init function: the hit is a sprite, not a bg1 thread
 #define FF6_ATTACK_MONSTER_WEAPON_SCRIPT 0x62  // the script of the weapon of every monster
 #define FF6_ATTACK_MONSTER_HIT_FIRST 0x60  // the hit scripts from here are those of the monsters, +0x200
@@ -1297,7 +1298,7 @@
 #define FF6_ATTACK_SPRITE_HFLIP 0x40
 #define FF6_ATTACK_SPRITE_VFLIP 0x80
 #define FF6_CHAR_GFX_COUNT 24
-#define FF6_STATUS_GFX_BYTES 0x1000  // the sprites of the statuses: 16 x 8 tiles
+#define FF6_STATUS_GFX_BYTES 0x1980  // the sprites of the statuses (16 x 8 tiles, the first 0x1000 bytes), and from 0x1800 the word Miss and the digits of the damage
 #define FF6_STATUS_PAL_BYTES 32
 #define FF6_CHAR_GFX_IMP 15  // what a character is while it is an imp
 #define FF6_CHAR_GFX_ESPER_TERRA 18  // and while it is morphed
@@ -1347,8 +1348,24 @@
 #define FF6_BATTLE_STEP_PIXELS 12  // the step of a character at a monster, to the left
 #define FF6_BATTLE_FLASH_FRAMES 10
 #define FF6_BATTLE_FLASH_PERCENT 7  // what each frame of the flash is worth, in percent of its color
-#define FF6_BATTLE_BLINK_FRAMES 24  // a monster that is hit blinks, and one that falls fades the same way
+#define FF6_BATTLE_BLINK_FRAMES 24  // a monster that is hit blinks
 #define FF6_BATTLE_BLINK_PERIOD 3
+#define FF6_BATTLE_DEATH_FRAMES 32  // a monster that falls turns to purple and fades out in this many frames (MonsterDeathAnim)
+#define FF6_BATTLE_DEATH_DELAY 6  // the frames between the number of the blow that kills a monster and the start of its fade
+// The colors of the sprite of a monster that falls (MonsterDeathPal): a purple for each color of its palette, which lose one step of
+// red, green and blue at each frame; the sprite is added to the field.
+#define FF6_MONSTER_DEATH_PALETTE {0x318c, 0x0401, 0x7c1f, 0x741d, 0x6419, 0x5c17, 0x5415, 0x4c13, 0x4411, 0x3c0f, 0x340d, 0x2c0b, 0x2409, 0x1c07, 0x1405, 0x0c03}
+#define FF6_BATTLE_NUMERAL_FRAMES 64  // how long a number of damage lasts (a little over a second)
+// How high the number is lifted at each of its frames (DmgNumBounceTbl): it jumps, falls back, and hops again.
+#define FF6_BATTLE_NUMERAL_BOUNCE {3, 6, 8, 10, 11, 13, 14, 15, 15, 16, 16, 16, 16, 16, 15, 15, 14, 13, 11, 10, 8, 6, 3, 0, 3, 4, 5, 6, 7, 7, 8, 8, \
+                                   7, 7, 6, 5, 4, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+#define FF6_BATTLE_NUMERAL_HIDE_Y 0x97  // a number that would be at this line or lower is not drawn (the windows start there)
+#define FF6_BATTLE_NUMERAL_TILE 0x1840  // the first digit in the sprites of the statuses, then one tile each
+#define FF6_BATTLE_MISS_TILE 0x1800  // the word Miss, two tiles
+#define FF6_BATTLE_NUMERAL_MAX 9999
+#define FF6_BATTLE_POPUP_MISS 0x4000  // the damage of a popup that shows the word Miss
+#define FF6_BATTLE_BG_PERIOD 512  // bg1 and bg3 of the animations have tiles of 16 x 16 on a map of 32 x 32: they go round every 512 pixels
+#define FF6_MONSTER_PROP_ATTACK_ANIM 26  // the animation of the blow of a monster: its number plus one picks the entry among the attacks of monsters
 #define FF6_BATTLE_MODE7_LINES 151  // the scanlines of the field that mode 7 takes; below, the HDMA of the game goes back to mode 1 for the windows
 #define FF6_BATTLE_FIELD_HEIGHT 160  // the scanlines of the battlefield, above the windows
 #define FF6_BATTLE_SLASH_SIZE 14  // the half of the diagonal of a slash, and how long it lasts

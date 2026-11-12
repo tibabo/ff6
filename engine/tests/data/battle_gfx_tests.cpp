@@ -48,6 +48,32 @@ void testBattleGfx() {
         }
     }
     CHECK(gfx.statusSprite(0, 0).rgba.empty() && gfx.statusSprite(1, 4).rgba.empty());
+
+    // The numbers of damage: 8 x 8 for each digit, white or green, and the word Miss for a negative value.
+    const ff6::BattleImage& white = gfx.numeral(129, false);
+    const ff6::BattleImage& green = gfx.numeral(129, true);
+    CHECK(white.width == 3 * FF6_MENU_TILE_SIZE && white.height == FF6_MENU_TILE_SIZE && green.width == white.width);
+    CHECK(gfx.numeral(5, false).width == FF6_MENU_TILE_SIZE && gfx.numeral(12345, false).width == 4 * FF6_MENU_TILE_SIZE);  // up to four digits
+    CHECK(gfx.numeral(-1, false).width == 2 * FF6_MENU_TILE_SIZE);
+    size_t shown = 0, brighter = 0;
+    for (size_t i = 0; i < white.rgba.size(); i += FF6_BYTES_PER_PIXEL) {
+        shown += white.rgba[i + FF6_ALPHA_OFFSET] != 0;
+        brighter += white.rgba[i + FF6_ALPHA_OFFSET] != 0 && white.rgba[i] > 200 && white.rgba[i + 1] > 200 && white.rgba[i + 2] > 200;
+    }
+    CHECK(shown > 20 && brighter > 8 && brighter < shown);  // a white fill inside a dark outline
+    CHECK(white.rgba != green.rgba && gfx.numeral(1, false).rgba != gfx.numeral(2, false).rgba && &gfx.numeral(129, false) == &white);
+
+    // A monster that falls: the purple of its death at the start, and nothing but black once the steps have taken all of it.
+    const ff6::BattleImage fresh = gfx.monsterFading(0, 0), gone = gfx.monsterFading(0, FF6_BATTLE_DEATH_FRAMES - 1);
+    CHECK(fresh.width == gfx.monster(0).width && fresh.height == gfx.monster(0).height && gone.width == fresh.width);
+    size_t purple = 0, dark = 0, stays = 0;
+    for (size_t i = 0; i < fresh.rgba.size(); i += FF6_BYTES_PER_PIXEL) {
+        if (fresh.rgba[i + FF6_ALPHA_OFFSET] == 0) continue;
+        ++stays;
+        purple += fresh.rgba[i] > 100 && fresh.rgba[i + 1] < 16 && fresh.rgba[i + 2] > 100;
+        dark += gone.rgba[i] == 0 && gone.rgba[i + 1] == 0 && gone.rgba[i + 2] == 0 && gone.rgba[i + FF6_ALPHA_OFFSET] != 0;
+    }
+    CHECK(stays > 0 && purple > 0 && dark == stays);
     std::array<uint16_t, 16> stone = gfx.characterPalette(0);
     CHECK(stone[1] != 0 || stone[2] != 0);
     const ff6::BattleImage plain = gfx.characterWith(0, FF6_CHAR_POSE_FIGHT, stone);

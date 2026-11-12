@@ -7,7 +7,8 @@ import {
 } from './battle/battle_bg.mjs';
 import {
   CHAR_ACTION_COUNT, CHAR_ACTION_TILES, CHAR_GFX_BYTES, CHAR_GFX_COUNT, CHAR_PAL_BYTES, CHAR_PAL_COUNT, CHAR_PAL_TABLE_BYTES,
-  MAGITEK_FRAME_BYTES, MAGITEK_FRAME_COUNT, STATUS_GFX_BYTES, STATUS_PAL_BYTES, readCharActions, readCharGfx, readCharPalTable, readStatusGfx,
+  MAGITEK_FRAME_BYTES, MAGITEK_FRAME_COUNT, STATUS_GFX_BYTES, STATUS_NUMERAL_DIGITS, STATUS_NUMERAL_MISS, STATUS_PAL_BYTES, readCharActions, readCharGfx,
+  readCharPalTable, readStatusGfx,
 } from './battle/battle_chars.mjs';
 import {
   BATTLE_GFX_MAGIC, MONSTER_GFX_BYTES, MONSTER_GFX_COUNT, MONSTER_GFX_PROP_BYTES, MONSTER_PAL_BYTES, STENCIL_LARGE_BYTES,
@@ -59,6 +60,13 @@ test('battle graphics hold the tables one after the other', { skip }, () => {
   const status = readStatusGfx(loadRom());
   assert.equal(status.length, STATUS_GFX_BYTES);
   assert.ok(status.some(byte => byte !== 0));  // the sprites of poison and sleep
+  // The word Miss (two tiles) and the ten digits of the damage, a tile of 32 bytes each, end the graphics.
+  assert.equal(STATUS_NUMERAL_DIGITS + 10 * 32, STATUS_GFX_BYTES);
+  assert.equal(STATUS_NUMERAL_MISS + 2 * 32, STATUS_NUMERAL_DIGITS);
+  for (let digit = 0; digit < 10; digit++) {
+    assert.ok(status.subarray(STATUS_NUMERAL_DIGITS + digit * 32, STATUS_NUMERAL_DIGITS + (digit + 1) * 32).some(byte => byte !== 0));
+  }
+  assert.ok(status.subarray(STATUS_NUMERAL_MISS, STATUS_NUMERAL_DIGITS).some(byte => byte !== 0));
 });
 
 test('the characters of a battle are posed with tiles of their map sprite', { skip }, () => {
