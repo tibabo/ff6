@@ -49,10 +49,12 @@ struct Capture {
     std::string moves;
     int waitFrames = 0;  // idle frames before the moves, for npcs to walk
     int atX = -1, atY = -1;  // party tile, when it is not the start of the map
+    int vehicle = -1;  // the lead rides it (the bits of the events: 0x40 magitek, 0x80 shows the rider)
     int talkFrames = -1;
     int menuCursor = -1;  // open the menu with the cursor on this option
     int menuSelect = 0;  // and press the confirm button there this many times
     int menuDowns = 0;  // then press down this many times
+    std::string menuKeys;  // then these buttons, as for keys
     std::string keys;  // buttons pressed one after the other, for a battle: A confirm, B cancel, URDL, . a pause
     int afterFrames = 0;  // idle frames after the keys, to catch an animation in the middle
 };
@@ -118,6 +120,16 @@ void captureFrame(ff6::Game& game, ff6::SdlRenderer& renderer, const Capture& ca
         for (int press = 0; press < capture.menuDowns; ++press) {
             game.tick({ff6::Down, false});
             for (int frame = 0; frame < FF6_CAPTURE_MENU_SETTLE_FRAMES; ++frame) game.tick({});  // a page may scroll
+        }
+        for (const char key : capture.menuKeys) {
+            ff6::InputState input;
+            const char* const found = key == '\0' ? nullptr : std::strchr(letters, key);
+            if (key == 'A') input.confirm = true;
+            else if (key == 'B') input.cancel = true;
+            else if (found) input.direction = static_cast<int>(found - letters);
+            else throw std::runtime_error("--menukeys only accepts A, B, U, R, D and L");
+            game.tick(input);
+            for (int frame = 0; frame < FF6_CAPTURE_MENU_SETTLE_FRAMES; ++frame) game.tick({});
         }
         game.finishFade();
     }
@@ -357,6 +369,7 @@ int run(const std::string& packDir, const Start& start, const std::string& saveP
         ff6::NoSound sound;
         const std::unique_ptr<ff6::Game> game = makeGame(std::move(common), packDir, start, renderer, sound);
         if (capture->atX >= 0) game->placeParty(capture->atX, capture->atY);
+        if (capture->vehicle >= 0) game->setLeadVehicle(capture->vehicle);
         if (start.battle >= 0) {
             for (ff6::CharacterState& character : game->party().characters) character.status |= start.partyStatus;
             game->startBattleNumber(start.battle, start.battleBackground);
@@ -516,6 +529,8 @@ int main(int argc, char** argv) {
                 capture.path = argv[i + 1];
             } else if (option == "--moves") {
                 capture.moves = argv[i + 1];
+            } else if (option == "--vehicle") {
+                capture.vehicle = std::stoi(argv[i + 1], nullptr, 0);
             } else if (option == "--at") {
                 if (std::sscanf(argv[i + 1], "%d,%d", &capture.atX, &capture.atY) != 2 || capture.atX < 0 || capture.atY < 0) {
                     throw std::runtime_error("invalid --at, expected x,y");
@@ -537,6 +552,8 @@ int main(int argc, char** argv) {
                 if (capture.afterFrames < 0 || capture.afterFrames > FF6_CAPTURE_MAX_TALK_FRAMES) throw std::runtime_error("invalid --after");
             } else if (option == "--down") {
                 capture.menuDowns = std::stoi(argv[i + 1]);
+            } else if (option == "--menukeys") {
+                capture.menuKeys = argv[i + 1];
             } else if (option == "--talk") {
                 capture.talkFrames = std::stoi(argv[i + 1]);
                 if (capture.talkFrames < 0 || capture.talkFrames > FF6_CAPTURE_MAX_TALK_FRAMES) {
@@ -546,7 +563,7 @@ int main(int argc, char** argv) {
                 throw std::runtime_error("unknown option " + option);
             }
         }
-        if (capture.path.empty() && (!capture.moves.empty() || capture.talkFrames >= 0 || capture.menuCursor >= 0 || capture.waitFrames > 0 || capture.atX >= 0 || !capture.keys.empty() || capture.afterFrames > 0)) {
+        if (capture.path.empty() && (!capture.moves.empty() || capture.talkFrames >= 0 || capture.menuCursor >= 0 || capture.waitFrames > 0 || capture.atX >= 0 || capture.vehicle >= 0 || !capture.keys.empty() || capture.afterFrames > 0)) {
             throw std::runtime_error("--at, --wait, --moves, --talk, --keys and --after require --capture");
         }
         if (animAttack >= 0) {

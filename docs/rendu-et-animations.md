@@ -117,10 +117,12 @@ d'initialisation :
 | `$D4` | mathématiques de couleur (§5) |
 | `$E1`,`$F1` | cache ou montre l'attaquant ou la cible |
 | `$E8`,`$EF` | mouvement polaire (rayon et angle), normal ou aplati |
-| `$EB`,`$F0`,`$F3`,`$F8`,`$FA` | sauts (par indice de copie, par cible, par attaquant, fixes) |
+| `$EB`,`$F0`,`$F3`,`$FA` | sauts (par indice de copie, par cible, par attaquant, fixes) |
+| `$F8` | saut selon le mode Magitek (`setMagitek`) : l'adresse normale, ou celle de l'armure |
 | `$EC` | le fil passe dans une autre couche |
 | `$D0` | priorité des combattants (octet >> 4) face à bg1 en mode 7 |
-| `$90`,`$D1`,`$F7`,`$C2` | reconnus, sans effet dans ce rendu (ordre des sprites, priorité des tuiles, attente de ligne) |
+| `$90`,`$D1`,`$F7` | reconnus, sans effet dans ce rendu (ordre des sprites, priorité des tuiles, attente de ligne) |
+| `$C2` | relâche les fils en attente de bg1, bg3 ou des sprites : l'init `0x4E` (Fire, Ice et Bolt Beam, Tek Laser) met les sprites et bg3 en attente, pour que la lueur et la flamme ne viennent qu'après la marche de l'armure |
 | `$8D`,`$8F`,`$9C` | déplace le fil si l'attaquant (ou la cible) regarde dans tel sens |
 | `$8E`,`$9B`,`$F4` | le fil passe derrière ou devant les combattants (`AnimSprite::back`, noté mais pas encore dessiné) |
 | `$DB` | saute le pas en arrière d'un personnage ; un monstre ne le fait jamais |
@@ -147,7 +149,8 @@ d'initialisation :
 | `$CB` | échos d'un personnage : jusqu'à huit positions passées gardées tous les `masque + 1` images, quatre dessinées à chaque image, une sur deux (`AnimEcho`, `BattleScreen::echoHistory_`) |
 | `$80/$73`,`$1B` | la face d'un dé (`setDice`) ; un personnage qui suit un vecteur n'emporte plus le fil |
 | `$80/$85` | lumières de Chadarnook : le champ prend la palette du jeu, allumée ou éteinte (`attackanim.ff6data`, 2 × 96 octets en `C2/E288`) |
-| `$99`, `$F9` | la rangée de palette d'un fil (le Crusader l'a déjà par sa feuille d'esprit) et la pose de l'armure Magitek (le combat ne dessine pas l'armure) : sans effet ici |
+| `$99` | la rangée de palette d'un fil (le Crusader l'a déjà par sa feuille d'esprit) : sans effet ici |
+| `$F9` | l'action de l'armure Magitek de l'attaquant ou de la cible (0 debout, 1 marche, 2 tire : `AnimShift::armor`) ; `$E7` vise 24 pixels plus haut en mode Magitek |
 | `$80/$3F` | attend, en rejouant le cadre d'avant, que le fil de bg1 arrive à la hauteur de l'attaquant (saut de Sonic Dive) |
 | `$80/$02`,`$03`,`$0E`,`$18`,`$19`,`$34`..`$36`,`$4A`,`$51`,`$64`,`$67`,`$68`,`$6D`,`$6F`,`$70`,`$71`,`$89` | registres, palettes et compteurs du matériel, sans équivalent ici |
 
@@ -439,7 +442,7 @@ dessiné, ou sans équivalent :
   Les sprites `back` (`$8E`, `$9B`, `$F4`, `$80/$21`) passent sous les combattants, les
   combattants de priorité 3 par-dessus bg1, mais pas d'ordre par hauteur (`$80/$17`, `$69`) ;
 - **sans effet ici** : les registres et palettes du matériel (liste du §3), la rangée de
-  palette `$99`, l'armure Magitek `$F9` (le combat ne dessine pas l'armure) ;
+  palette `$99` ;
 - **approché** : la position verticale du triangle (centrée sur ses coordonnées,
   d'après `UpdateTriangle`) ; le saut de `$E2` et `$E3` d'un monstre (même arc que pour
   un personnage) ; l'ordre des échos de `$CB` ; le tableau de la tornade est posé tel que

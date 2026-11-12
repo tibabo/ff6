@@ -30,6 +30,15 @@ export function readCharGfx(rom) {
   return Buffer.concat(blocks);
 }
 
+// The magitek armor of the battles (MagitekGfxPtrs): four frames of 4 x 4 tiles, from the graphics of the vehicles, whose rows are
+// at 0, 0x200, 0x80 and 0x280 from the start of the frame.
+export const MAGITEK_FRAME_COUNT = 4;
+export const MAGITEK_FRAME_BYTES = 0x300;
+const MAGITEK_GFX = 0x183000;  // D8/3000
+const MAGITEK_FRAMES = [0x1500, 0x1800, 0x1900, 0x1c00];
+
+export const readMagitekGfx = rom => Buffer.concat(MAGITEK_FRAMES.map(offset => table(rom, MAGITEK_GFX + offset, MAGITEK_FRAME_BYTES)));
+
 export const readCharActions = rom => table(rom, CHAR_ACTIONS, CHAR_ACTION_COUNT * CHAR_ACTION_TILES * 2);
 export const readCharPalTable = rom => table(rom, CHAR_PAL_TABLE, CHAR_PAL_TABLE_BYTES);
 export const readCharPal = rom => table(rom, CHAR_PAL, CHAR_PAL_COUNT * CHAR_PAL_BYTES);

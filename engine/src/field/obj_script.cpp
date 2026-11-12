@@ -47,7 +47,7 @@ bool Objects::nextCommand(Npc& npc) {
     npc.scriptPtr += 1;  // past the command byte; commands with arguments add their size below
 
     if (cmd <= FF6_OBJ_CMD_FRAME_LAST) {
-        npc.frame = cmd;
+        npc.frame = actionFrame(cmd);
         return true;
     }
     if (cmd <= FF6_OBJ_CMD_WALK_LAST) {

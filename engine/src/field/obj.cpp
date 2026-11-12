@@ -50,6 +50,16 @@ NpcProp decodeNpcProp(const uint8_t* bytes) {
     prop.vehicle = (bytes[7] & FF6_VEHICLE_NPC_MASK) >> FF6_VEHICLE_SHIFT;
     prop.vram = bytes[0] & 0x7F;
     prop.large = (bytes[8] & FF6_NPC_NO_TURN) != 0;
+    // The bytes of the event, which a special npc does not have, say how it looks (InitNPCs and DrawObjSpecial).
+    prop.frames = (bytes[8] & FF6_NPC_DIR_MASK) + 1;
+    prop.speedShift = bytes[7] >> FF6_NPC_SPEED_SHIFT;
+    prop.flip = (bytes[0] & 0x80) != 0;
+    prop.order = (bytes[7] >> FF6_NPC_ORDER_SHIFT) & FF6_NPC_ORDER_MASK;
+    const bool slave = (bytes[2] & 2) != 0, down = (bytes[2] & 1) != 0;
+    const int shift = (bytes[1] & 0xE0) >> (slave ? 1 : 4);  // 16 pixels, or 2, for each step
+    prop.shiftX = down ? 0 : shift;
+    prop.shiftY = down ? shift : 0;
+    prop.master = slave ? bytes[1] & 0x1F : -1;
     return prop;
 }
 

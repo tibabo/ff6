@@ -9,7 +9,7 @@ import { readBg3Anim, readBgAnim } from './field/anim.mjs';
 import { readMapColorMath } from './field/scroll.mjs';
 import { readLongEntrances, readShortEntrances } from './field/entrance.mjs';
 import { MAP_PROP_SIZE, loadLayout, readMapProperties } from './field/map.mjs';
-import { SPRITE_FRAMES, SPRITE_GFX_COUNT, buildSpriteGfx, spriteGfxOffset } from './field/obj.mjs';
+import { SPECIAL_GFX_BYTES, SPRITE_FRAMES, SPRITE_GFX_COUNT, buildSpecialGfx, buildSpriteGfx, spriteGfxOffset } from './field/obj.mjs';
 import { encodeDialogueForEngine } from './field/text.mjs';
 import { decodeNpcProp, readNpcProps, readNpcSwitchDefaults } from './event/npc_prop.mjs';
 import { readEventScript, readEventTriggers } from './event/event_trigger.mjs';
@@ -96,7 +96,16 @@ test('parallax, animation and sprite tables read the documented layouts', { skip
   assert.equal(spriteGfxOffset(rom, 0), 0x150000);  // Terra
   assert.equal(buildSpriteGfx(rom, 0).length, SPRITE_FRAMES.length * 16 * 24);
   assert.ok(buildSpriteGfx(rom, 0).some(index => index !== 0));
+  // The list of frames is the one of the engine.
+  const engineList = readFileSync(new URL('../engine/src/field/sprite_data.cpp', import.meta.url), 'utf8').match(/kFrameIds\[FF6_FRAME_COUNT\] = \{([^}]*)\}/)[1];
+  assert.deepEqual(engineList.split(',').map(value => Number(value.trim())), SPRITE_FRAMES);
   assert.throws(() => buildSpriteGfx(rom, SPRITE_GFX_COUNT), /Invalid sprite graphics/);
+  // The special npcs take the raw graphics: the big switch and the save point have pixels in their first frame.
+  const special = buildSpecialGfx(rom);
+  assert.equal(special.length, SPRITE_GFX_COUNT * SPECIAL_GFX_BYTES);
+  for (const gfx of [111, 116]) {
+    assert.ok(special.subarray(gfx * SPECIAL_GFX_BYTES, gfx * SPECIAL_GFX_BYTES + 0x80).some(byte => byte !== 0));
+  }
   // Layers that are declared larger than their layout are padded with empty cells.
   const props = readMapProperties(rom, 6);
   props.layers.forEach((layer, index) => {

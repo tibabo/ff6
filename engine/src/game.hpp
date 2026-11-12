@@ -75,6 +75,8 @@ public:
     void draw();
     // Puts the party on another tile of the current map, for captures and tests.
     void placeParty(int tileX, int tileY);
+    // The lead of the party rides a vehicle (FF6_VEHICLE_*), for captures.
+    void setLeadVehicle(int vehicle);
 
     const MapData& map() const { return map_; }
     const Player& player() const { return player_; }
@@ -151,6 +153,8 @@ private:
     void applyStage(std::vector<uint8_t>& image);
     const std::vector<uint8_t>& vehicleSprite(int palette, uint16_t word);
     int stripOf(Npc& object);
+    void loadSpecialGfx();
+    void drawSpecial(uint8_t* screen, const Npc& npc, int x, int y) const;
     void startEvent(uint32_t offset);
     void followScroll();
     void copyPlayerToLead(Npc& lead) const;
@@ -181,6 +185,8 @@ private:
     void checkEncounter();
     void endBattle();
     MenuStatus menuStatus();
+    bool onSavePoint() const;  // the flag of the main menu that allows the tent and the sleeping bag
+    int eventCharacter(int code) const;
     MenuCharacter menuCharacter(int id, const CharacterState& state) const;
     std::vector<MenuItem> inventoryItems() const;
     std::vector<MenuCharacter> partyCharacters() const;
@@ -259,6 +265,7 @@ private:
     LoadMenu loadMenu_;
     PartyMenu partyMenu_;
     bool partyOpen_ = false;  // the menu that is open is the party selection
+    int leaveItem_ = -1;  // the tent or warp stone that ended the main menu: its event runs when the menu is gone
     bool loadMenuOpen_ = false;
     bool restoreRequested_ = false;  // the event asked for the saved game: it is loaded once the event is out of the way
     uint32_t frame_ = 0;
@@ -295,6 +302,7 @@ private:
     int portrait_ = -1;  // the character of 0xE7
     int portraitShown_ = -1;
     std::vector<uint8_t> portraitImage_;
+    std::vector<uint8_t> specialChars_;  // the sprite characters of the special npcs: palette indices, 16 x 16 tiles of 8 x 8 pixels
     std::map<std::pair<int, int>, int> stripIndex_;  // by graphics and palette
     std::map<std::pair<int, int>, std::vector<uint8_t>> vehicleSprites_;  // by palette and word of the tile
     std::vector<uint8_t> screenPixels_, overlayPixels_;

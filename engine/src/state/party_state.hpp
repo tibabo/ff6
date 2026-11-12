@@ -17,6 +17,7 @@ struct CharacterState {
     std::array<int, FF6_MENU_EQUIP_SLOTS> equipment{};  // right hand to second relic; FF6_ITEM_EMPTY for nothing
     unsigned status = 0;  // the statuses that outlast a battle (FF6_ST_PERSISTENT), $1614
     int esper = -1;  // the esper that it carries, which gives it the command Summon; -1 for none
+    bool backRow = false;  // fights from the back row (bit 5 of $1850): the Order screen and the Row command change it
 
     CharacterState() { equipment.fill(FF6_ITEM_EMPTY); }
 };

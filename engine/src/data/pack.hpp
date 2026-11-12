@@ -48,6 +48,7 @@ struct CommonData {
     std::vector<uint8_t> npcSwitchDefaults;  // FF6_NPC_SWITCH_BYTES
     std::vector<uint8_t> eventScript;
     std::vector<uint8_t> vehicleGfx;  // FF6_VEHICLE_GFX_BYTES of 4 bits per pixel, which the game keeps from $7200 in the sprite characters
+    std::vector<uint8_t> specialGfx;  // FF6_SPECIAL_GFX_BYTES of the raw 4bpp graphics of every map sprite, for the special npcs
 
     size_t spriteGfxCount() const { return spriteGfx.size() / FF6_SPRITE_SHEET_BYTES; }
     size_t spritePaletteCount() const { return spritePalettes.size() / FF6_SPRITE_PAL_COLORS; }

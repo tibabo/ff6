@@ -53,8 +53,10 @@ private:
     size_t pos_ = 0;
     int x_ = FF6_TEXT_START_X, line_ = 0, pause_ = 0;
     int cursor_ = 0, choice_ = 0, choiceCount_ = 0, lastDirection_ = FF6_NO_DIRECTION;
+    int keyTimer_ = 0;  // frames left before the wait for the button is given up; once a timer has been set it stays set
     bool active_ = false, waiting_ = false, clearOnKey_ = false, closeOnKey_ = false;
-    bool waitAfterPause_ = false, choosing_ = false, atBottom_ = false;
+    bool keyTimerSet_ = false, choosing_ = false, atBottom_ = false;
+    void giveUpWaiting();
 };
 
 }  // namespace ff6

@@ -10,6 +10,9 @@
 void testSpriteData() {
     CHECK(ff6::stopFrame(ff6::Down) == 1 && ff6::stopFrame(ff6::Right) == 10);
     CHECK(ff6::moveFrame(ff6::Down, 0) == 1 && ff6::moveFrame(ff6::Down, 8) == 2);
+    CHECK(ff6::actionFrame(0) == 0 && ff6::actionFrame(0x46) == 9 && ff6::actionFrame(0x2f) == FF6_FRAME_RIDING_LEFT + 1);
+    CHECK(ff6::actionFrame(0x2c) >= 16 && ff6::actionFrame(0x2c) < FF6_FRAME_COUNT && ff6::actionFrame(0x20) != ff6::actionFrame(0x2c));
+    CHECK(ff6::actionFrame(0x7f) == 1);  // a frame that is not in the sheet shows the one facing down
     CHECK(ff6::moveFrame(ff6::Down, 16) == 1 && ff6::moveFrame(ff6::Down, 24) == 0);  // the walk cycle
 
     // Graphics 0 with palette 1: index 3 is the second color, index 0 stays transparent.

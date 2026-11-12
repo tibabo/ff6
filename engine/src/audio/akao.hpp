@@ -115,7 +115,7 @@ private:
     void applyAdsr(int ch);
     void terminate(int ch);
     uint8_t fetch(int ch);
-    int baseOf(const Channel& c) const;
+    int resolve(const Channel& c, int address) const;
     uint16_t calcFreq(const Channel& c, uint8_t note) const;
     static uint16_t calcVibratoRate(uint8_t param, uint8_t cycle);
     void initVibrato(int ch);
@@ -133,7 +133,7 @@ private:
     uint8_t sfxPanTicks_ = 0;
     uint16_t tempoRatio_ = 0, tempoRatioRate_ = 0, pitchShift_ = 0, pitchShiftRate_ = 0;  // 8.8, the high byte is the value
     uint8_t tempoRatioTicks_ = 0, pitchShiftTicks_ = 0;
-    int base_ = 0;  // script address + base_ = index into the script
+    int start_ = 0;  // the address in the sound memory where the script is (the index into the script is the distance from it)
     std::array<Channel, FF6_AKAO_VOICES> channels_;
     std::array<VoiceRegs, FF6_AKAO_VOICES> regs_;
     uint8_t activeChannels_ = 0;  // one bit per channel

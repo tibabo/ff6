@@ -26,7 +26,8 @@
 
 #define FF6_FRAME_WIDTH 16
 #define FF6_FRAME_HEIGHT 24
-#define FF6_FRAME_COUNT 16  // down, up, left, right, then the poses of a rider facing left and right
+#define FF6_OPENING_FRAMES_PER_STEP 2  // the opening march runs at half the frame rate on the console
+#define FF6_FRAME_COUNT 88  // down, up, left, right, the poses of a rider facing left and right, then those of the scripts
 #define FF6_FRAME_RIDING_LEFT 12  // two frames
 #define FF6_FRAME_RIDING_RIGHT 14  // two frames
 #define FF6_FRAME_BYTES (FF6_FRAME_WIDTH * FF6_FRAME_HEIGHT * FF6_BYTES_PER_PIXEL)
@@ -74,11 +75,11 @@
 #define FF6_DLG_NEWLINE 0x01
 #define FF6_DLG_WAIT_FIXED 0x10  // no argument
 #define FF6_DLG_WAIT 0x11  // one argument: duration in FF6_DLG_WAIT_UNIT_FRAMES
-#define FF6_DLG_KEY 0x12  // waits for the confirm button
+#define FF6_DLG_KEY 0x12  // gives up the waits for the confirm button that follow (the end of the text, a page)
 #define FF6_DLG_PAGE 0x13  // waits for the confirm button, then clears the window
 #define FF6_DLG_TAB 0x14  // one argument: number of spaces
 #define FF6_DLG_CHOICE 0x15  // advances by the wide-space width
-#define FF6_DLG_KEY_TIMED 0x16  // one argument: waits that long, then for the confirm button
+#define FF6_DLG_KEY_TIMED 0x16  // one argument: waits for the confirm button, for that long at most
 #define FF6_DLG_WAIT_FIXED_FRAMES 60
 #define FF6_DLG_WAIT_UNIT_FRAMES 15
 
@@ -126,7 +127,7 @@
 #define FF6_PACK_MAGIC_SIZE 8
 #define FF6_COMMON_MAGIC "FF6COMMN"
 #define FF6_MAP_MAGIC "FF6MAP01"
-#define FF6_PACK_VERSION 36
+#define FF6_PACK_VERSION 40
 #define FF6_COMMON_FILE "common.ff6data"
 #define FF6_MAP_DIR "maps"
 #define FF6_MAP_FILE_EXTENSION ".ff6map"
@@ -236,6 +237,15 @@
 #define FF6_NPC_DIR_MASK 3
 #define FF6_NPC_BANK_MASK 3
 #define FF6_NPC_NO_TURN 4
+#define FF6_NPC_SPEED_SHIFT 6  // special npcs: the animation speed is in the top bits of the byte of the movement
+#define FF6_NPC_ORDER_SHIFT 4  // and the order of the sprite in the next two
+#define FF6_NPC_ORDER_MASK 3
+#define FF6_NPC_ORDER_NORMAL 0
+#define FF6_NPC_ORDER_HIGH 1  // in front of the other sprites and of the layers
+#define FF6_NPC_ORDER_LOW 2  // behind the other sprites
+#define FF6_SPECIAL_CHARS_TILES 16  // the sprite characters are 16 tiles wide and high
+#define FF6_SPECIAL_TILE_BYTES 32  // a tile of 8 x 8 pixels of 4 bits
+#define FF6_SPECIAL_FRAME_MASKS {0, 0, 1, 3}  // ObjAnimFrameMaskTbl, by the number of frames minus one
 #define FF6_NPC_SCROLL_BG2 0x20
 #define FF6_NPC_ANIM_FRAME_SHIFT 5
 #define FF6_NPC_LAYER_PRIORITY_SHIFT 3
@@ -621,6 +631,11 @@
 #define FF6_MENU_PORTRAIT_TILE_ORDER \
     {0, 1, 2, 3, 8, 16, 17, 18, 19, 9, 4, 5, 6, 7, 10, 20, 21, 22, 23, 11, 13, 14, 15, 24, 12}  // tile of each cell
 #define FF6_MENU_PORTRAIT_X 14  // of a character in the front row, and the y of the first one
+#define FF6_MENU_PORTRAIT_BACK_ROW_DX 12  // a character in the back row is this far to the right (InitPortraitRowPos: 26 instead of 14)
+#define FF6_MENU_ORDER_SCROLL 72  // how far the main menu slides to the right for Order: 6 frames of 12 pixels
+#define FF6_MENU_ORDER_SLIDE_FRAMES 6
+#define FF6_MENU_ORDER_SLIDE_STEP 12
+#define FF6_MENU_ORDER_ROW_FRAMES 12  // a portrait goes to the other row in this many frames; two characters take twice as long to change places
 #define FF6_MENU_PORTRAIT_Y 21
 #define FF6_MENU_PORTRAIT_STEP 48
 #define FF6_MENU_PORTRAITS_OF_CHARACTER {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 17}  // Leo and Banon come after two others
@@ -677,6 +692,15 @@
 #define FF6_SKILL_LIST_X 11
 #define FF6_ITEM_NAME_BYTES 13
 #define FF6_ITEM_DESC_BYTES 0x13A0
+#define FF6_RARE_ITEM_COUNT 20  // the key items of the story: the event bits FF6_RARE_ITEM_FIRST_BIT and the next ones say which ones the party has
+#define FF6_RARE_ITEM_FIRST_BIT 0x1D0
+#define FF6_RARE_DESC_BYTES 0x260
+#define FF6_RARE_ROWS 10  // the list of the rare items has two columns of ten
+#define FF6_RARE_SECOND_COLUMN_X 17  // in tiles; the first is FF6_ITEM_NAME_X
+#define FF6_RARE_CURSOR_X {8, 120}
+#define FF6_ITEM_COUNT_X 27  // the number of items in the inventory, or of rare items, and its row of tiles
+#define FF6_ITEM_COUNT_ROW 8
+#define FF6_ITEM_SORT_ICONS {0xFF, 0xD8, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF, 0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7}  // ItemIconTbl: Arrange puts the items in the order of their symbols
 #define FF6_ITEM_DESC_NEWLINE 0x01  // in a description
 #define FF6_ITEM_DESC_X 2  // in tiles; the two lines of the window are 12 pixels apart
 #define FF6_ITEM_DESC_TOP 48
@@ -794,7 +818,10 @@
 #define FF6_CHAR_AI_COUNT 24  // the scenes with characters that act by a script
 #define FF6_CHAR_AI_BYTES 24  // flags, background, targets, song, then four characters of five bytes: actor and flags, sprite, script, x, y
 #define FF6_MONSTER_ANIM_SFX 9  // the command FA of the scripts: the sound effect, and the others are animations of the table of the attacks
-#define FF6_MONSTER_ANIMS {274, 273, 272, 383, 382, -1, -1, 393, 392, -1, 399, 400, 401, 403}  // flash, move back and forward, Kefka, glows
+#define FF6_MONSTER_ANIMS {274, 273, 272, 383, 382, 389, 388, 393, 392, -1, 399, 400, 401, 403}  // flash, move back and forward, the characters run right and left, Kefka, glows
+#define FF6_MONSTER_ANIM_RUN_RIGHT 5  // the sub-codes of FA that move all the characters
+#define FF6_KEFKA_DEATH_ANIM 403  // the animation of the end of the last battle: its background (36) makes the monster tremble
+#define FF6_KEFKA_TREMBLE {1, 2, 1, 0, 1, 2, 1, 2}  // UpdateBattleBG_36: pixels to the right, by the frame counter
 #define FF6_COLOSSEUM_BYTES 1024  // four bytes for each of the 256 items: opponent, $40, prize, prize name hidden
 #define FF6_COLOSSEUM_ENTRY_BYTES 4
 #define FF6_COLOSSEUM_BATTLE 0x23F
@@ -1143,6 +1170,8 @@
 #define FF6_TILE_PLANE_STRIDE 16  // the third and fourth planes of a tile start here
 #define FF6_BATTLE_MONSTER_X_UNIT 8  // the position of a monster in a battle: the nibbles times this, in pixels
 #define FF6_BATTLE_MONSTER_Y_UNIT 8
+#define FF6_BATTLE_PINCER_SPLIT 0x68  // a monster whose right edge is at or past this goes to the right side of a pincer attack
+#define FF6_BATTLE_PINCER_SHIFT 64  // and is moved this far right of the mirror image
 #define FF6_BG_COUNT 56  // battle backgrounds, the last three blank
 #define FF6_BG_PROP_BYTES 6  // three blocks of graphics, two tilemaps, a palette
 #define FF6_BG_PROP_PALETTE 5
@@ -1213,6 +1242,8 @@
 #define FF6_ATTACK_RNG_BYTES 256  // the random numbers of the game (RNGTbl)
 #define FF6_ATTACK_ROW_SPEED_BYTES 32  // the steps toward the back row, then toward the front row: 16 each, by battle type * 4 + slot
 #define FF6_ATTACK_LIGHTS_BYTES 192  // the 3 palettes of the field of Chadarnook with its lights on, then off (96 bytes each)
+#define FF6_ATTACK_EVENT_PAL_BYTES 160  // the 5 palettes (32 bytes each) of the sparkles of the frozen esper of the first battle
+#define FF6_ATTACK_EVENT_PAL_STEP 32
 #define FF6_MODE7_SIDE 256  // the pixels of the plane that hold a picture: 32 x 32 tiles of the 128 x 128 of the plane
 #define FF6_MODE7_TILE_COLUMNS 32
 #define FF6_MODE7_SET_GFX_BYTES 0x800
@@ -1278,6 +1309,17 @@
 #define FF6_STATUS_SPRITE_SHADOW 7
 #define FF6_CHAR_GFX_LEO 0x10
 #define FF6_CHAR_GFX_BYTES 0x1500
+// The magitek armor of the battles (a 32 x 32 sprite in front of the rider): four frames of 4 x 4 tiles with the rows at these places, the
+// 12 colors of MagitekPal (BGR555, color 0 transparent), and where it stands in relation to the character (it is at 16 x 24, the
+// rider sits in it).
+#define FF6_MAGITEK_FRAMES 4
+#define FF6_MAGITEK_FRAME_BYTES 0x300
+#define FF6_MAGITEK_ROWS {0x000, 0x200, 0x080, 0x280}
+#define FF6_MAGITEK_PALETTE {0x00bf, 0x0c63, 0x196c, 0x2e10, 0x42f7, 0x110e, 0x2ebc, 0x4b9f, 0x41ad, 0x6739, 0x7fff, 0x2192}
+#define FF6_MAGITEK_SIZE 32
+#define FF6_MAGITEK_X (-9)
+#define FF6_MAGITEK_Y 4
+#define FF6_MAGITEK_LIFT 4
 #define FF6_CHAR_ACTION_COUNT 32
 #define FF6_CHAR_ACTION_TILES 8  // two unused, then six in reading order
 #define FF6_CHAR_ACTION_FIRST_TILE 2
@@ -1301,6 +1343,7 @@
 #define FF6_BATTLE_ESCAPE_FRAMES 40  // a character that runs away leaves the screen in this long, so many pixels a frame
 #define FF6_BATTLE_ESCAPE_SPEED 3
 #define FF6_BATTLE_POSE_FRAMES 40  // how long an action keeps its pose
+#define FF6_BATTLE_CAST_LEAD_FRAMES 30  // a character steps up and raises its arms this long before its spell shows
 #define FF6_BATTLE_STEP_PIXELS 12  // the step of a character at a monster, to the left
 #define FF6_BATTLE_FLASH_FRAMES 10
 #define FF6_BATTLE_FLASH_PERCENT 7  // what each frame of the flash is worth, in percent of its color
@@ -1387,9 +1430,15 @@
 #define FF6_ITEM_FRACTION_SHIFT 4
 #define FF6_ITEM_MEGALIXIR 239
 #define FF6_ITEM_FENIX_DOWN 240
-#define FF6_ITEM_SLEEPING_BAG 246  // these need a save point, a place to warp from, and the status effects of the game
+#define FF6_ITEM_SLEEPING_BAG 246  // needs a save point; the tent too, and the warp stone a map that allows it
 #define FF6_ITEM_TENT 247
 #define FF6_ITEM_WARP_STONE 253
+#define FF6_EVENT_BIT_SAVE_POINT 0x1BF  // the party is on a save point ($1eb7 bit 7, the first flag of the main menu)
+#define FF6_MAP_PROP_WARP 1  // bit 1: the warp and the warp stone work here
+#define FF6_MAP_WARP_ENABLED 0x02
+#define FF6_EVENT_SCRIPT_TENT 0x34  // the events that follow the tent (field and world map) and the warp, in the event script
+#define FF6_EVENT_SCRIPT_WORLD_TENT 0x4F
+#define FF6_EVENT_SCRIPT_WARP 0x39
 #define FF6_ITEM_IMP_BIT 0x40  // of the equip flags: an item that only an imp can use well
 #define FF6_ITEM_TWO_HANDED 0x40  // of the flags of a weapon
 #define FF6_RELIC1_HP_25 0x04
@@ -1694,6 +1743,8 @@
 #define FF6_HP_BOOST_MASK 0xC0
 #define FF6_HP_CHANGES {1, 2, 4, 8, 16, 32, 64, 128}  // what the commands that add or take hp use
 #define FF6_EVENT_SET_CHAR_PROP 0x40
+#define FF6_EVENT_SET_CHAR_NAME 0x7F  // a character gets the name of an actor: Wedge, Vicks, the ghosts, the Kefkas
+#define FF6_CHAR_NAME_BYTES 6
 #define FF6_EVENT_NORMALIZE_LEVEL 0x77
 #define FF6_EVENT_GIVE_ITEM 0x80
 #define FF6_EVENT_TAKE_ITEM 0x81
@@ -1784,7 +1835,8 @@
 #define FF6_GAME_START_MAP 19  // loaded in the dark before the event of the start of the game takes over
 
 // ---- Vehicles (DrawChoco, DrawMagitek, DrawRaft): the graphics that the objects ride on ------------------------
-#define FF6_VEHICLE_GFX_BYTES 0x1C00
+#define FF6_VEHICLE_GFX_BYTES 0x2000  // the vehicles, then the armor of the battles
+#define FF6_SPECIAL_GFX_BYTES 0x800  // of each map sprite graphic, raw 4bpp: what a special npc takes (4 frames of 32x32 at most)
 #define FF6_VEHICLE_GFX_VRAM 0x7200  // where the game puts them in the video memory, in words
 #define FF6_VEHICLE_MASK 0x60  // the type of vehicle in the flags of the vehicle commands
 #define FF6_VEHICLE_CHOCOBO 0x20

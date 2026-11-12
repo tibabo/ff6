@@ -24,6 +24,7 @@ struct BattleGfx {
     std::vector<uint8_t> monsterGfx;
     std::vector<uint8_t> bgProp, bgPal, bgGfx, bgTiles;  // the backgrounds of the battlefield
     std::vector<uint8_t> charGfx, charActions, charPalTable, charPal;  // the characters, in their poses
+    std::vector<uint8_t> magitekGfx;  // FF6_MAGITEK_FRAMES of FF6_MAGITEK_FRAME_BYTES, the armor of the characters in a magitek battle
     std::vector<uint8_t> statusGfx, statusPal;  // the sprites of the statuses (FF6_STATUS_GFX_BYTES) and their four palettes of the colors 12 to 15
 
     // The picture of a monster from the top left tile of its stencil; empty for a number that has none. Decoded once.
@@ -48,10 +49,12 @@ struct BattleGfx {
     // The sprite of a status (1 poison, 2 confuse, 3 blind, 4 berserk, 5 silence, 6 sleep, 7 the shadow under a character) at one of
     // its four frames, 16 x 16.
     const BattleImage& statusSprite(int kind, int frame) const;
+    // The magitek armor at one of its frames, 32 x 32.
+    const BattleImage& magitekArmor(int frame) const;
 
 private:
     BattleImage decodeMonster(int id, const std::array<uint16_t, 8>* replace) const;
-    mutable std::map<int, BattleImage> monsters_, backgrounds_, characters_, statuses_;
+    mutable std::map<int, BattleImage> monsters_, backgrounds_, characters_, statuses_, armors_;
     mutable std::map<int, std::vector<uint8_t>> characterColors_;  // the numbers of the colors of each pixel, 0 for none
 };
 

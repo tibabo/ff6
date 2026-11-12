@@ -78,6 +78,27 @@ void testText() {
     run(dialogue, 10);
     CHECK(text(dialogue, 0) == "B");
 
+    // A key code before the end closes the text by itself, as the story texts of the opening do.
+    std::vector<uint8_t> autoClose = {0x20, FF6_DLG_WAIT, 2, FF6_DLG_KEY, FF6_DLG_END};
+    dialogue.open({autoClose.data(), autoClose.size()}, widths, false);
+    for (int i = 0; i < 100; ++i) dialogue.update(false, FF6_NO_DIRECTION);
+    CHECK(!dialogue.active() && text(dialogue, 0) == "A");
+
+    // A timed key waits for the button, but only that long.
+    std::vector<uint8_t> timed = {0x20, FF6_DLG_KEY_TIMED, 2, 0x21, FF6_DLG_END};
+    dialogue.open({timed.data(), timed.size()}, widths, false);
+    run(dialogue, 10);
+    CHECK(text(dialogue, 0) == "A" && dialogue.waitingForKey());
+    for (int i = 0; i < 2 * FF6_DLG_WAIT_UNIT_FRAMES + 2 && dialogue.waitingForKey(); ++i) dialogue.update(false, FF6_NO_DIRECTION);
+    CHECK(!dialogue.waitingForKey());
+    run(dialogue, 10);
+    CHECK(text(dialogue, 0) == "AB");
+    dialogue.open({timed.data(), timed.size()}, widths, false);
+    run(dialogue, 10);
+    dialogue.update(true, FF6_NO_DIRECTION);
+    run(dialogue, 10);
+    CHECK(text(dialogue, 0) == "AB");
+
     // A dialogue that does not exist or is empty never opens.
     dialogue.open({}, widths, false);
     CHECK(!dialogue.active());

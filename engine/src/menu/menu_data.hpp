@@ -28,6 +28,11 @@ struct MenuData {
     std::vector<uint8_t> spellNames, esperNames, bushidoNames, blitzNames;
     std::vector<uint8_t> spriteGfx;  // FF6_MENU_SPRITE_BYTES: the hand, the arrow and the status icons
     std::array<uint16_t, FF6_MENU_CURSOR_PALETTE_COLORS> iconPalette{};  // the sprite colors 12 to 15 of the status icons
+    // The rare items: FF6_RARE_ITEM_COUNT names of FF6_ITEM_NAME_BYTES codes, where each description starts, and the texts.
+    std::vector<uint8_t> rareNames;
+    std::vector<uint16_t> rareDescPtrs;
+    std::vector<uint8_t> rareDescriptions;
+    std::vector<uint8_t> rareDescription(int item) const;
 
     // The codes of the name of a spell, an esper, a swordtech or a blitz; empty when there is no such thing.
     std::vector<uint8_t> spellName(int index) const;

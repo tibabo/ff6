@@ -193,7 +193,7 @@ void testItemUse(const ff6::GameRules& rules) {
     terra.equipment.fill(FF6_ITEM_EMPTY);
     for (const int item : {233, 233, 238, 239, 240, 246, 247}) ff6::giveItem(party, item);  // potion, elixir, megalixir, fenix down, bag, tent
     CHECK(ff6::itemUsableInMenu(rules, 233) && ff6::itemUsableInMenu(rules, 238) && ff6::itemUsableInMenu(rules, 240));
-    CHECK(!ff6::itemUsableInMenu(rules, 239) && !ff6::itemUsableInMenu(rules, 246) && !ff6::itemUsableInMenu(rules, 247));
+    CHECK(!ff6::itemUsableInMenu(rules, 239) && ff6::itemUsableInMenu(rules, 246) && !ff6::itemUsableInMenu(rules, 247));  // the tent leaves the menu
     CHECK(!ff6::itemUsableInMenu(rules, 1) && !ff6::itemUsableInMenu(rules, FF6_ITEM_EMPTY));  // a weapon, and nothing
 
     CHECK(!ff6::canUseItemOn(party, rules, 0, 233));  // nothing to restore
@@ -208,6 +208,23 @@ void testItemUse(const ff6::GameRules& rules) {
     CHECK(ff6::useItemOn(party, rules, 0, 238) && terra.hp == terra.maxHp && terra.mp == terra.maxMp);  // the elixir
     CHECK(!ff6::useItemOn(party, rules, 0, 233));  // she is full of hp and the potion is of no use
     CHECK(!ff6::useItemOn(party, rules, 0, 99));  // and an item that she does not have
+}
+
+void testArrange() {
+    ff6::PartyState party;
+    std::vector<uint8_t> names(static_cast<size_t>(FF6_ITEM_COUNT) * FF6_ITEM_NAME_BYTES, 0xFF);
+    names[5 * FF6_ITEM_NAME_BYTES] = 0xD9;
+    names[6 * FF6_ITEM_NAME_BYTES] = 0xD8;
+    names[8 * FF6_ITEM_NAME_BYTES] = 0xD9;
+    names[7 * FF6_ITEM_NAME_BYTES] = 0x00;  // a symbol that the game does not sort: last
+    party.inventory[1] = {5, 3};
+    party.inventory[3] = {7, 1};
+    party.inventory[4] = {8, 2};
+    party.inventory[6] = {6, 9};
+    ff6::arrangeItems(party, names);
+    CHECK(party.inventory[0].item == 6 && party.inventory[0].quantity == 9);  // 0xD8 first
+    CHECK(party.inventory[1].item == 5 && party.inventory[2].item == 8 && party.inventory[3].item == 7);  // 0xD9 in their order
+    CHECK(party.inventory[4].item == FF6_ITEM_EMPTY && party.inventory[4].quantity == 0);
 }
 
 void testPoison(const ff6::GameRules& rules) {
@@ -264,6 +281,16 @@ void testPoison(const ff6::GameRules& rules) {
     CHECK(!ff6::canUseItemOn(party, rules, 0, antidote));
     terra.status = FF6_ST_POISON | FF6_ST_BLIND;
     CHECK(ff6::useItemOn(party, rules, 0, antidote) && terra.status == FF6_ST_BLIND && ff6::itemQuantity(party, antidote) == 0);
+    // The sleeping bag gives back all of the hp and mp and cures what lasts, but does not raise the dead.
+    ff6::giveItem(party, FF6_ITEM_SLEEPING_BAG);
+    terra.status = FF6_ST_POISON | FF6_ST_BLIND;
+    terra.hp = 3;
+    terra.mp = 0;
+    CHECK(ff6::useItemOn(party, rules, 0, FF6_ITEM_SLEEPING_BAG) && terra.status == 0 && terra.hp == terra.maxHp && terra.mp == terra.maxMp);
+    ff6::giveItem(party, FF6_ITEM_SLEEPING_BAG);
+    CHECK(!ff6::canUseItemOn(party, rules, 0, FF6_ITEM_SLEEPING_BAG));  // nothing to give back
+    terra.hp = 0;
+    CHECK(!ff6::canUseItemOn(party, rules, 0, FF6_ITEM_SLEEPING_BAG));
 }
 
 void testShops(const ff6::GameRules& rules) {
@@ -365,12 +392,14 @@ void testParty() {
     CHECK(rules.charProp.size() == static_cast<size_t>(FF6_CHAR_PROP_COUNT) * FF6_CHAR_PROP_BYTES);
     CHECK(rules.levelExp.size() == FF6_LEVEL_STEPS && rules.levelExp[0] == 4 && rules.levelExp[FF6_LEVEL_STEPS - 1] == 11111);
     CHECK(rules.levelHp[0] == 11 && rules.levelMp[0] == 4);
+    CHECK(rules.actorName(0) == "Terra" && rules.actorName(0x20) == "Wedge" && rules.actorName(0x21) == "Vicks");  // char_name
     testCharacters(rules);
     testStats(rules);
     testHpChanges(rules);
     testEquipmentRemoval(rules);
     testEquipping(rules);
     testItemUse(rules);
+    testArrange();
     testPoison(rules);
     testShops(rules);
     testAbilities(rules);

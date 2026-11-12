@@ -27,13 +27,6 @@ constexpr int kWaterRows = 16;
 constexpr uint8_t kWaterStart[kWaterRows] = {0x80, 0x00, 0x40, 0x10, 0xA0, 0x60, 0x30, 0xB0,
                                              0xF0, 0x20, 0x70, 0xC0, 0xD0, 0x50, 0x90, 0xE0};
 
-// A command of the event that gives a frame of the sprite sheet by the number that the game uses for it.
-int engineFrame(int original) {
-    if (original >= 0x46 && original <= 0x48) return original - 0x46 + 9;
-    if (original == 0x2E || original == 0x2F) return original - 0x2E + FF6_FRAME_RIDING_LEFT;
-    return original < FF6_FRAME_COUNT ? original : 0;
-}
-
 uint16_t word(const std::vector<uint8_t>& bytes, size_t at) {
     return static_cast<uint16_t>(bytes[at] | (bytes[at + 1] << 8));
 }
@@ -362,7 +355,7 @@ void WorldScreen::execWorldCmd() {
         const int cmd = inCommand_ ? command_ : scriptByte();
         command_ = cmd;
         if (cmd < 0x80) {  // a frame of the character
-            frame_ = engineFrame(cmd);
+            frame_ = actionFrame(cmd);
             continue;
         }
         if (cmd < 0xA0) {  // walk a number of tiles

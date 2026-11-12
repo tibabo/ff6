@@ -171,11 +171,12 @@ void testBattle() {
     }
     CHECK(lit > 1000);
     view.start(data, rules, played, {0}, 0, 1, FF6_BATTLE_SPEED_DEFAULT, true);
-    bool sawCommand = false, sawTarget = false, sawPopup = false, drew = false;
+    bool sawCommand = false, sawTarget = false, sawPopup = false, drew = false, sawLate = false;
     for (int frame = 0; frame < 60000 && !view.finished(); ++frame) {
         sawCommand = sawCommand || view.mode() == ff6::BattleMode::Command;
         sawTarget = sawTarget || view.mode() == ff6::BattleMode::Target;
         sawPopup = sawPopup || (view.popupTarget() >= 0 && view.popupDamage() > 0);
+        sawLate = sawLate || (view.battle()->outcome() == ff6::BattleOutcome::Won && !view.resolved());
         if (frame % 50 == 0 || view.mode() == ff6::BattleMode::Command) {
             view.draw();
             for (const uint8_t byte : screen.pixels()) drew = drew || byte != 0;
@@ -184,6 +185,7 @@ void testBattle() {
     }
     CHECK(view.finished() && view.outcome() == ff6::BattleOutcome::Won);
     CHECK(sawCommand && sawTarget && sawPopup && drew);
+    CHECK(sawLate);  // the blow that wins is shown before the victory
     CHECK(played.gil == party.gil + view.battle()->reward().gil && played.characters[0].experience >= party.characters[0].experience);
     bool selected = false;
     for (const auto& command : sound.commands) selected = selected || command.command == FF6_SFX_MENU_SELECT;

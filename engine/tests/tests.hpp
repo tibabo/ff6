@@ -38,3 +38,5 @@ void testCutsceneScenes();
 void testWorld();
 void testParty();
 void testGame();
+void testCamping();
+void testSpecialNpcs();

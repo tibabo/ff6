@@ -21,6 +21,10 @@ public:
     MenuScreen(const CommonData& common, const MenuData& menu);
 
     void clear();
+    // Moves everything that is drawn to the right (the scroll of the backgrounds); the left side is black.
+    void shiftRight(int pixels);
+    // Where the windows and the text start, in pixels from the left of the screen (they may begin off it, like a window that slides in).
+    void setOriginX(int pixels) { originX_ = pixels; }
     // Moves the text down by some pixels, like the scrolling of the backgrounds of a menu.
     void setTextOffset(int pixels) { textOffsetY_ = pixels; }
     // The text of the first background is only seen between these two lines of the screen.
@@ -68,6 +72,7 @@ private:
     std::vector<uint8_t> pixels_;
     std::map<std::pair<int, int>, std::vector<uint8_t>> strips_;  // the map sprites that were asked for, by sprite and palette
     int textOffsetY_ = 0;
+    int originX_ = 0;
     int clipTop_ = 0, clipBottom_ = FF6_SCREEN_HEIGHT;
     std::vector<uint8_t> windowTiles_;  // empty until the config is applied: then the tiles of the common data are used
     uint16_t fontColor_ = FF6_CONFIG_FONT_COLOR_DEFAULT;

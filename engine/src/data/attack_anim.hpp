@@ -37,7 +37,7 @@ struct AttackFrame {
 // attackanim.ff6data: the scripts of the attack animations, their frames and the tiles of these, raw as the game keeps them.
 struct AttackAnim {
     std::vector<uint8_t> props, gfxProps, scriptPtrs, scripts, framePtrs, frames, tiles3, pal, tiles2, gfx3, gfx2, weapons, mode7Gfx,
-        mode7Map, rng, rowSpeeds, lights;  // the random numbers, the steps toward each row, the palettes of the lights of Chadarnook
+        mode7Map, rng, rowSpeeds, lights, eventPal;  // the random numbers, the steps toward each row, the palettes of the lights of Chadarnook, the sparkles of the frozen esper
 
     AttackAnimProp prop(int attack) const;
     // The animation of the blows of a weapon (the item) or of an attack of a monster (FF6_ATTACK_WEAPON_FISTS + the index).
@@ -55,6 +55,8 @@ struct AttackAnim {
     BattleImage mode7Plane(int tileSet, int mapSet, int palette, int cycle = 0) const;
     // The 8 colors of a palette of the animations as the game keeps them (BGR555); zeros past the data.
     std::array<uint16_t, 8> paletteWords(int palette) const;
+    // The same for a palette of the sparkles of the frozen esper (BattleEventPal).
+    std::array<uint16_t, 8> eventPaletteWords(int palette) const;
 
 private:
     mutable std::map<long, AttackFrame> cache_;

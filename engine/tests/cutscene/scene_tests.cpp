@@ -82,16 +82,17 @@ void testCutsceneScenes() {
         test::RecordingSound sound;
         ff6::OpeningScene opening(data, sound);
         CHECK(sound.commands.size() == 1 && sound.commands[0].arg1 == 4 && sound.commands[0].arg2 == FF6_SOUND_FULL_VOLUME);
-        for (int i = 0; i < 20; ++i) opening.tick({});
+        constexpr int kStep = FF6_OPENING_FRAMES_PER_STEP;  // the opening advances every other frame
+        for (int i = 0; i < 20 * kStep; ++i) opening.tick({});
         const ff6::Ppu& ppu = opening.core().ppu;
         CHECK(ppu.lines[10].bgMode == 0x09 && ppu.lines[100].bgMode == 0x07);
         CHECK(ppu.lines[100].m7a == 0x4000 / (((100 - 24) * 292 >> 8) & 0xFF) && ppu.lines[100].m7a == ppu.lines[100].m7d);
         CHECK(ppu.lines[200].m7a < ppu.lines[100].m7a && ppu.lines[100].m7b == 0 && ppu.lines[100].m7c == 0);
         CHECK(ppu.lines[90].fixed[0] > ppu.lines[200].fixed[0] && ppu.lines[10].fixed[0] == 0);
-        for (int i = 20; i < 260; ++i) opening.tick({});
+        for (int i = 20 * kStep; i < 260 * kStep; ++i) opening.tick({});
         CHECK(litPixels(opening) > 3000);  // the ground, the armors and the first names
         CHECK(opening.core().ram[0x4458] == 0x2C || opening.core().ram[0x4458] == 0x01);  // "producer" begins with a p
-        const int frames = 260 + tickUntilFinished(opening, 4000);
+        const int frames = (260 * kStep + tickUntilFinished(opening, 4000 * kStep)) / kStep;
         CHECK(opening.finished() && !opening.skipped() && frames > 3400 && frames < 3700);
         CHECK(sound.commands.back().command == FF6_SOUND_STOP_ALL);
     }

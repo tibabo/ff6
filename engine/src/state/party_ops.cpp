@@ -182,6 +182,10 @@ void removeEquipment(PartyState& party, int slot) {
     }
 }
 
+void emptyEquipment(PartyState& party, const GameRules& rules, int slot) {
+    for (int place = FF6_EQUIP_RIGHT_HAND; place <= FF6_EQUIP_BODY; ++place) equipItem(party, rules, slot, place, FF6_ITEM_EMPTY);
+}
+
 bool poisonStep(PartyState& party, const GameRules& rules, const std::vector<int>& members) {
     bool poisoned = false;
     for (const int slot : members) {
@@ -251,8 +255,7 @@ static unsigned curedStatuses(const uint8_t* prop) {
 }
 
 bool itemUsableInMenu(const GameRules& rules, int item) {
-    if (item < 0 || item >= FF6_ITEM_COUNT || item == FF6_ITEM_MEGALIXIR || item == FF6_ITEM_SLEEPING_BAG ||
-        item == FF6_ITEM_TENT || item == FF6_ITEM_WARP_STONE) {
+    if (item < 0 || item >= FF6_ITEM_COUNT || item == FF6_ITEM_MEGALIXIR || item == FF6_ITEM_TENT || item == FF6_ITEM_WARP_STONE) {
         return false;
     }
     const uint8_t* prop = rules.item(item);
@@ -450,6 +453,23 @@ int sellPrice(const GameRules& rules, int item) {
     if (item < 0 || item >= FF6_ITEM_COUNT) return 0;
     const uint8_t* prop = rules.item(item);
     return (prop[FF6_ITEM_PROP_PRICE] | (prop[FF6_ITEM_PROP_PRICE + 1] << 8)) / 2;
+}
+
+void arrangeItems(PartyState& party, const std::vector<uint8_t>& itemNames) {
+    static constexpr int kIcons[] = FF6_ITEM_SORT_ICONS;
+    const auto rank = [&](int item) {
+        const size_t at = static_cast<size_t>(item) * FF6_ITEM_NAME_BYTES;
+        const int icon = at < itemNames.size() ? itemNames[at] : -1;
+        const int* found = std::find(std::begin(kIcons), std::end(kIcons), icon);
+        return static_cast<int>(found - std::begin(kIcons));  // an unknown symbol goes after the known ones
+    };
+    std::vector<InventorySlot> used;
+    for (const InventorySlot& slot : party.inventory) {
+        if (slot.item != FF6_ITEM_EMPTY) used.push_back(slot);
+    }
+    std::stable_sort(used.begin(), used.end(), [&](const InventorySlot& a, const InventorySlot& b) { return rank(a.item) < rank(b.item); });
+    party.inventory.fill(InventorySlot());
+    std::copy(used.begin(), used.end(), party.inventory.begin());
 }
 
 int itemQuantity(const PartyState& party, int item) {

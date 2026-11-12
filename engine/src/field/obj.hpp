@@ -27,6 +27,12 @@ struct NpcProp {
     int vehicle = 0;  // FF6_VEHICLE_MASK bits: none, chocobo, magitek or raft
     int vram = 0;  // special npcs: where their graphics go, in steps of two tiles
     bool large = false;  // special npcs: 32x32 pixels instead of 16x16
+    int frames = 1;  // special npcs: the frames of their graphics (1, 2 or 4 of those that the sprite shows in turn)
+    int speedShift = 0;  // special npcs: the frames change every 4 << this many game frames
+    bool flip = false;  // special npcs: the sprite is mirrored
+    int order = 0;  // special npcs: FF6_NPC_ORDER_*, where the sprite is among the others
+    int shiftX = 0, shiftY = 0;  // special npcs: pixels from the place (or from the master) where the sprite is drawn
+    int master = -1;  // special npcs: the npc whose place it follows, -1 for none
 };
 NpcProp decodeNpcProp(const uint8_t* bytes);
 

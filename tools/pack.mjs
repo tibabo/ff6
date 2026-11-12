@@ -12,7 +12,7 @@ import {
   loadTileset, readMapProperties, BG3_GFX_BYTES, BG3_PALETTE_BYTES,
 } from './field/map.mjs';
 import {
-  SPRITE_GFX_COUNT, SPRITE_PAL_COUNT, buildSpriteGfx, readSpritePalettes, readVehicleGfx,
+  SPRITE_GFX_COUNT, SPRITE_PAL_COUNT, buildSpecialGfx, buildSpriteGfx, readSpritePalettes, readVehicleGfx,
 } from './field/obj.mjs';
 import {
   buildFontRows, buildFontWidths, buildWindowTiles, encodeDialogueForEngine,
@@ -33,7 +33,7 @@ import { buildWorldData } from './world/world.mjs';
 
 export const COMMON_MAGIC = 'FF6COMMN';
 export const MAP_MAGIC = 'FF6MAP01';
-export const PACK_VERSION = 36;
+export const PACK_VERSION = 40;
 export const FIRST_FIELD_MAP = 3;  // maps 0-2 are the world maps
 
 class Writer {
@@ -104,6 +104,7 @@ export function buildCommonData(rom, { textFile } = {}) {
   out.u32(script.length);
   out.bytes(script);
   out.bytes(readVehicleGfx(rom));
+  out.bytes(buildSpecialGfx(rom));
   return out.build();
 }
 

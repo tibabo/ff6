@@ -263,4 +263,19 @@ void testAttackAnimPlayer() {
         for (const ff6::AnimSprite& sprite : player.sprites()) layered = layered || sprite.layer != 0;
     }
     CHECK(layered);
+
+    // A beam of the magitek armor: the armor walks up to the monster first, and the glow and the flare wait until it fires.
+    ff6::AnimBody armor = attacker;
+    armor.slot = 0;
+    player.setMagitek(true);
+    player.start(131, armor, {monster(0, 70, 84)}, false);
+    int firstGlow = -1, frame = 0;
+    for (; player.tick() && firstGlow < 0; ++frame) {
+        for (const ff6::AnimSprite& sprite : player.sprites()) {
+            if (sprite.layer != 1) firstGlow = frame;
+        }
+    }
+    CHECK(firstGlow > 10);
+    CHECK(player.shift(false, 0).armor == 2 && player.shift(false, 0).x < -40);
+    player.setMagitek(false);
 }

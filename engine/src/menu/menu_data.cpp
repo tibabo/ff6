@@ -30,6 +30,15 @@ std::vector<uint8_t> MenuData::itemDescription(int item) const {
     return text;
 }
 
+std::vector<uint8_t> MenuData::rareDescription(int item) const {
+    std::vector<uint8_t> text;
+    if (item < 0 || static_cast<size_t>(item) >= rareDescPtrs.size()) return text;
+    for (size_t at = rareDescPtrs[static_cast<size_t>(item)]; at < rareDescriptions.size() && rareDescriptions[at] != 0; ++at) {
+        text.push_back(rareDescriptions[at]);
+    }
+    return text;
+}
+
 MenuData loadMenuData(const std::string& packDir) {
     const std::vector<uint8_t> file = readFile(packDir + "/" FF6_MENU_FILE);
     ByteReader reader(file);
@@ -55,6 +64,9 @@ MenuData loadMenuData(const std::string& packDir) {
     menu.blitzNames = reader.bytes(static_cast<size_t>(FF6_TECH_COUNT) * FF6_TECH_NAME_BYTES);
     menu.spriteGfx = reader.bytes(FF6_MENU_SPRITE_BYTES);
     for (uint16_t& color : menu.iconPalette) color = reader.u16();
+    menu.rareNames = reader.bytes(static_cast<size_t>(FF6_RARE_ITEM_COUNT) * FF6_ITEM_NAME_BYTES);
+    menu.rareDescPtrs = reader.words(FF6_RARE_ITEM_COUNT);
+    menu.rareDescriptions = reader.bytes(FF6_RARE_DESC_BYTES);
     if (reader.remaining() != 0) throw std::runtime_error("menu data has trailing bytes");
     return menu;
 }

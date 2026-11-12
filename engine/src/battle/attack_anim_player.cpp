@@ -282,6 +282,7 @@ void AttackAnimPlayer::begin(const AnimBody& attacker, bool flipped) {
     sounds_.clear();
     skipped_.clear();
     hidden_[0] = hidden_[1] = hidden_[2] = false;
+    paused_[0] = paused_[1] = paused_[2] = false;
     for (AnimTint& tint : tints_) tint = AnimTint();
     for (AnimWave& wave : waves_) wave = AnimWave();
     for (AnimBlend& blend : blends_) blend = AnimBlend();
@@ -391,7 +392,23 @@ void AttackAnimPlayer::startScene(const std::vector<SceneThread>& threads, const
 // A script of a character in bank D0: it has no graphics, only the commands that move and pose the character.
 void AttackAnimPlayer::addSceneThread(int address, const AnimBody& body) {
     const uint8_t* code = anim_->scripts.data();
-    if (body.monster || body.slot < 0 || body.slot > 3 || address < 0 || static_cast<size_t>(address) + kHeaderBytes + 12 >= anim_->scripts.size()) return;
+    if (body.slot < 0 || address < 0 || static_cast<size_t>(address) + kHeaderBytes + 12 >= anim_->scripts.size()) return;
+    if (body.monster) {  // a monster of the scene has no moves to make: its script has the sparkles and the sounds
+        Thread thread;
+        thread.active = true;
+        thread.layer = 0;
+        thread.sheet = -1;
+        thread.target = thread.attacker = body;
+        thread.ptr = static_cast<size_t>(address) + kHeaderBytes;
+        thread.rate = (code[address] >> 4) + 1;
+        thread.counter = 1;
+        thread.flipped = flipped_;
+        thread.posX = thread.targetX = thread.attackerX = body.centerX;
+        thread.posY = thread.targetY = thread.attackerY = body.centerY;
+        threads_.push_back(thread);
+        return;
+    }
+    if (body.slot > 3) return;
     CharMove& move = charMove_[body.slot];
     if (!move.known) {  // PosX and PosY: the left of the sprite, and 8 pixels under its top
         move.known = true;
@@ -442,6 +459,7 @@ void AttackAnimPlayer::addAttack(int attack, const AnimBody& attacker, const std
         break;
     }
     const int initType = prop.init & 0x7F;
+    if (initType == 0x4E) paused_[0] = paused_[2] = true;  // the beams: the flare and the glow wait for the armor to be in place
     if (initType == FF6_ATTACK_INIT_JUSTICE || initType == FF6_ATTACK_INIT_POSSESS) bg3High_ = false;
     if (initType == FF6_ATTACK_INIT_JUSTICE) {
         behindLimit_ = FF6_JUSTICE_BEHIND_Y;
@@ -962,6 +980,7 @@ void AttackAnimPlayer::commandScene(Thread& thread, const uint8_t* code, size_t 
             else soundCommands_.push_back({code[at + 2], code[at + 3], code[at + 4]});
             break;
         case 12: gfxChanges_.push_back({code[at + 2], code[at + 3]}); break;
+        case 13: eventPalette_ = code[at + 2]; break;  // the sparkles of the frozen esper: one of the palettes
         case 14: shake_ = code[at + 2]; break;
         default: break;  // the facing, the unused ones, the sparkles of Tritoch, who is shown and the running
     }
@@ -1553,8 +1572,16 @@ void AttackAnimPlayer::command(Thread& thread, const uint8_t* code, size_t at) {
             if (!thread.attacker.monster) echo_ = {(code[at + 1] & 0x80) != 0, thread.attacker.slot & 3, code[at + 1] & 0x7F};
             break;
         // The palette that a thread takes for its sprites ($99) is a row of the sprite palettes of the game, which the purifier uses
-        // for the crusader (its sheet has the palette of the esper here); the armor that $F9 poses is not drawn in a battle here.
-        case 0x99: case 0xF9: break;
+        // for the crusader (its sheet has the palette of the esper here).
+        case 0x99: break;
+        case 0xF9:  // the action of the magitek armor of the attacker, or of the target
+            if (code[at + 3] == 0) shifts_[bodyIndex(code[at + 2] == 0 ? thread.attacker : thread.target)].armor = code[at + 1];
+            break;
+        case 0xC2:  // the layers whose threads were waiting go on
+            for (int layer = 0; layer < 3; ++layer) {
+                if (code[at + 1] & (layer == 1 ? 0x80 : layer == 2 ? 0x40 : 0x20)) paused_[layer] = false;
+            }
+            break;
         case 0xF6: updateTriangle(true); break;
         case 0x86: case 0x87: {  // the attacker or the target moves
             int dx = 0, dy = 0;
@@ -1568,7 +1595,7 @@ void AttackAnimPlayer::command(Thread& thread, const uint8_t* code, size_t at) {
             break;
         }
         // These change nothing that this screen draws: the order of the sprites, the tiles in front, the wait for a scanline.
-        case 0xD1: case 0xF7: case 0xC2: break;
+        case 0xD1: case 0xF7: break;
         case 0x90: thread.priority = code[at + 1] >> 4; break;
         case 0xD0: spritePriority_ = code[at + 1] >> 4; break;  // the priority of the combatants against bg1 in mode 7
         case 0x84: thread.rate = code[at + 1]; break;
@@ -1609,6 +1636,7 @@ void AttackAnimPlayer::command(Thread& thread, const uint8_t* code, size_t at) {
                 toX += static_cast<int>(nextRandom() % static_cast<uint32_t>(thread.target.width)) - thread.target.width / 2;
                 toY += static_cast<int>(nextRandom() % static_cast<uint32_t>(height)) - height / 2;
             }
+            if (op == 0xE7 && magitek_) toY -= 24;  // the armor aims higher
             const double dx = toX - thread.attackerX, dy = toY - thread.attackerY;
             const double length = std::sqrt(dx * dx + dy * dy);
             thread.vecLength = static_cast<int>(length);
@@ -1685,7 +1713,7 @@ void AttackAnimPlayer::command(Thread& thread, const uint8_t* code, size_t at) {
         case 0xEB: next = static_cast<size_t>(word(code, at + 1 + 2 * static_cast<size_t>(std::min(thread.index, 7)))); break;
         case 0xF0: next = static_cast<size_t>(word(code, at + 1 + 2 * static_cast<size_t>(thread.target.monster ? 4 : thread.target.slot & 3))); break;
         case 0xF3: next = static_cast<size_t>(word(code, at + 1 + 2 * static_cast<size_t>(thread.attacker.monster ? 4 : thread.attacker.slot & 3))); break;
-        case 0xF8: next = static_cast<size_t>(word(code, at + 1)); break;  // the normal one
+        case 0xF8: next = static_cast<size_t>(word(code, at + (magitek_ ? 3 : 1))); break;  // the normal one, or the magitek one
         case 0xFA: next = static_cast<size_t>(word(code, at + 1)); break;
         case 0x80: special(thread, code, at); return;
         default:
@@ -1728,7 +1756,7 @@ bool AttackAnimPlayer::tick() {
     ++frames_;
     for (int slot = 0; slot < 4; ++slot) updatePose(slot);  // a character that walks takes its next step
     for (Thread& thread : threads_) {
-        if (!thread.active) continue;
+        if (!thread.active || paused_[thread.layer]) continue;
         thread.counter = (thread.counter - 1) & 0xFF;  // a byte, as in the game: zero rolls over to 255
         if (thread.counter != 0) continue;
         thread.counter = thread.rate;

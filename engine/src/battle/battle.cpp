@@ -116,6 +116,7 @@ void Battle::fillCharacter(Combatant& c, int index) {
         }
     }
     c.status |= state.status;
+    c.backRow = state.backRow;
     if (c.hp == 0) c.status = FF6_ST_DEAD;
     updateNearFatal(c);
 }

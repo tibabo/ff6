@@ -41,6 +41,7 @@ private:
     CutsceneCore core_;
     Shared shared_;
     Phase phase_ = Phase::Run;
+    int lag_ = 0;
     bool skipped_ = false;
 };
 

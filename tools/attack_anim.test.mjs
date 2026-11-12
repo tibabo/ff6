@@ -5,7 +5,7 @@ import {
   ATTACK_ANIM_MAGIC, ATTACK_ANIM_PROP_BYTES, ATTACK_ANIM_PROP_COUNT, ATTACK_ANIM_SCRIPT_BYTES, ATTACK_ANIM_SCRIPT_COUNT,
   ATTACK_FRAME_END, ATTACK_FRAME_FIRST, ATTACK_FRAME_PTR_COUNT, ATTACK_GFX_2BPP_BYTES, ATTACK_GFX_3BPP_BYTES, ATTACK_GFX_PROP_BYTES,
   ATTACK_MODE7_GFX_BYTES, ATTACK_MODE7_MAP_BYTES, ATTACK_PAL_BYTES, ATTACK_TILES_2BPP_BYTES, ATTACK_TILES_3BPP_BYTES,
-  ATTACK_WEAPON_PROP_BYTES, ATTACK_WEAPON_PROP_COUNT, ATTACK_RNG_BYTES, ATTACK_ROW_SPEED_BYTES, ATTACK_LIGHTS_BYTES, buildAttackAnim,
+  ATTACK_WEAPON_PROP_BYTES, ATTACK_WEAPON_PROP_COUNT, ATTACK_RNG_BYTES, ATTACK_ROW_SPEED_BYTES, ATTACK_LIGHTS_BYTES, ATTACK_EVENT_PAL_BYTES, readAttackEventPal, buildAttackAnim,
   readAttackAnimProp, readAttackFramePtrs, readAttackGfxProp, readAttackLights, readAttackMode7Gfx, readAttackMode7Map, readAttackRng,
   readAttackRowSpeeds, readAttackScriptPtrs, readAttackScripts, readWeaponAnimProp,
 } from './battle/attack_anim.mjs';
@@ -76,7 +76,7 @@ test('attack animations hold the tables one after the other', { skip }, () => {
     + ATTACK_ANIM_SCRIPT_BYTES + ATTACK_FRAME_PTR_COUNT * 2 + ATTACK_FRAME_END - ATTACK_FRAME_FIRST + ATTACK_TILES_3BPP_BYTES
     + ATTACK_PAL_BYTES + ATTACK_TILES_2BPP_BYTES + ATTACK_GFX_3BPP_BYTES + ATTACK_GFX_2BPP_BYTES
     + ATTACK_WEAPON_PROP_COUNT * ATTACK_WEAPON_PROP_BYTES + ATTACK_MODE7_GFX_BYTES + ATTACK_MODE7_MAP_BYTES
-    + ATTACK_RNG_BYTES + ATTACK_ROW_SPEED_BYTES + ATTACK_LIGHTS_BYTES);
+    + ATTACK_RNG_BYTES + ATTACK_ROW_SPEED_BYTES + ATTACK_LIGHTS_BYTES + ATTACK_EVENT_PAL_BYTES);
 });
 
 test('the random numbers, the row speeds and the palettes of the lights are those of the game', { skip }, () => {
@@ -89,6 +89,9 @@ test('the random numbers, the row speeds and the palettes of the lights are thos
   const lights = readAttackLights(rom);
   assert.deepEqual([...lights.subarray(0, 6)], [0x00, 0x00, 0xad, 0x31, 0x0a, 0x19]);  // on
   assert.deepEqual([...lights.subarray(96, 102)], [0x00, 0x00, 0x84, 0x0c, 0x44, 0x0c]);  // off
+  const sparkles = readAttackEventPal(rom);
+  assert.equal(sparkles.length, ATTACK_EVENT_PAL_BYTES);
+  assert.deepEqual([...sparkles.subarray(0, 6)], [0x29, 0x25, 0x43, 0x08, 0xfe, 0x7f]);  // the first of the five
 });
 
 test('the mode 7 pictures are three sets of tiles and three maps of 32 x 32 tiles', { skip }, () => {

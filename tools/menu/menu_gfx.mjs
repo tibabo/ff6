@@ -84,6 +84,22 @@ export function readItemDescriptions(rom) {
   ]);
 }
 
+export const RARE_ITEM_COUNT = 20;
+export const RARE_NAME_BYTES = 13;
+export const RARE_DESC_BYTES = 0x260;
+const RARE_NAMES = 0x0efba0;  // CE/FBA0
+const RARE_DESC_PTRS = 0x0efb60;  // CE/FB60: a word for each, from the start of the texts
+const RARE_DESC = 0x0efcb0;  // CE/FCB0: the texts of the small font, like the items'
+
+// The names of the rare items (the key items of the story), then the pointers to their descriptions, then the texts.
+export function readRareItems(rom) {
+  return Buffer.concat([
+    rom.subarray(RARE_NAMES, RARE_NAMES + RARE_ITEM_COUNT * RARE_NAME_BYTES),
+    rom.subarray(RARE_DESC_PTRS, RARE_DESC_PTRS + RARE_ITEM_COUNT * 2),
+    rom.subarray(RARE_DESC, RARE_DESC + RARE_DESC_BYTES),
+  ]);
+}
+
 const WINDOW_GFX = 0x2d0000;
 const WINDOW_PAL = 0x2d1c00;
 export const WINDOW_COUNT = 8;
@@ -119,5 +135,5 @@ export function buildMenuData(rom, version) {
   header.write(MENU_MAGIC, 0, 8, 'ascii');
   header.writeUInt32LE(version, 8);
   return Buffer.concat([header, readMenuFont(rom), readMenuPalette(rom), readCursorTiles(rom), readCursorPalette(rom),
-    readPortraits(rom), readWindows(rom), readItemNames(rom), readItemDescriptions(rom), readSkillNames(rom), readMenuSprites(rom)]);
+    readPortraits(rom), readWindows(rom), readItemNames(rom), readItemDescriptions(rom), readSkillNames(rom), readMenuSprites(rom), readRareItems(rom)]);
 }

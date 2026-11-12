@@ -39,6 +39,7 @@ struct AnimShift {
     bool hidden = false;
     int pose = -1;  // the pose of a character that the script chose
     bool flip = false;  // the pose is turned the other way round
+    int armor = 0;  // what its magitek armor does ($F9): 0 stands, 1 walks, 2 fires
     int action = 0;  // the animated action of a character (CHAR_ACTION), which makes its pose go on changing
     int vx = 0, vy = 0;  // where a jump along a vector put the combatant (set, not added to x and y)
     int priority = -1;  // the sprite tile priority a script gave it (0 to 3), -1 for none
@@ -134,6 +135,7 @@ class AttackAnimPlayer {
 public:
     explicit AttackAnimPlayer(const AttackAnim& anim) : anim_(&anim) {}
 
+    void setMagitek(bool on) { magitek_ = on; }
     // `flipped` is whether the attacker faces right (forward is then to the right); `battleType` picks the jumps of
     // scripts that differ by the type of battle.
     void start(int attack, const AnimBody& attacker, const std::vector<AnimBody>& targets, bool flipped, int battleType = 0);
@@ -155,6 +157,12 @@ public:
     int takeShake() {
         const int value = shake_;
         shake_ = -1;
+        return value;
+    }
+    // The palette of sparkles that a script of a scene gave to the frozen esper, or -1 when it did not ask since the last time.
+    int takeEventPalette() {
+        const int value = eventPalette_;
+        eventPalette_ = -1;
         return value;
     }
     // One frame; false when every thread is over.
@@ -299,6 +307,8 @@ private:
     int sheet_[3] = {-1, -1, -1}, palettes_[3] = {0, 0, 0};  // the script of the graphics and the palette of each layer
     AnimBody attacker_;
     bool flipped_ = false, done_ = true, miss_ = false;
+    bool paused_[3] = {false, false, false};  // the layers whose threads wait for $C2 (the beams: sprites and bg3)
+    bool magitek_ = false;  // the party rides magitek armors (wMagitekModeEnabled)
     bool hidden_[3] = {false, false, false};  // the layers of the backgrounds that the script hid
     AnimTint tints_[kTintGroups];
     AnimWave waves_[3];
@@ -335,6 +345,7 @@ private:
     std::vector<std::array<int, 3>> soundCommands_;
     std::vector<std::pair<int, int>> gfxChanges_;
     int shake_ = -1, maxFrames_ = 0;
+    int eventPalette_ = -1;
     AnimMode7 mode7_;
     AnimPlane plane_;
     AnimEsperSheet esperSheet_;

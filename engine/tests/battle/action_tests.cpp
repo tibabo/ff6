@@ -1107,14 +1107,16 @@ void testBattleActions() {
         CHECK(charmed && struck);
     });
     scripted({225, 0xFF}, 5, 30000, [&](const ff6::Battle&, const std::vector<ff6::BattleEvent>& events) { CHECK(has(events, Kind::Sap)); });
-    // The command FA of a script: a monster that moves back (the animation 273 on itself) and a sound effect.
-    scripted({0xFA, 0x01, 0x3F, 0x00, 0xFA, 0x09, 0x00, 0x21, 0xFF}, 5, 20000, [&](const ff6::Battle&, const std::vector<ff6::BattleEvent>& events) {
-        bool moved = false, sound = false;
+    // The command FA of a script: a monster that moves back (the animation 273 on itself), the characters that run to the left
+    // (388, for all of them) and a sound effect.
+    scripted({0xFA, 0x01, 0x3F, 0x00, 0xFA, 0x06, 0x00, 0x00, 0xFA, 0x09, 0x00, 0x21, 0xFF}, 5, 20000, [&](const ff6::Battle&, const std::vector<ff6::BattleEvent>& events) {
+        bool moved = false, ran = false, sound = false;
         for (const ff6::BattleEvent& event : events) {
             moved = moved || (event.kind == Kind::MonsterAnim && event.attack == 273 && event.target >= FF6_BATTLE_PARTY_SLOTS);
+            ran = ran || (event.kind == Kind::MonsterAnim && event.attack == 388 && event.target < 0);
             sound = sound || (event.kind == Kind::MonsterAnim && event.damage == FF6_MONSTER_ANIM_SFX && event.attack == 0x21);
         }
-        CHECK(moved && sound);
+        CHECK(moved && ran && sound);
     });
     // Overcast marks the party: whoever falls afterwards is a zombie.
     scripted({220, 0xFF}, 5, 30000, [&](const ff6::Battle& b, const std::vector<ff6::BattleEvent>&) {

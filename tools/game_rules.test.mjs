@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import {
   CHAR_PROP_BYTES, CHAR_PROP_COUNT, ITEM_PROP_BYTES, ITEM_PROP_COUNT, LEVEL_COUNT, RULES_MAGIC, SHOP_COUNT, SHOP_PROP_BYTES,
-  NATURAL_MAGIC_BYTES, MAGIC_PROP_BYTES, MAGIC_PROP_COUNT, buildRulesData, readAbilityLevels, readMagicProp, readCharProp, readItemProp, readLevelUp, readShopProp,
+  NATURAL_MAGIC_BYTES, MAGIC_PROP_BYTES, MAGIC_PROP_COUNT, buildRulesData, CHAR_NAME_BYTES, readCharNames, readAbilityLevels, readMagicProp, readCharProp, readItemProp, readLevelUp, readShopProp,
   GENJU_COUNT, GENJU_PROP_BYTES, readGenjuProp,
 } from './data/game_rules.mjs';
 import { requireSupportedRom } from './rom.mjs';
@@ -53,7 +53,11 @@ test('game data holds the tables one after the other', { skip }, () => {
   assert.equal(data.readUInt32LE(8), 4);
   assert.equal(data.length, 12 + CHAR_PROP_COUNT * CHAR_PROP_BYTES + ITEM_PROP_COUNT * ITEM_PROP_BYTES + LEVEL_COUNT * 4
     + SHOP_COUNT * SHOP_PROP_BYTES + NATURAL_MAGIC_BYTES + 16 + MAGIC_PROP_COUNT * MAGIC_PROP_BYTES
-    + GENJU_COUNT * GENJU_PROP_BYTES);
+    + GENJU_COUNT * GENJU_PROP_BYTES + CHAR_PROP_COUNT * CHAR_NAME_BYTES);
+  // The names of the actors that the story gives to Wedge and Vicks: a W and a V first, then lower case letters.
+  const names = readCharNames(loadRom());
+  assert.equal(names[0x20 * CHAR_NAME_BYTES], 0x80 + 22);
+  assert.equal(names[0x21 * CHAR_NAME_BYTES], 0x80 + 21);
 });
 
 test('Ramuh teaches three spells and raises the stamina', { skip }, () => {

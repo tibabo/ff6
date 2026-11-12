@@ -40,6 +40,27 @@ void testAkao() {
         CHECK(keyOffTick > 90 && keyOffTick < 106);
         CHECK(finishedTick > 190 && finishedTick < 220);
     }
+    {  // a song that starts near the end of the sound memory goes on at the beginning of it: the voice that starts there plays
+        std::vector<uint8_t> body(12, 0xEB);  // the voice 0 ends at once
+        const std::vector<uint8_t> second = prologue();
+        body.insert(body.end(), second.begin(), second.end());
+        body.insert(body.end(), {0x04, 0xBA, 0xEB});
+        ff6::AudioData audio = makeAudio(body);
+        std::vector<uint8_t>& script = audio.songs[0].script;
+        const auto put = [&](size_t word, uint16_t value) {
+            script[word * 2] = static_cast<uint8_t>(value);
+            script[word * 2 + 1] = static_cast<uint8_t>(value >> 8);
+        };
+        const uint16_t start = 0xFFF8, end = static_cast<uint16_t>(start + body.size());
+        put(0, start);
+        put(1, end);
+        for (size_t i = 0; i < 16; ++i) put(2 + i, i == 0 ? start : i == 1 ? static_cast<uint16_t>(start + 12) : end);
+        ff6::AkaoSequencer sequencer;
+        sequencer.load(audio, 0);
+        int keyOns = 0;
+        for (int tick = 0; tick < 400; ++tick) keyOns += (sequencer.tick().keyOn & 2) ? 1 : 0;
+        CHECK(keyOns == 1);
+    }
     {  // a loop with a count of 3 plays its body three times
         std::vector<uint8_t> body = prologue();
         body.insert(body.end(), {0xE2, 0x02, 0x04, 0xBA, 0xE3, 0xEB});

@@ -122,26 +122,39 @@ void RuinScene::loadGraphics() {
     transfer(0x16E0, 0x0DE0, 0x6000);
 }
 
-// _7e6f83: a number from the table of random numbers, which the table gives again.
+// _7e6f83: a number from the table of random numbers, which the table gives again. The last addition has no clear carry before it,
+// so the carry of the one before goes in (the loop of the scene clears it at each frame, and a new task clears it too).
 uint8_t RuinScene::chance() {
     ++chanceCounter_;
     const uint8_t first = core_.data.random[chanceCounter_];
-    return static_cast<uint8_t>(first + core_.data.random[first]);
+    const int sum = core_.data.random[first] + first + (carry_ ? 1 : 0);
+    carry_ = sum > 0xFF;
+    return static_cast<uint8_t>(sum);
 }
 
+// _7e6f97 (a blink) and then _7e6f4c (a spark): the order of the draws is the one of the game.
 void RuinScene::sparks() {
-    if ((chance() & 0x1F) == 0) {
-        const uint32_t at = kSparkPositions + static_cast<uint32_t>(chance() & 3) * 2;
-        core_.createTask<FlashTask>(0, kSparkAnim, core_.data.byteAt(at), core_.data.byteAt(at + 1));
-    }
     if ((chance() & 7) == 0) {
-        const int x = (chance() & 0x3F) + 0x68, y = (chance() & 0x3F) + 0x98;
+        carry_ = false;
+        const int low = chance() & 0x3F;
+        const int x = low + 0x68 + (carry_ ? 1 : 0);
+        carry_ = false;
+        const int high = chance() & 0x3F;
+        const int y = high + 0x98 + (carry_ ? 1 : 0);
+        carry_ = false;
         core_.createTask<FlashTask>(0, kBlinkAnim, x, y);
+    }
+    if ((chance() & 0x1F) == 0) {
+        carry_ = false;
+        const uint32_t at = kSparkPositions + static_cast<uint32_t>(chance() & 3) * 2;
+        carry_ = false;
+        core_.createTask<FlashTask>(0, kSparkAnim, core_.data.byteAt(at), core_.data.byteAt(at + 1));
     }
 }
 
 void RuinScene::state() {
     CutsceneCore& core = core_;
+    carry_ = false;  // the loop shifts a small number just before a state runs
     switch (core.state) {
         case 0:
             chanceCounter_ = 0;

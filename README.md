@@ -188,7 +188,7 @@ carte par fichier dans `maps/` ; il n'ecrase jamais un
 dossier existant. `--text` utilise un `dialogues.json` modifie. Un caractere
 absent de la police de la ROM, par exemple un accent, provoque une erreur
 explicite. Le pack contient des donnees du jeu : ne pas le distribuer. Le format
-est versionne (version 36 : cartes du monde, dirigeable, chocobo, Fosse du Serpent, train, et les tables du combat : esprits, rages, danses, points de magie, dialogues des monstres et des scenes, Metamorph, scenes a personnages scriptes, Colisee, graphismes des cinematiques de la Ruine et du continent flottant, ecran de « THE END », textes et decors du generique) ; un ancien pack
+est versionne (version 37 : cartes du monde, dirigeable, chocobo, Fosse du Serpent, train, et les tables du combat : esprits, rages, danses, points de magie, dialogues des monstres et des scenes, Metamorph, scenes a personnages scriptes, Colisee, graphismes bruts des sprites des PNJ speciaux, graphismes des cinematiques de la Ruine et du continent flottant, ecran de « THE END », textes et decors du generique) ; un ancien pack
 doit etre regenere.
 
 Controles :
@@ -225,9 +225,16 @@ Limites actuelles :
   le menu qui suit n'a que deux choix (New Game et Continue, un seul fichier
   de sauvegarde JSON) au lieu des trois emplacements de la console. Les
   armures Magitek sont dessinees depuis les graphismes de la ROM (marche, pas et
-  passager). Les textes de l'histoire sont affiches
-  sans cadre et ne bloquent pas l'evenement, mais restent a l'ecran jusqu'a
-  une pression de la touche de validation.
+  passager) ; un vehicule garde la priorite normale du sprite sur toutes les cases
+  (le jeu ne la change pas par moitie comme pour un personnage a pied), donc il passe
+  derriere le linteau d'une porte. `--vehicle 0xC0` (avec `--capture`) met l'armure
+  sous le chef du groupe. Les textes de l'histoire sont affiches
+  sans cadre et ne bloquent pas l'evenement ; ils se ferment seuls quand leur
+  texte finit par le code 0x12 (le jeu annule alors l'attente de la touche), et
+  le code 0x16 n'attend la touche que le temps qu'il donne. La marche des armures
+  de l'ouverture avance une image sur deux : la console n'acheve pas un tour de
+  sa boucle en une image (les compteurs comptent les tours, la musique garde son
+  rythme).
 
 - Cartes du monde : le monde de l'Equilibre et le monde de la Ruine sont
   dessines comme sur la console, en mode 7 avec la perspective que la matrice
@@ -346,7 +353,11 @@ Limites actuelles :
   (d'un cote et de l'autre) et, vers le haut et le bas seulement, dans le reve de
   Cyan et chez les tentacules ; les monstres qui tombent se dissolvent, et un
   personnage qui fuit court vers le bord de l'ecran ; les monstres sont retournes lors
-  d'une attaque dans le dos ou, un sur deux, d'une attaque en tenaille, et les
+  d'une attaque dans le dos ou, ceux dont le bord droit passe x = 0x68, d'une
+  attaque en tenaille (`CalcMonsterPos` : le groupe est alors au milieu du champ,
+  ceux-la sont retournes et decales de 64 pixels vers la droite, et l'attaquant
+  se tourne vers sa cible ; dans une
+  attaque de cote, les deux derniers sont de l'autre cote), et les
   actions ont leur effet : le personnage avance et frappe, lance un sort, se
   protege ou grimace, le monstre touche clignote puis s'efface, le champ
   s'eclaire de la couleur de l'element, et le groupe leve les bras a la
@@ -374,7 +385,7 @@ Limites actuelles :
   remplacent l'animation d'une attaque qui n'en a pas. `--anim n --capture`
   ecrit la planche des images d'une attaque.
   Les noms des poses ne sont pas dans le jeu : elles sont choisies sur la planche
-  des personnages. Defilement des fonds (nuages, cascade, trains, voiture Magitek, a chaque image comme UpdateBattleBG) et palettes qui tournent (radeau, cascade, monde du reve de Cyan). Ne sont pas dessines : le defilement du dernier fond de Kefka, les
+  des personnages. Defilement des fonds (nuages, cascade, trains, voiture Magitek, a chaque image comme UpdateBattleBG) et palettes qui tournent (radeau, cascade, monde du reve de Cyan). Le dernier Kefka tremble de 0 a 2 pixels pendant sa mort comme le fond 36. Ne sont pas dessines : les
   animations des esprits et des attaques a vecteurs, les images des esprits ;
   les statuts se voient (sprites de statut, effets de palette, diablotin, vol, poses ; `--status bits` les capture) et le nom
   du personnage change de couleur : gris a terre, jaune quand il est pret, bleu-vert avec un statut ;
@@ -388,6 +399,14 @@ Limites actuelles :
   Mad) ; le morceau de la carte attend et revient apres, et une victoire joue
   la fanfare, sauf pour les combats qui n'en ont pas ou quand Shadow part. Le
   combat conditionnel du jeu (0x1C4 devient 0x1A8 avec son interrupteur) est lu.
+  Quand quelqu'un a le statut Magitek, tout le groupe est dessine dans son armure
+  (les quatre images de `MagitekGfxPtrs`, 32 x 32 pixels devant le passager, qui
+  est souleve de 4 pixels et dont l'armure cache les jambes, sans ombre ni sprites de statut) ; les personnages
+  prennent le graphisme qu'ils portent sur le terrain (Wedge et Vicks sont des
+  soldats) et la commande 0x7F donne a Wedge et Vicks leur nom. Les armures
+  marchent et tirent comme le disent les scripts (`magitek_action` : debout, marche, tir) et
+  ne lancent pas la pose d'incantation ; les rayons attendent que l'armure soit en place. Les PV et les chiffres des
+  degats n'apparaissent qu'a la fin de l'animation du coup.
   Le statut Magitek (pose par l'histoire, il dure apres le combat) et les combats
   de magie seule (Tour du Fanatique) remplacent Fight par Magitek ou Magic et
   retirent les autres commandes, sauf Item et Mimic. Les scenes a personnages
@@ -420,10 +439,10 @@ Limites actuelles :
   (changement de combat), F3 (dialogue, lu dans les textes du jeu), F5 (entree
   et sortie de monstres), F6 (objet), la condition « Gau present » et les
   effets 3, 6 et 7 de FB (recruter Gau, viser ou non) sont executes ; les
-  evenements de combat (F7) jouent leurs dialogues et les animations des personnages et des attaques de leur script (`--scene n` les capture ; les commandes de scene 7 a 12, pour les monstres, sont sautees) ; les
+  evenements de combat (F7) jouent leurs dialogues et les animations des personnages et des attaques de leur script (`--scene n` les capture ; les commandes de scene 7 a 12 donnent un script a un monstre : les scintillements de la glace de Tritoch changent la palette du premier monstre) ; les
   animations des monstres (FA : clignotement rouge, recul et avance, tete de Kefka, lueurs d'Atma, mort de Kefka, et le son
-  du sous-code 9) jouent les animations du jeu sur le monstre, sans garder le decalage une fois finies ; la course des
-  personnages (sous-codes 5 et 6) n'est pas jouee. Les commandes
+  du sous-code 9) jouent les animations du jeu sur le monstre, dont le decalage reste une fois finies ; la course de tous les
+  personnages (sous-codes 5 et 6) est jouee et ils restent ou elle les laisse. Les commandes
   Fight, Magic, Item, Tools (les outils d'Edgar, jamais consommes), Steal,
   SwdTech, Blitz, Lore (les sorts de Strago, appris quand un monstre l'en
   touche ; sauvegardes), Morph et Revert (les degats de Terra doublent 600 pas
@@ -555,11 +574,17 @@ Limites actuelles :
   liste de l'inventaire (noms de la ROM, quantites, defilement) avec la
   description de l'objet sous la main et les options Use, Arrange et Rare ;
   l'inventaire se remplit par les evenements, les coffres et les boutiques.
-  Use demande un personnage et fait ce que font les objets qui rendent des PV ou
+  Use ouvre la liste : A choisit un objet, puis A sur un autre echange leurs places et A
+  sur le meme l'utilise (B reprend le choix). Arrange range l'inventaire dans l'ordre des
+  symboles des objets (`SortItemsByIcon`), Rare liste en deux colonnes les objets de l'histoire
+  que le groupe a (les bits 0x1D0 et suivants, noms et descriptions de la ROM) ; un nombre au
+  bout de la description dit combien il y en a. L'utilisation demande un personnage et fait ce que font les objets qui rendent des PV ou
   des PM (Potion, Ether, Elixir...) et le Fenix Down (un personnage a 0 PV est
-  mort) ; les autres objets (soins d'etat, tente, sac de couchage, pierre de
-  warp) ont besoin des etats des personnages, d'un point de sauvegarde ou de
-  la carte du monde et ne sont pas utilisables. Skills, Equip, Relic et
+  mort) ; les objets qui soignent un statut (Antidote, Collyre, Remede...)
+  et le sac de couchage (soin complet, sur un point de sauvegarde ou sur la carte du monde) se
+  servent de la meme facon ; la tente (sur un point de sauvegarde, ou partout sur la carte du
+  monde) et la pierre de warp (dans les cartes qui l'autorisent) ferment le menu et lancent
+  l'evenement du jeu (`Tent`, `WorldTent`, `Warp`) apres le fondu. Skills, Equip, Relic et
   Status demandent un personnage (la main se pose sur les portraits) puis
   ouvrent son ecran : etat, equipement, listes de competences ; les valeurs
   sont les vraies (niveau, PV, PM, experience, statistiques calculees comme
@@ -576,9 +601,15 @@ Limites actuelles :
   autorises, deux armes seulement avec le Genji Glove, jamais deux boucliers)
   precedee de « Remove » ; les statistiques montrent l'effet de l'objet sous la
   main (jaune plus haut, gris plus bas) et la validation echange l'objet avec
-  l'inventaire. Les options Rmove, Empty et Optimum ne sont pas portees et la
-  disposition de ces ecrans est la mienne. Save demande « Erasing data. Okay? » puis ecrit le JSON
-  de sauvegarde (le meme fichier que F5). Order (gauche) n'est pas porte.
+  l'inventaire. L'ecran Equip commence par ses options (Equip, Optimum, Rmove, Empty ; Equip et Remove pour
+  Relic) : Optimum et Empty agissent aussitot, Rmove retire l'objet de l'emplacement choisi ;
+  la disposition des autres parties de ces ecrans est la mienne. Save (grise hors d'un point de sauvegarde, sauf sur la carte du monde) demande « Erasing data. Okay? » puis ecrit le JSON
+  de sauvegarde (le meme fichier que F5, qui reste possible partout). Gauche dans la liste glisse l'ecran de 72 pixels vers la droite (6 images de 12 pixels) et
+  ouvre Order (`menu/field_menu.cpp`) : A sur un personnage puis A sur un autre echange leurs places,
+  A deux fois sur le meme change sa rangee (le portrait glisse de 12 pixels en 12 images ; l'echange
+  fait disparaitre les deux blocs 12 images, puis les montre a leur nouvelle place, sans le balayage
+  par fenetre du jeu) ;
+  la rangee est gardee (sauvegarde, combat, qui la rend apres les commandes Row).
   Les positions des ecrans de personnage sont une mise en page a moi,
   inspiree des textes du jeu, pas celle de la console.
   `--capture ... --menu n [--select k] [--down k]` capture le menu avec le
@@ -598,7 +629,7 @@ Limites actuelles :
   joues par des scripts sur les voix 4 a 7, qui les prennent a la musique,
   avec leur pan et leur volume. Le tempo et la hauteur du morceau changent
   sur commande du jeu (0x84 et 0x85) et restent d'un morceau a l'autre. Un
-  glissement du volume des effets jusqu'a zero les arrete. Un morceau peut
+  glissement du volume des effets jusqu'a zero les arrete. Les adresses d'un morceau sont sur 16 bits : un morceau qui commence pres de la fin de la memoire sonore (le theme de combat, par exemple) continue au debut. Un morceau peut
   lancer un effet sur sa voix (commandes E9 et EA). Non pris en charge : mode
   mono. Les attentes du son sont abandonnees
   au bout d'une minute. Le retard d'echo vaut 80 ms au
@@ -662,18 +693,17 @@ genere par `build-pack`, pour leurs tests sur les vraies donnees.
 
 - Reconstruction binaire de la ROM via le desassemblage de reference.
 - Cartes du monde (a pied, dirigeable, chocobo, Fosse du Serpent) et train fantome sont portes.
-- Commandes d'evenements restantes : aucune connue. Le vol du Falcon (0xBF) et les images de la fin (0xBA) sont portes : le rectangle de l'image de chaque personnage va dans `wBG1Tiles::ScreenA`, qui est en 7E:3849 (les adresses de destination des images, comme `$3ba1`, sont alors des rangees et des colonnes entieres). Le texte des noms en petit (BG3) est dessine par `_c3a611` avec les grandes lettres de `LargeFontGfx`, que le moteur remplace par la police des menus. Les autres PNJ speciaux (vehicules, Falcon, Terra volante...) ne sont pas dessines. Les scenes de la Ruine et du continent flottant, le menu de l'ordre final, le menu des noms
+- Commandes d'evenements restantes : aucune connue. Le vol du Falcon (0xBF) et les images de la fin (0xBA) sont portes : le rectangle de l'image de chaque personnage va dans `wBG1Tiles::ScreenA`, qui est en 7E:3849 (les adresses de destination des images, comme `$3ba1`, sont alors des rangees et des colonnes entieres). Le texte des noms en petit (BG3) est dessine par `_c3a611` avec les grandes lettres de `LargeFontGfx`, que le moteur remplace par la police des menus. Les PNJ speciaux (cables des grues, interrupteurs, ascenseurs, gardiens, Falcon, Terra volante...) montrent leurs graphismes (pack v37 : les 4 trames de 32 x 32 pixels de chaque sprite, copiees en memoire de sprites comme `InitSpecialNPCGfx`, trame choisie par le compteur de trames et la vitesse du PNJ, miroir, ordre, decalage et maitre de l'objet). Les scenes de la Ruine et du continent flottant, le menu de l'ordre final, le menu des noms
   et la pyramide sont portes mais n'ont ete verifies que par des tests et des captures.
 - Mise en scene et fin du jeu, ce qui manque ou est approche (rien de cela n'a ete verifie dans le jeu, seulement par des tests et des captures) :
   - Falcon (0xBF) : la position de depart de la camera sur le plan n'est pas donnee par la scene (elle reste de la memoire du monde, qu'on ne peut pas connaitre) : elle est choisie au-dessus de la terre ; les particules du sillage sont portees (deux jeux de cinq, un par image, avec leur naissance au hasard), mais le jeu indexe la table de leurs frames par l'etat seul : toutes valent 0 (rien), sauf la premiere de chaque image, dont l'indice a devant lui l'octet haut du pas vertical du Falcon et lit au-dela de la table (`EE/5196`) ; cela ne dessine que quelques images au debut, dans le coin haut gauche, sous le fondu et la fenetre ; les graphismes des sprites du monde sont charges aux adresses du monde de la marche.
   - Approche : les noms en petit des scenes de personnages, sur la rangee et avec le fondu et la descente du jeu mais dans la police des menus (le jeu les dessine sur BG3 avec les grandes lettres de 16 pixels de `LargeFontGfx`) ; les compteurs que le jeu ne remet pas a zero d'une scene a l'autre sont pris a zero (`$3349` de la tache de Gogo, qu'une erreur du code lit au lieu d'ecrire) ; la tache `_c3cc79` (un oiseau du vol 4) s'arrete aussitot, comme dans le jeu (sa position est nulle) ; les oiseaux prennent leur phase de depart dans des octets du code du jeu (C3/CB68), comme lui ; le texte du generique est fait de sprites avec les polices et les palettes du jeu (mouvement, fondu et mathematique des couleurs comme lui) ; les fondus de palette du livre sont lineaires (32 pas de 4 images), ceux des scenes de personnages et des vols suivent le jeu ; la brume du horizon et le tableau de couleurs du generique suivent les tables HDMA lues dans le code ; la scene des nuages 2 (etat 4) n'a pas l'inclinaison 0x8000 que le code lui donne (elle alterne deux zooms une paire de lignes sur deux, ce que le jeu original ne montre pas) ; la duree de chaque scene est la somme des attentes de ses etats plus 15 images de fondu, et la musique n'est pas suivie.
   - « THE END » : le jeu s'y arrete pour toujours, ici A ramene au titre une fois les etoiles allumees ; les attentes de la musique (ports 1 et 3) ont une limite de 30 secondes, que le jeu n'a pas.
-  - Portrait (0xE7) : lu quand le sprite est dessine, et non quand la carte commence ; seuls les PNJ speciaux « NOTHING » le montrent ; le miroir horizontal et l'animation des PNJ speciaux ne sont pas pris en compte ; les autres PNJ speciaux (vehicules, Falcon, Terra volante...) ne sont pas dessines.
-  - Cinematiques de la Ruine et du continent flottant : portees du code du jeu, mais le masque `M7SEL` (hors de l'image transparent) du continent flottant n'est pas gere (le plan se repete) et les fondus de palette sont lineaires.
+  - Portrait (0xE7) : lu quand le sprite est dessine, et non quand la carte commence ; seuls les PNJ speciaux « NOTHING » le montrent (le jeu efface toute la memoire de sprites en le chargeant, ici les autres PNJ speciaux gardent leurs graphismes) ; les PNJ speciaux n'ont ni miroir de leurs graphismes de portrait ni animation : les pieces du portrait n'en demandent pas.
+  - Cinematiques de la Ruine et du continent flottant : portees du code du jeu, avec les fondus de palette du jeu, le masque `M7SEL` (hors de l'image transparent) du continent flottant et, pour la Ruine, les tirages au hasard dans l'ordre du jeu avec leur retenue (`chance()` de `cutscene/ruin.cpp`).
   - Commandes de mise en scene du champ (couleurs, couleur fixe, secousse, defilements, filtre, mosaique, lampe torche, pyramide), menu des noms et menu de l'ordre final : portes sans verification dans le jeu ; la lampe torche, la mosaique et la pyramide sont dessinees avec les formules du code mais pas comparees a l'image du jeu.
-- Menus : soins d'etat, tente et sac de couchage, Rmove/Empty/Optimum, Order.
-- Combat : la course des personnages des monstres (FA 5 et 6), le decalage qui reste des monstres (FA), les commandes de
-  scene pour les monstres, le fond de Kefka et les effets d'animation encore approches (§ 10 de `docs/rendu-et-animations.md`) ; les objets utilisables jouent leur animation (table `ItemAnimPtrs`).
+- Menus : la pierre de warp ne marche pas sur la carte du monde, comme dans le jeu ; l'echange de deux personnages n'a pas le balayage par fenetre du jeu.
+- Combat : les scintillements de la glace de Tritoch (premiere scene) colorent le premier monstre, sans que le jeu ait ete consulte sur lequel ; le tremblement du dernier Kefka n'est que de 0 a 2 pixels sur le monstre, sans le defilement de bg1 que le jeu cache ; les effets d'animation encore approches (§ 10 de `docs/rendu-et-animations.md`) ; les objets utilisables jouent leur animation (table `ItemAnimPtrs`).
 - Audio natif sans emulation du SPC700 : mode mono.
 - Interface adaptable aux ecrans larges et remappage des commandes.
 - Gestion des graphismes HD.

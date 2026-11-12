@@ -26,6 +26,7 @@ struct MenuCharacter {
     std::array<SkillList, FF6_MENU_SKILL_LISTS> skills;  // espers, magic, swordtechs, blitzes, lores, rages and dances
     std::vector<int> espers;  // the number of each esper of skills[0]
     int equippedEsper = -1;  // the esper that the character carries
+    bool backRow = false;  // in the back row: the portrait of the main menu is a little to the right
 };
 
 enum class CharacterScreen { Status, Equip, Relic, Skills };
@@ -36,6 +37,8 @@ struct EquipHooks {
     std::function<MenuCharacter(int character, int slot, int item)> preview;  // the character with the item on
     std::function<MenuCharacter(int character, int slot, int item)> equip;  // does it, and gives the character back
     std::function<MenuCharacter(int character, int esper)> equipEsper;  // carries the esper (or lets it go), and gives the character back
+    std::function<MenuCharacter(int character)> optimum;  // the best equipment (EquipOptimum), and the character back
+    std::function<MenuCharacter(int character)> empty;  // the four slots of the equipment go back to the inventory (EquipRemoveAll)
 };
 
 // The screens of one character (src/menu/status.asm, equip.asm and skills.asm): the equipment can be changed, and the
@@ -55,6 +58,11 @@ public:
     const MenuCharacter& character() const { return character_; }
     // The hand is on a list of items that fit the slot: the first choice takes the item off.
     bool picking() const { return picking_; }
+    // The hand is on the options of the top row (Equip, Optimum, Rmove, Empty; Equip and Remove for the relics).
+    bool inOptions() const { return inOptions_; }
+    int option() const { return option_; }
+    // The slots are chosen to take the item off.
+    bool removing() const { return removing_; }
     const std::vector<int>& choices() const { return choices_; }
     int pick() const { return pickCursor_; }
     // The hand is on the names of one category of the Skills screen.
@@ -64,6 +72,8 @@ public:
 private:
     int rows() const;
     int slot() const;
+    int optionCount() const { return which_ == CharacterScreen::Relic ? 2 : 4; }
+    void updateOptions(int direction, const InputState& input);
     void startPick();
     void updatePick(int direction, const InputState& input);
     void updatePreview();
@@ -81,6 +91,9 @@ private:
     std::vector<int> choices_;
     int pickCursor_ = 0, pickScroll_ = 0;
     bool picking_ = false;
+    bool inOptions_ = false;
+    bool removing_ = false;
+    int option_ = 0;
     bool listing_ = false;
     int listCursor_ = 0, listScroll_ = 0;
     int cursor_ = 0;

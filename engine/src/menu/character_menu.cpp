@@ -30,6 +30,9 @@ void CharacterMenu::open(CharacterScreen which, const MenuCharacter& character, 
     listing_ = false;
     closed_ = false;
     cursor_ = 0;
+    inOptions_ = which == CharacterScreen::Equip || which == CharacterScreen::Relic;
+    removing_ = false;
+    option_ = 0;
     repeat_.reset();
 }
 
@@ -88,10 +91,43 @@ int CharacterMenu::rows() const {
     }
 }
 
+// The top row: Equip, Optimum, Rmove and Empty (SelectEquipOption), or Equip and Remove for the relics.
+void CharacterMenu::updateOptions(int direction, const InputState& input) {
+    const bool relic = which_ == CharacterScreen::Relic;
+    if ((direction == Left && option_ > 0) || (direction == Right && option_ < optionCount() - 1)) {
+        option_ += direction == Right ? 1 : -1;
+        sound_.command(FF6_SFX_MENU_MOVE, 0, 0);
+    }
+    if (input.cancel) {
+        sound_.command(FF6_SFX_MENU_MOVE, 0, 0);
+        closed_ = true;
+    } else if (input.confirm) {
+        const bool optimum = !relic && option_ == 1, empty = !relic && option_ == 3;
+        if (optimum || empty) {
+            const std::function<MenuCharacter(int)>* hook = !hooks_ ? nullptr : optimum ? &hooks_->optimum : &hooks_->empty;
+            if (!hook || !*hook) {
+                sound_.command(FF6_SFX_MENU_INVALID, 0, 0);
+                return;
+            }
+            character_ = (*hook)(character_.id);
+            sound_.command(FF6_SFX_MENU_SELECT, 0, 0);
+            return;
+        }
+        sound_.command(FF6_SFX_MENU_SELECT, 0, 0);
+        removing_ = relic ? option_ == 1 : option_ == 2;
+        inOptions_ = false;
+        cursor_ = 0;
+    }
+}
+
 void CharacterMenu::update(const InputState& input) {
     const int direction = repeat_.update(input.direction);
     if (picking_) {
         updatePick(direction, input);
+        return;
+    }
+    if (inOptions_) {
+        updateOptions(direction, input);
         return;
     }
     if (listing_) {  // the names of one category: they can be browsed, nothing is cast from here
@@ -130,7 +166,18 @@ void CharacterMenu::update(const InputState& input) {
     }
     if (input.cancel) {
         sound_.command(FF6_SFX_MENU_MOVE, 0, 0);
-        closed_ = true;
+        if (which_ == CharacterScreen::Equip || which_ == CharacterScreen::Relic) {
+            inOptions_ = true;  // back to the options, with the hand on the one that was chosen
+        } else {
+            closed_ = true;
+        }
+    } else if (input.confirm && removing_) {
+        if (hooks_ && hooks_->equip) {
+            character_ = hooks_->equip(character_.id, slot(), FF6_ITEM_EMPTY);
+            sound_.command(FF6_SFX_MENU_SELECT, 0, 0);
+        } else {
+            sound_.command(FF6_SFX_MENU_INVALID, 0, 0);
+        }
     } else if (input.confirm && (which_ == CharacterScreen::Equip || which_ == CharacterScreen::Relic)) {
         startPick();
     } else if (input.confirm && which_ == CharacterScreen::Skills && !character_.skills[static_cast<size_t>(cursor_)].empty()) {
@@ -188,7 +235,18 @@ void CharacterMenu::drawEquip() {
         return std::vector<uint8_t>(name, name + FF6_ITEM_NAME_BYTES);
     };
     if (picking_) screen_.window(1, FF6_EQUIP_STAT_ROW - 1, FF6_EQUIP_LIST_WIDTH, FF6_EQUIP_LIST_ROWS);
-    screen_.text(2, 2, relic ? "RELIC" : "EQUIP", Layer::Bg3, FF6_MENU_BG3_TEAL);
+    // The options of the top row until one is chosen, then the title of what the slots do (EQUIP_OPTION_* and EQUIP_TITLE_*).
+    struct Option { int x; const char* text; };
+    static const Option kEquipOptions[] = {{3, "EQUIP"}, {10, "OPTIMUM"}, {19, "RMOVE"}, {26, "EMPTY"}};
+    static const Option kRelicOptions[] = {{5, "EQUIP"}, {12, "REMOVE"}};
+    if (inOptions_) {
+        for (int i = 0; i < optionCount(); ++i) {
+            const auto& option = relic ? kRelicOptions[i] : kEquipOptions[i];
+            screen_.text(option.x, 2, option.text, Layer::Bg3, FF6_MENU_BG3_DEFAULT);
+        }
+    } else {
+        screen_.text(25, 2, removing_ ? "REMOVE" : "EQUIP", Layer::Bg3, FF6_MENU_BG3_TEAL);
+    }
     drawName(10, 4);
     for (int slot = 0; slot < FF6_MENU_EQUIP_SLOTS; ++slot) {
         const int row = FF6_EQUIP_SLOT_ROW + slot;
@@ -215,6 +273,11 @@ void CharacterMenu::drawEquip() {
                      then > now ? FF6_MENU_BG3_YELLOW : then < now ? FF6_MENU_BG3_GRAY : FF6_MENU_BG3_DEFAULT);
     }
     if (!picking_) {
+        if (inOptions_) {  // the hand of the options: 16 pixels above the slots' first, at the x of each option (EquipOptionCursorPos)
+            static constexpr int kEquipHandX[] = {0, 56, 128, 184}, kRelicHandX[] = {16, 72};
+            screen_.hand(FF6_MENU_EQUIP_CURSOR_X + (relic ? kRelicHandX : kEquipHandX)[option_], 16);
+            return;
+        }
         screen_.hand(FF6_MENU_EQUIP_CURSOR_X, (FF6_EQUIP_SLOT_ROW + slot()) * FF6_MENU_TILE_SIZE + FF6_ITEM_CURSOR_DY);
         return;
     }

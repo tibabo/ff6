@@ -105,7 +105,7 @@ std::string saveToJson(const SaveState& state) {
             out << "    {\"actor\": " << c.actor << ", \"level\": " << c.level << ", \"hp\": " << c.hp << ", \"maxHp\": " << c.maxHp
                 << ", \"mp\": " << c.mp << ", \"maxMp\": " << c.maxMp << ", \"experience\": " << c.experience
                 << ", \"vigor\": " << c.vigor << ", \"speed\": " << c.speed << ", \"stamina\": " << c.stamina
-                << ", \"magicPower\": " << c.magicPower << ", \"esper\": " << c.esper << ", \"status\": " << c.status << ", \"equipment\": ";
+                << ", \"magicPower\": " << c.magicPower << ", \"esper\": " << c.esper << ", \"backRow\": " << (c.backRow ? 1 : 0) << ", \"status\": " << c.status << ", \"equipment\": ";
             appendList(out, std::vector<int>(c.equipment.begin(), c.equipment.end()));
             std::vector<int> known;
             for (size_t spell = 0; spell < party.spells[i].size(); ++spell) {
@@ -257,6 +257,7 @@ SaveState saveFromJson(const std::string& text) {
             std::copy(equipment.begin(), equipment.end(), c.equipment.begin());
             if (item.find("status")) c.status = static_cast<unsigned>(number(item, "status", 0, 0x7FFFFFFF)) & FF6_ST_PERSISTENT;
             if (item.find("esper")) c.esper = number(item, "esper", -1, FF6_ESPER_COUNT - 1);
+            if (item.find("backRow")) c.backRow = number(item, "backRow", 0, 1) != 0;
             if (item.find("spells")) {
                 for (const int spell : ids(item, "spells", FF6_SPELL_COUNT)) party.spells[i][static_cast<size_t>(spell)] = true;
             }

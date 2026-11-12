@@ -1,6 +1,7 @@
 #include "game.hpp"
 
 #include <algorithm>
+#include <climits>
 #include <cstdio>
 #include <stdexcept>
 
@@ -24,6 +25,7 @@ struct Drawable {
     bool topAbove, bottomAbove;
     bool onVehicle = false;
     VehicleLook look;  // what it rides, when it does
+    const Npc* special = nullptr;  // a special npc, which has graphics of its own
 };
 
 }  // namespace
@@ -288,6 +290,7 @@ bool Game::loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEven
     anim_.init();
     scroll_.init();
     objects_.init(map_, bits_);
+    loadSpecialGfx();
     if (x < 0) {
         x = map_.startX;
         y = map_.startY;
@@ -772,6 +775,9 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
         case FF6_EVENT_SET_CHAR_PROP:
             setCharacterProperties(state_, rules_, byteAt(0), byteAt(1), availableCharacters());
             break;
+        case FF6_EVENT_SET_CHAR_NAME:
+            setCharacterName(byteAt(0), rules_.actorName(byteAt(1)));
+            break;
         case FF6_EVENT_NORMALIZE_LEVEL:
             normalizeLevel(state_, rules_, byteAt(0), availableCharacters());
             break;
@@ -791,17 +797,17 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
         case FF6_EVENT_SET_STATUS:
         case FF6_EVENT_TOGGLE_STATUS: {  // the word is the first status byte, then the fourth one (Float and Interceptor)
             const unsigned word = static_cast<unsigned>(byteAt(1) | (byteAt(2) << 8));
-            changeStatus(state_, byteAt(0), op, (word & 0xFF) | ((word & 0xFF00) << 16));
+            changeStatus(state_, eventCharacter(byteAt(0)), op, (word & 0xFF) | ((word & 0xFF00) << 16));
             break;
         }
         case FF6_EVENT_CHANGE_HP:
-            changeHp(state_, rules_, byteAt(0), byteAt(1));
+            changeHp(state_, rules_, eventCharacter(byteAt(0)), byteAt(1));
             break;
         case FF6_EVENT_CHANGE_MP:
-            changeMp(state_, rules_, byteAt(0), byteAt(1));
+            changeMp(state_, rules_, eventCharacter(byteAt(0)), byteAt(1));
             break;
         case FF6_EVENT_REMOVE_EQUIPMENT:
-            removeEquipment(state_, byteAt(0));
+            removeEquipment(state_, eventCharacter(byteAt(0)));
             break;
         case FF6_EVENT_SHOP:
             openShop(byteAt(0));
@@ -1223,6 +1229,10 @@ void Game::tick(const InputState& input) {
     followScroll();
 }
 
+void Game::setLeadVehicle(int vehicle) {
+    if (Npc* lead = objects_.lead()) lead->vehicle = vehicle;
+}
+
 void Game::placeParty(int tileX, int tileY) {
     if (world_) {
         world_->enter(world_->world(), tileX, tileY, world_->facing(), worldLead());
@@ -1284,6 +1294,7 @@ MenuCharacter Game::menuCharacter(int id, const CharacterState& state) const {
         character.espers.push_back(esper);
     }
     character.equippedEsper = state.esper;
+    character.backRow = state.backRow;
     for (int spell = 0; spell < FF6_SPELL_COUNT; ++spell) {
         if (state_.spells[static_cast<size_t>(id)][static_cast<size_t>(spell)]) {
             // The name, then the cost in mp: two digits, the first of them blank when it is 0.
@@ -1342,6 +1353,17 @@ std::vector<MenuCharacter> Game::partyCharacters() const {
     return party;
 }
 
+// MenuStatus: the world map always allows the tent; the maps of the field only on a save point.
+bool Game::onSavePoint() const { return world_ || bits_.get(FF6_EVENT_BIT_SAVE_POINT); }
+
+// CalcCharPtr: the commands that act on a character take its number, or 0x31 to 0x34 for the one that is in that place of the
+// party; an empty place is nobody.
+int Game::eventCharacter(int code) const {
+    if (code < FF6_OBJ_PARTY_FIRST) return code;
+    const size_t place = static_cast<size_t>(code - FF6_OBJ_PARTY_FIRST);
+    return place < objects_.partySlots().size() ? objects_.partySlots()[place] : -1;
+}
+
 // The menu keeps hooks into the game: the equipment screens list, preview and change what a character wears.
 MenuStatus Game::menuStatus() {
     MenuStatus status;
@@ -1349,7 +1371,30 @@ MenuStatus Game::menuStatus() {
     status.items = inventoryItems();
     status.item.items = [this] { return inventoryItems(); };
     status.item.party = [this] { return partyCharacters(); };
-    status.item.usable = [this](int item) { return itemUsableInMenu(rules_, item); };
+    status.item.usable = [this](int item) { return itemUsableInMenu(rules_, item) && (item != FF6_ITEM_SLEEPING_BAG || onSavePoint()); };
+    status.item.swap = [this](int first, int second) {  // the places of the list are the used ones, in order
+        std::vector<InventorySlot*> used;
+        for (InventorySlot& slot : state_.inventory) {
+            if (slot.item != FF6_ITEM_EMPTY) used.push_back(&slot);
+        }
+        if (first >= 0 && second >= 0 && static_cast<size_t>(first) < used.size() && static_cast<size_t>(second) < used.size()) {
+            std::swap(*used[static_cast<size_t>(first)], *used[static_cast<size_t>(second)]);
+        }
+    };
+    status.item.arrange = [this] { arrangeItems(state_, menuData_.itemNames); };
+    status.item.rareItems = [this] {
+        std::vector<int> owned;
+        for (int i = 0; i < FF6_RARE_ITEM_COUNT; ++i) {
+            if (bits_.get(FF6_RARE_ITEM_FIRST_BIT + i)) owned.push_back(i);
+        }
+        return owned;
+    };
+    status.item.leave = [this](int item) {
+        if (itemQuantity(state_, item) == 0) return false;
+        if (item == FF6_ITEM_TENT ? !onSavePoint() : (world_ || !(map_.prop[FF6_MAP_PROP_WARP] & FF6_MAP_WARP_ENABLED))) return false;
+        takeItem(state_, item);
+        return true;
+    };
     status.item.canUse = [this](int item, int id) { return canUseItemOn(state_, rules_, id, item); };
     status.item.use = [this](int item, int id) { return useItemOn(state_, rules_, id, item); };
     status.equip.choices = [this](int id, int slot) { return equippableItems(state_, rules_, id, slot); };
@@ -1370,8 +1415,37 @@ MenuStatus Game::menuStatus() {
         if (!let) state_.characters[static_cast<size_t>(id)].esper = esper;
         return menuCharacter(id, state_.characters[static_cast<size_t>(id)]);
     };
+    status.equip.optimum = [this](int id) {
+        optimizeEquipment(state_, rules_, id);
+        return menuCharacter(id, state_.characters[static_cast<size_t>(id)]);
+    };
+    status.equip.empty = [this](int id) {
+        emptyEquipment(state_, rules_, id);
+        return menuCharacter(id, state_.characters[static_cast<size_t>(id)]);
+    };
+    status.order.swap = [this](int from, int to) {  // the menu lists the characters that are there, in the order of their places
+        std::array<int, FF6_PARTY_SIZE> slots = objects_.partySlots();
+        std::vector<size_t> places;
+        for (size_t i = 0; i < slots.size(); ++i) {
+            if (slots[i] >= 0) places.push_back(i);
+        }
+        if (from >= 0 && to >= 0 && static_cast<size_t>(from) < places.size() && static_cast<size_t>(to) < places.size()) {
+            std::swap(slots[places[static_cast<size_t>(from)]], slots[places[static_cast<size_t>(to)]]);
+            objects_.setPartySlots(slots);
+        }
+        return partyCharacters();
+    };
+    status.order.row = [this](int place) {
+        const std::vector<MenuCharacter> party = partyCharacters();
+        if (place >= 0 && static_cast<size_t>(place) < party.size()) {
+            CharacterState& state = state_.characters[static_cast<size_t>(party[static_cast<size_t>(place)].id)];
+            state.backRow = !state.backRow;
+        }
+        return partyCharacters();
+    };
     status.gil = state_.gil;
     status.steps = state_.steps;
+    status.canSave = onSavePoint();
     status.hours = static_cast<int>(std::min<uint32_t>(frame_ / FF6_MENU_FRAMES_PER_HOUR, FF6_MENU_MAX_HOURS));
     status.minutes = static_cast<int>(frame_ / FF6_MENU_FRAMES_PER_MINUTE % FF6_MENU_MINUTES_PER_HOUR);
     return status;
@@ -1623,6 +1697,17 @@ void Game::launchBattle(int battle, int background, bool veldt) {
     bits_.setBattle(FF6_BATTLE_FLAG_DEFEATED, false);
     battleScreen_.start(battleData_, rules_, state_, characters, battle, battleSeed_, config_.battleSpeed(),
                         (config_.battle & FF6_CONFIG_WAIT) != 0, background, veldt, colosseumBout_);
+    {  // the characters of the story that fight in the graphics that they wear on the field
+        std::array<int, FF6_CHAR_COUNT> gfx;
+        gfx.fill(-1);
+        for (const int id : characters) {
+            if (id >= 0 && id < FF6_CHAR_COUNT && static_cast<size_t>(id) < objects_.characters().size()) {
+                const int worn = objects_.characters()[static_cast<size_t>(id)].prop.gfx;
+                if (worn >= 0 && worn < FF6_CHAR_GFX_COUNT) gfx[static_cast<size_t>(id)] = worn;
+            }
+        }
+        battleScreen_.setCharacterGfx(gfx);
+    }
     {  // Gau and Shadow come and go with the story
         Battle::Story story;
         story.gauAvailable = bits_.get(FF6_EVENT_BIT_CHAR_AVAILABLE + FF6_ACTOR_GAU);
@@ -1694,6 +1779,11 @@ void Game::endBattle() {
     const bool gauRecruited = battleScreen_.battle() && battleScreen_.battle()->recruitedGau();
     const bool gauLeaped = battleScreen_.battle() && battleScreen_.battle()->gauLeaped();
     const bool shadowLeft = battleScreen_.battle() && battleScreen_.battle()->shadowLeft();
+    if (const Battle* fought = battleScreen_.battle()) {  // the Row command lasts after the battle
+        for (const Combatant& c : fought->combatants()) {
+            if (c.present && !c.monster) state_.characters[static_cast<size_t>(c.id)].backRow = c.backRow;
+        }
+    }
     battleScreen_.close();
     battleOpen_ = false;
     if (colosseum) {  // the fighter is as it was: only the wager and the prize count
@@ -1757,7 +1847,7 @@ void Game::tickMenu(const InputState& input) {
     } else if (menuPhase_ == MenuPhase::Open && battleOpen_) {
         battleScreen_.update(input);
         if (const Battle* fought = battleScreen_.battle()) {  // the fanfare of a victory, unless the battle has none
-            if (fought->victory() && !fanfarePlayed_) {
+            if (fought->victory() && battleScreen_.resolved() && !fanfarePlayed_) {
                 fanfarePlayed_ = true;
                 if (!(battleData_.formation(lastBattle_).flags & FF6_BATTLE_FLAG_NO_FANFARE) && !fought->shadowLeft()) {
                     sound_.command(FF6_SOUND_PLAY_SONG, FF6_SONG_VICTORY_FANFARE, FF6_SOUND_FULL_VOLUME);
@@ -1802,6 +1892,8 @@ void Game::tickMenu(const InputState& input) {
         menu_.update(input);
         if (menu_.takeSaveRequest() && saveHandler_) saveHandler_(saveState());
         if (menu_.closed()) {
+            leaveItem_ = menu_.takeLeaveItem();
+            objects_.updateParty();  // Order may have put another character in the lead
             menuPhase_ = MenuPhase::Leaving;
             startFade(false, FF6_BRIGHTNESS_STEP);
         }
@@ -1838,6 +1930,15 @@ void Game::tickMenu(const InputState& input) {
         common_.windowTiles = buildWindowTiles(menuData_, config_);  // the dialogues have the windows of the config
         if (world_) world_->setLead(worldLead());  // the menu may have changed who leads
         startFade(true, FF6_BRIGHTNESS_STEP);
+        if (leaveItem_ >= 0) {  // OpenMainMenu: the tent and the warp stone go on with an event
+            const bool tent = leaveItem_ == FF6_ITEM_TENT;
+            leaveItem_ = -1;
+            if (world_) {
+                if (tent) world_->startVehicleEvent(FF6_EVENT_SCRIPT_WORLD_TENT);
+            } else {
+                startEvent(tent ? FF6_EVENT_SCRIPT_TENT : FF6_EVENT_SCRIPT_WARP);
+            }
+        }
     }
 }
 
@@ -1906,6 +2007,66 @@ void Game::composeTimer(int frames) {
     }
 }
 
+// InitSpecialNPCGfx: each special npc copies the frames of its graphics into the sprite characters, in rows of tiles, at the place
+// that it asks for; a later one takes the place of an earlier one. The portrait of the story is another story.
+void Game::loadSpecialGfx() {
+    constexpr int kTiles = FF6_SPECIAL_CHARS_TILES, kTile = FF6_MENU_TILE_SIZE;
+    specialChars_.assign(static_cast<size_t>(kTiles) * kTiles * kTile * kTile, 0);
+    for (const Npc& npc : objects_.npcs()) {
+        const NpcProp& prop = npc.prop;
+        if (!prop.special || prop.gfx == FF6_MAP_SPRITE_NOTHING || static_cast<size_t>(prop.gfx) >= common_.spriteGfxCount()) continue;
+        const uint8_t* data = &common_.specialGfx[static_cast<size_t>(prop.gfx) * FF6_SPECIAL_GFX_BYTES];
+        const int side = prop.large ? 4 : 2;  // tiles of a frame, in each direction
+        for (int frame = 0; frame < prop.frames; ++frame) {
+            for (int row = 0; row < side; ++row) {
+                for (int column = 0; column < side; ++column) {
+                    const size_t source = static_cast<size_t>((frame * side + row) * side + column) * FF6_SPECIAL_TILE_BYTES;
+                    if (source + FF6_SPECIAL_TILE_BYTES > FF6_SPECIAL_GFX_BYTES) continue;
+                    const int tile = (prop.vram * 2 + frame * side + column + kTiles * row) & (kTiles * kTiles - 1);
+                    const uint8_t* bytes = data + source;
+                    for (int y = 0; y < kTile; ++y) {
+                        for (int x = 0; x < kTile; ++x) {
+                            const int bit = kTile - 1 - x;  // two planes of the first half, two of the second
+                            const int index = ((bytes[y * 2] >> bit) & 1) | (((bytes[y * 2 + 1] >> bit) & 1) << 1) |
+                                              (((bytes[16 + y * 2] >> bit) & 1) << 2) | (((bytes[17 + y * 2] >> bit) & 1) << 3);
+                            specialChars_[static_cast<size_t>(((tile / kTiles) * kTile + y) * kTiles * kTile + (tile % kTiles) * kTile + x)] =
+                                static_cast<uint8_t>(index);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// DrawObjSpecial: the frame comes from the frame counter, at the speed of the npc, and the sprite is mirrored when it asks to.
+void Game::drawSpecial(uint8_t* screen, const Npc& npc, int x, int y) const {
+    constexpr int kTiles = FF6_SPECIAL_CHARS_TILES, kTile = FF6_MENU_TILE_SIZE;
+    static constexpr int kMasks[] = FF6_SPECIAL_FRAME_MASKS;
+    const NpcProp& prop = npc.prop;
+    const int side = prop.large ? 4 : 2;
+    const int frame = ((frame_ >> 2) >> prop.speedShift) & kMasks[prop.frames - 1];
+    const int base = prop.vram * 2 + frame * side;
+    const size_t slot = static_cast<size_t>(prop.palette) & (FF6_SPRITE_PALETTE_SLOTS - 1);
+    uint8_t colors[FF6_SPRITE_PAL_COLORS][FF6_BYTES_PER_PIXEL];
+    for (size_t i = 0; i < FF6_SPRITE_PAL_COLORS; ++i) colorToRgba(spriteColors_[slot * FF6_SPRITE_PAL_COLORS + i], colors[i]);
+    const int size = side * kTile;
+    for (int row = 0; row < size; ++row) {
+        const int screenY = y + row;
+        if (screenY < 0 || screenY >= FF6_SCREEN_HEIGHT) continue;
+        for (int column = 0; column < size; ++column) {
+            const int screenX = x + column;
+            if (screenX < 0 || screenX >= FF6_SCREEN_WIDTH) continue;
+            const int shown = prop.flip ? size - 1 - column : column;
+            const int tileColumn = ((base & (kTiles - 1)) + shown / kTile) & (kTiles - 1);
+            const int tileRow = ((base / kTiles) + row / kTile) & (kTiles - 1);
+            const uint8_t index = specialChars_[static_cast<size_t>((tileRow * kTile + row % kTile) * kTiles * kTile + tileColumn * kTile + shown % kTile)];
+            if (index == 0) continue;
+            std::copy_n(colors[index], FF6_BYTES_PER_PIXEL, screen + (static_cast<size_t>(screenY) * FF6_SCREEN_WIDTH + screenX) * FF6_BYTES_PER_PIXEL);
+        }
+    }
+}
+
 // InitPortrait: the special npcs with no graphics of their own show the portrait that is in the sprite memory.
 void Game::drawPortrait(uint8_t* screen, bool above) {
     if (portrait_ < 0 || !bits_.get(FF6_EVENT_BIT_PORTRAIT)) return;
@@ -1944,6 +2105,7 @@ void Game::drawSprites(bool above) {
                           object.pixelY() - FF6_SPRITE_Y_OFFSET - object.jumpHeight - scroll_.y(layer) - stage_.shakeOffset(3),
                           object.topIsAbove(), object.bottomIsAbove()};
         if ((object.vehicle & FF6_VEHICLE_MASK) != 0) {
+            drawable.topAbove = drawable.bottomAbove = false;  // a vehicle is always drawn at the normal priority, whatever the tile
             // The steps come from the position along the axis that it moves on, and the lead is moved by the player.
             const bool led = &object == objects_.lead() && player_.moving();
             const bool horizontal = object.speedX != 0 || (led && (object.facing == Left || object.facing == Right));
@@ -1957,13 +2119,29 @@ void Game::drawSprites(bool above) {
         if (character.blocks() && character.map == objects_.mapId()) add(character);
     }
     for (Npc& npc : objects_.npcs()) {
-        if (npc.blocks()) add(npc);  // hidden, deleted and special npcs are not drawn
+        if (npc.blocks()) {
+            add(npc);  // hidden and deleted npcs are not drawn
+        } else if (npc.enabled && npc.visible && npc.prop.special && npc.prop.gfx != FF6_MAP_SPRITE_NOTHING) {
+            // The place of a special npc, or of its master, and where its sprite is from it; in front of the others or behind them.
+            const NpcProp& prop = npc.prop;
+            const Npc& base = prop.master >= 0 && static_cast<size_t>(prop.master) < objects_.npcs().size() ? objects_.npcs()[static_cast<size_t>(prop.master)] : npc;
+            const int layer = prop.scrollBg2 ? FF6_BG2 : FF6_BG1;
+            const int sortY = prop.order == FF6_NPC_ORDER_HIGH ? INT_MAX : prop.order == FF6_NPC_ORDER_LOW ? INT_MIN : npc.pixelY();
+            Drawable drawable{sortY, 0, 0, base.pixelX() - scroll_.x(layer) + prop.shiftX,
+                              base.pixelY() + prop.shiftY - FF6_SPECIAL_SPRITE_Y_OFFSET - base.jumpHeight - scroll_.y(layer) - stage_.shakeOffset(3), false, false};
+            drawable.special = &npc;
+            drawables.push_back(drawable);
+        }
     }
     std::stable_sort(drawables.begin(), drawables.end(),
                      [](const Drawable& a, const Drawable& b) { return a.sortY < b.sortY; });
     uint8_t* screen = spritePixels_[above ? 1 : 0].data();
     drawPortrait(screen, above);
     for (const Drawable& sprite : drawables) {
+        if (sprite.special) {
+            if ((sprite.special->prop.order == FF6_NPC_ORDER_HIGH) == above) drawSpecial(screen, *sprite.special, sprite.screenX, sprite.screenY);
+            continue;
+        }
         const std::vector<uint8_t>& strip = strips_[static_cast<size_t>(sprite.strip)];
         if (sprite.onVehicle) {
             // The OAM order puts the front first and the bottom sprites after the top ones: paint the back first.

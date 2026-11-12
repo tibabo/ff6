@@ -10,6 +10,9 @@ namespace ff6 {
 // ObjStopTileTbl: the sprite frame of an object standing still, for a facing direction.
 int stopFrame(int facing);
 
+// The frame of the sheet for a frame that a script gives by the number that the game uses (0x00-0x39, plus 0x40 for the mirrored ones).
+int actionFrame(int original);
+
 // ObjMoveTileTbl: the sprite frame while walking, from the pixel position along the walking axis.
 int moveFrame(int facing, int position);
 

@@ -68,6 +68,7 @@ private:
 
 FloatingScene::FloatingScene(const TitleData& data, Sound& sound) : core_(data, sound) {
     core_.ppu.objsel = 0x03;
+    core_.ppu.m7sel = 0x80;
     core_.ppu.tm = 0x17;
     core_.ppu.ts = 0x17;
     core_.ppu.clearVram();

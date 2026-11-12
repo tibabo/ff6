@@ -245,7 +245,7 @@ bool AkaoSequencer::execCommand(int ch, uint8_t cmd) {
         case 0xF4: masterVolume_ = a; break;
         case 0xF5: {  // jump to the second ending
             const int low = fetch(ch);
-            const int target = (low | (fetch(ch) << 8)) + baseOf(c);
+            const int target = resolve(c, low | (fetch(ch) << 8));
             const size_t top = static_cast<size_t>(c.loopTop);
             if (c.loopRound[top] == a) {
                 if (c.loopCount[top] == 1) c.loopTop = (c.loopTop - 1) & (FF6_AKAO_LOOP_DEPTH - 1);
@@ -254,7 +254,7 @@ bool AkaoSequencer::execCommand(int ch, uint8_t cmd) {
             break;
         }
         case 0xF6: {
-            const int target = (a | (fetch(ch) << 8)) + baseOf(c);
+            const int target = resolve(c, a | (fetch(ch) << 8));
             c.pc = target;
             break;
         }
@@ -287,7 +287,7 @@ bool AkaoSequencer::execCommand(int ch, uint8_t cmd) {
         case 0xFA: outputCode_ = 0; break;
         case 0xFB: ignoreSongVolume_ |= bit; break;
         case 0xFC: {  // a jump that the game asks for with the continue command
-            const int target = (a | (fetch(ch) << 8)) + baseOf(c);
+            const int target = resolve(c, a | (fetch(ch) << 8));
             if (conditionalJump_ & bit) {
                 conditionalJump_ &= static_cast<uint8_t>(~bit);
                 c.pc = target;

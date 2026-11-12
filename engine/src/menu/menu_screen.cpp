@@ -64,8 +64,20 @@ void MenuScreen::clear() {
     }
 }
 
+void MenuScreen::shiftRight(int pixels) {
+    const size_t row = static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_BYTES_PER_PIXEL, shift = static_cast<size_t>(pixels) * FF6_BYTES_PER_PIXEL;
+    for (size_t y = 0; y < static_cast<size_t>(FF6_SCREEN_HEIGHT); ++y) {
+        const auto line = pixels_.begin() + static_cast<std::ptrdiff_t>(y * row);
+        std::copy_backward(line, line + static_cast<std::ptrdiff_t>(row - shift), line + static_cast<std::ptrdiff_t>(row));
+        for (size_t i = 0; i < shift; i += FF6_BYTES_PER_PIXEL) {
+            std::fill(line + static_cast<std::ptrdiff_t>(i), line + static_cast<std::ptrdiff_t>(i + FF6_BYTES_PER_PIXEL), 0);
+            line[static_cast<std::ptrdiff_t>(i + FF6_ALPHA_OFFSET)] = 255;
+        }
+    }
+}
+
 void MenuScreen::window(int x, int y, int w, int h) {
-    drawWindow(pixels_, windowTiles_.empty() ? common_.windowTiles : windowTiles_, x * FF6_MENU_TILE_SIZE,
+    drawWindow(pixels_, windowTiles_.empty() ? common_.windowTiles : windowTiles_, x * FF6_MENU_TILE_SIZE + originX_,
                y * FF6_MENU_TILE_SIZE, w + 2, h + 2);
 }
 
@@ -106,7 +118,7 @@ void MenuScreen::codes(int x, int y, const std::vector<uint8_t>& codes, Layer la
                 const int shift = FF6_MENU_TILE_SIZE - 1 - column;
                 const int value = ((tile[row * 2] >> shift) & 1) | (((tile[row * 2 + 1] >> shift) & 1) << 1);
                 if (value == 0) continue;
-                blendPixel(pixels_, (x + static_cast<int>(at)) * FF6_MENU_TILE_SIZE + column, screenY, colors[value]);
+                blendPixel(pixels_, (x + static_cast<int>(at)) * FF6_MENU_TILE_SIZE + column + originX_, screenY, colors[value]);
             }
         }
     }

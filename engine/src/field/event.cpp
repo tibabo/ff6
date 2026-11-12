@@ -347,6 +347,7 @@ bool EventRunner::step(EventHost& host) {
         case FF6_EVENT_FADE_OUT_SPEED:
         case FF6_EVENT_FADE_STOP:
         case FF6_EVENT_SET_CHAR_PROP:
+        case FF6_EVENT_SET_CHAR_NAME:
         case FF6_EVENT_NORMALIZE_LEVEL:
         case FF6_EVENT_GIVE_ITEM:
         case FF6_EVENT_TAKE_ITEM:

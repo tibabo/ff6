@@ -21,7 +21,23 @@ void Dialogue::open(const DialogueText& text, const std::array<uint8_t, FF6_FONT
     choiceCount_ = 0;
     lastDirection_ = FF6_NO_DIRECTION;
     active_ = codes_ != nullptr && length_ > 0;
-    waiting_ = clearOnKey_ = closeOnKey_ = waitAfterPause_ = choosing_ = false;
+    waiting_ = clearOnKey_ = closeOnKey_ = choosing_ = keyTimerSet_ = false;
+    keyTimer_ = 0;
+}
+
+// The timer of the button ran out: the page or the end of the text goes on as if the button had been pressed.
+void Dialogue::giveUpWaiting() {
+    if (!waiting_) return;
+    waiting_ = false;
+    if (closeOnKey_) {
+        active_ = false;
+    } else if (clearOnKey_) {
+        glyphs_.clear();
+        marks_.clear();
+        line_ = 0;
+        x_ = FF6_TEXT_START_X;
+        clearOnKey_ = false;
+    }
 }
 
 void Dialogue::newLine() {
@@ -62,6 +78,15 @@ void Dialogue::update(bool confirmPressed, int direction) {
         }
         return;
     }
+    if (pause_ > 0) {
+        --pause_;
+        return;
+    }
+    if (keyTimerSet_) {
+        if (keyTimer_ == 0) giveUpWaiting();
+        else --keyTimer_;
+        if (!active_) return;
+    }
     if (waiting_) {
         if (!confirmPressed) return;
         waiting_ = false;
@@ -75,13 +100,6 @@ void Dialogue::update(bool confirmPressed, int direction) {
             line_ = 0;
             x_ = FF6_TEXT_START_X;
             clearOnKey_ = false;
-        }
-        return;
-    }
-    if (pause_ > 0) {
-        if (--pause_ == 0 && waitAfterPause_) {
-            waitAfterPause_ = false;
-            waiting_ = true;
         }
         return;
     }
@@ -116,8 +134,9 @@ void Dialogue::step() {
         pause_ = argument() * FF6_DLG_WAIT_UNIT_FRAMES;
         pos_ += 2;
         return;
-    case FF6_DLG_KEY:
-        waiting_ = true;
+    case FF6_DLG_KEY:  // waits for nothing: it gives up, a frame later, any wait that comes next, like the end of the text
+        keyTimerSet_ = true;
+        keyTimer_ = 1;
         ++pos_;
         return;
     case FF6_DLG_PAGE:
@@ -136,9 +155,9 @@ void Dialogue::step() {
         ++pos_;
         return;
     case FF6_DLG_KEY_TIMED:
-        pause_ = argument() * FF6_DLG_WAIT_UNIT_FRAMES;
-        waitAfterPause_ = pause_ > 0;
-        waiting_ = pause_ == 0;
+        keyTimerSet_ = true;
+        keyTimer_ = argument() * FF6_DLG_WAIT_UNIT_FRAMES;
+        waiting_ = true;
         pos_ += 2;
         return;
     default:

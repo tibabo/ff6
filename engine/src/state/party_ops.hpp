@@ -37,6 +37,9 @@ void changeHp(PartyState& party, const GameRules& rules, int slot, int code);
 void changeMp(PartyState& party, const GameRules& rules, int slot, int code);
 // EventCmd_8d: the equipment goes back to the inventory.
 void removeEquipment(PartyState& party, int slot);
+// EquipRemoveAll (the Empty option of the Equip screen): the weapons, shield, helmet and armor go back to the inventory; the
+// relics stay.
+void emptyEquipment(PartyState& party, const GameRules& rules, int slot);
 // The items of the inventory that the character can put in a slot of its equipment (GetValidEquip and
 // CheckCanEquipItem), in the order of the inventory.
 std::vector<int> equippableItems(const PartyState& party, const GameRules& rules, int character, int slot);
@@ -48,8 +51,8 @@ bool equipItem(PartyState& party, const GameRules& rules, int character, int slo
 // can wear take its place. The relics stay.
 void optimizeEquipment(PartyState& party, const GameRules& rules, int character);
 
-// Items that the menu can use: the ones that restore hp or mp, and the fenix down. The rest needs the status effects of
-// the characters, a save point or a battle.
+// Items that the menu can use on a character: the ones that restore hp or mp or cure statuses, the fenix down and the
+// sleeping bag (the tent and the warp stone leave the menu, and the game says where they work).
 bool itemUsableInMenu(const GameRules& rules, int item);
 // CheckCanUseItem: it has something to restore on this character (a character at 0 hp is dead: only a fenix down
 // helps it).
@@ -79,6 +82,9 @@ int shopPrice(const GameRules& rules, int shop, int item, int leadSprite);
 int sellPrice(const GameRules& rules, int item);
 // How many of an item the inventory holds.
 int itemQuantity(const PartyState& party, int item);
+// SortItemsByIcon (the Arrange option): the items go in the order of the symbol that starts their name (`itemNames` holds
+// FF6_ITEM_NAME_BYTES for each item), the ones that have the same symbol keeping their order; the empty places end the list.
+void arrangeItems(PartyState& party, const std::vector<uint8_t>& itemNames);
 // Pays and adds the items; false, and nothing done, when there is not enough gil, too many items or no place for them.
 bool buyItem(PartyState& party, int item, int quantity, int unitPrice);
 // Takes the items and pays for them; false when the party does not have that many.

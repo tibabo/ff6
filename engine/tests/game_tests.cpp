@@ -10,6 +10,8 @@
 #include "test_helpers.hpp"
 #include "tests.hpp"
 #include "game.hpp"
+#include "state/char_stats.hpp"
+#include "state/party_ops.hpp"
 
 namespace {
 
@@ -26,7 +28,75 @@ struct LoggedSound : ff6::Sound {
     int previousSong() const override { return program.previousSong(); }
 };
 
+// A renderer that keeps the last picture that it was given.
+struct PixelRenderer : test::RecordingRenderer {
+    std::vector<uint8_t> last;
+    void updateTexture(ff6::TextureId texture, const uint8_t* data) override {
+        RecordingRenderer::updateTexture(texture, data);
+        last.assign(data, data + static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL);
+    }
+};
+
 }  // namespace
+
+// The special npcs show their own graphics: with the graphics taken away, the screen of a map with a crane hook changes.
+void testSpecialNpcs() {
+    const char* pack = std::getenv("FF6_PACK");
+    if (!pack) return;
+    const ff6::InputState idle{FF6_NO_DIRECTION, false};
+    const ff6::CommonData data = ff6::loadCommonData(pack);
+    std::vector<uint8_t> shots[2];
+    for (int bare = 0; bare < 2; ++bare) {
+        ff6::CommonData common = data;
+        if (bare) std::fill(common.specialGfx.begin(), common.specialGfx.end(), 0);
+        PixelRenderer renderer;
+        test::RecordingSound sound;
+        ff6::Game game(std::move(common), pack, 254, renderer, sound);  // Kefka's tower, where the cranes are
+        game.placeParty(82, 7);
+        for (int i = 0; i < 60; ++i) game.tick(idle);
+        game.draw();
+        shots[bare] = renderer.last;
+    }
+    int different = 0;
+    for (size_t i = 0; i < shots[0].size(); i += FF6_BYTES_PER_PIXEL) {
+        if (!std::equal(shots[0].begin() + static_cast<std::ptrdiff_t>(i), shots[0].begin() + static_cast<std::ptrdiff_t>(i + FF6_BYTES_PER_PIXEL), shots[1].begin() + static_cast<std::ptrdiff_t>(i))) ++different;
+    }
+    CHECK(!shots[0].empty() && different > 20);
+}
+
+// the tent: on a save point the menu ends, the party sleeps and wakes with all of its hp and mp, and the tent is gone
+void testCamping() {
+    const char* pack = std::getenv("FF6_PACK");
+    if (!pack) return;
+    test::RecordingRenderer renderer;
+    test::RecordingSound sound;
+    const ff6::InputState idle{FF6_NO_DIRECTION, false}, confirm{FF6_NO_DIRECTION, true};
+    ff6::CommonData data = ff6::loadCommonData(pack);
+    const uint32_t startup = ff6::loadMap(pack, 0x1C).startupEvent;
+    const std::vector<uint8_t> script = {FF6_EVENT_SET_SWITCH + 2 * (FF6_EVENT_BIT_SAVE_POINT >> 8), FF6_EVENT_BIT_SAVE_POINT & 0xFF, 0xFE};
+    std::copy(script.begin(), script.end(), data.eventScript.begin() + startup);
+    ff6::Game camper(std::move(data), pack, 0x1C, renderer, sound);
+    for (int i = 0; i < 300; ++i) camper.tick(idle);
+    CHECK(camper.eventBits().get(FF6_EVENT_BIT_SAVE_POINT));
+    camper.party().inventory[0] = {FF6_ITEM_TENT, 1};
+    camper.party().inventory[1] = {FF6_ITEM_SLEEPING_BAG, 1};
+    camper.party().characters[0].hp = 5;
+    camper.party().characters[0].mp = 0;
+    ff6::InputState open;
+    open.menu = true;
+    camper.tick(open);
+    for (int i = 0; i < 300 && !(camper.menuPhase() == ff6::MenuPhase::Open && !camper.fading()); ++i) camper.tick(idle);
+    CHECK(camper.menuPhase() == ff6::MenuPhase::Open);
+    camper.tick(confirm);  // Item
+    camper.tick(confirm);  // Use
+    camper.tick(confirm);  // the tent, the first of the inventory, is picked
+    camper.tick(confirm);  // and used
+    const ff6::CharacterState& terra = camper.party().characters[0];
+    const int maxHp = ff6::calcStats(camper.rules(), terra).maxHp;
+    for (int i = 0; i < 4000 && terra.hp < maxHp; ++i) camper.tick(idle);
+    CHECK(terra.hp == ff6::calcStats(camper.rules(), terra).maxHp && terra.mp == ff6::calcStats(camper.rules(), terra).maxMp);
+    CHECK(ff6::itemQuantity(camper.party(), FF6_ITEM_TENT) == 0 && ff6::itemQuantity(camper.party(), FF6_ITEM_SLEEPING_BAG) == 1);
+}
 
 // Plays the real data pack when FF6_PACK points to one (built by `node ff6.mjs build-pack`).
 void testGame() {
@@ -375,6 +445,26 @@ void testGame() {
         CHECK(!start.loadMenuOpen() && !start.eventBits().get(FF6_EVENT_BIT_SKIPPED));
         for (int i = 0; i < 400 && !start.dialogue().active(); ++i) start.tick(idle);
         CHECK(start.map().id == 23 && start.dialogue().active());  // "Long ago, the War of the Magi...", over the mountains
+        if (std::getenv("WHELK")) {
+            int lastMap = -1;
+            for (int i = 0; i < 200000 && !start.battleOpen(); ++i) {
+                start.tick(i % 10 == 0 ? confirm : idle);
+                if (start.map().id != lastMap || i % 20000 == 0) {
+                    lastMap = start.map().id;
+                    std::fprintf(stderr, "tick %d map %d dialogue %d cutscene %d\n", i, lastMap, start.dialogue().active(), start.cutsceneOpen());
+                }
+            }
+            std::fprintf(stderr, "battleOpen=%d map=%d\n", start.battleOpen(), start.map().id);
+            for (const int c : {0, 14, 15}) {
+                const auto& ch = start.party().characters[c];
+                std::fprintf(stderr, "slot %d actor %d level %d hp %d/%d status %x\n", c, ch.actor, ch.level, ch.hp, ch.maxHp, ch.status);
+            }
+            for (int i = 0; i < 400; ++i) start.tick(idle);
+            for (const int c : {0, 14, 15}) {
+                const auto& ch = start.party().characters[c];
+                std::fprintf(stderr, "later slot %d actor %d level %d hp %d/%d status %x\n", c, ch.actor, ch.level, ch.hp, ch.maxHp, ch.status);
+            }
+        }
     }
     {  // with a saved game, the menu goes on with it: the map and the story come back
         ff6::Game played(ff6::loadCommonData(pack), pack, 0x1C, renderer, sound);

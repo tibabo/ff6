@@ -35,8 +35,11 @@ uint8_t AkaoSequencer::fetch(int ch) {
     return (*script)[static_cast<size_t>(at)];
 }
 
-// A channel that runs the script of a sound effect reads it from the sound memory, by address.
-int AkaoSequencer::baseOf(const Channel& c) const { return c.sfxScript ? 0 : base_; }
+// A channel that runs the script of a sound effect reads it from the sound memory, by address. The sound memory has 16-bit addresses:
+// a song that starts near the end of it goes on at the beginning.
+int AkaoSequencer::resolve(const Channel& c, int address) const {
+    return c.sfxScript ? address : ((address - start_) & 0xFFFF) + FF6_AKAO_HEADER_BYTES;
+}
 
 // The settings that the game made stay when a song is loaded.
 void AkaoSequencer::keepGameSettings(const AkaoSequencer& other) {
@@ -61,7 +64,7 @@ void AkaoSequencer::load(const AudioData& audio, size_t index, uint8_t songVolum
     const std::vector<uint8_t>& s = song.script;
     if (s.size() < FF6_AKAO_HEADER_BYTES) return;
     const auto word = [&](size_t at) { return static_cast<int>(s[at] | (s[at + 1] << 8)); };
-    base_ = FF6_AKAO_HEADER_BYTES - word(0);
+    start_ = word(0);
     const int end = word(FF6_AKAO_END_POINTER_OFFSET);
     const size_t pointers = FF6_AKAO_CHANNEL_POINTERS_OFFSET + (alternateStart ? 2 * FF6_AKAO_VOICES : 0);
     for (int ch = 0; ch < FF6_AKAO_VOICES; ++ch) {
@@ -69,7 +72,7 @@ void AkaoSequencer::load(const AudioData& audio, size_t index, uint8_t songVolum
         if (pointer == end) continue;
         activeChannels_ |= static_cast<uint8_t>(1 << ch);
         Channel& c = channels_[static_cast<size_t>(ch)];
-        c.pc = pointer + base_;
+        c.pc = resolve(c, pointer);
         c.duration = 1;
     }
     tempo_ = 1 << 8;  // the first tick runs the scripts
@@ -546,7 +549,6 @@ void AkaoSequencer::findNextNote(int ch, uint8_t* next) {
     Channel& c = channels_[static_cast<size_t>(ch)];
     const uint8_t bit = static_cast<uint8_t>(1 << ch);
     const std::vector<uint8_t>& script = c.sfxScript ? audio_->sfxMemory : *script_;
-    const int base = baseOf(c);
     int at = c.pc;
     int top = c.loopTop;
     const auto byteAt = [&](int i) -> uint8_t {
@@ -566,7 +568,7 @@ void AkaoSequencer::findNextNote(int ch, uint8_t* next) {
             return;
         }
         switch (code) {
-            case 0xF6: at = word(at) + base; break;
+            case 0xF6: at = resolve(c, word(at)); break;
             case 0xE3: {  // loop end
                 const uint8_t count = c.loopCount[static_cast<size_t>(top)];
                 if (count == 1) {
@@ -581,7 +583,7 @@ void AkaoSequencer::findNextNote(int ch, uint8_t* next) {
                     at += 3;
                 } else {
                     if (c.loopCount[static_cast<size_t>(top)] == 1) popLoop();
-                    at = word(at + 1) + base;
+                    at = resolve(c, word(at + 1));
                 }
                 break;
             }

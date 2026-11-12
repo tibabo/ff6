@@ -459,6 +459,10 @@ void Battle::runScript(int index, size_t start, bool counter) {
                     if (first == FF6_MONSTER_ANIM_SFX) {
                         shown.attack = third;
                         events_.push_back(shown);
+                    } else if (first == FF6_MONSTER_ANIM_RUN_RIGHT || first == FF6_MONSTER_ANIM_RUN_RIGHT + 1) {  // all the characters run across
+                        shown.attack = kAnims[first];
+                        shown.target = -1;
+                        events_.push_back(shown);
                     } else if (first >= 0 && first < 14 && kAnims[first] >= 0) {
                         shown.attack = kAnims[first];
                         for (int slot = 0; slot < FF6_BATTLE_COMBATANTS - FF6_BATTLE_PARTY_SLOTS; ++slot) {

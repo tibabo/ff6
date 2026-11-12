@@ -32,6 +32,9 @@ ff6::MenuData syntheticMenu() {
     menu.portraitTiles.assign(static_cast<size_t>(FF6_MENU_PORTRAIT_COUNT) * FF6_MENU_PORTRAIT_TILES * FF6_MENU_CURSOR_TILE_BYTES, 0);
     menu.portraitPalettes.assign(static_cast<size_t>(FF6_MENU_PORTRAIT_COUNT) * FF6_MENU_PORTRAIT_COLORS, 0);
     menu.itemNames.assign(static_cast<size_t>(FF6_ITEM_COUNT) * FF6_ITEM_NAME_BYTES, 0xFF);
+    menu.rareNames.assign(static_cast<size_t>(FF6_RARE_ITEM_COUNT) * FF6_ITEM_NAME_BYTES, 0xFF);
+    menu.rareDescPtrs.assign(FF6_RARE_ITEM_COUNT, 0);
+    menu.rareDescriptions.assign(FF6_RARE_DESC_BYTES, 0);
     menu.itemNames[5 * FF6_ITEM_NAME_BYTES + 1] = FF6_MENU_CODE_UPPER_A;  // the item 5 is called A
     return menu;
 }
@@ -281,12 +284,22 @@ void testMenu() {
         select();
         select();
         CHECK(field.characterMenu().which() == ff6::CharacterScreen::Relic && field.characterMenu().cursor() == 0);
+        CHECK(field.characterMenu().inOptions());
+        field.draw();
+        press(ff6::Right);  // Remove
+        press(ff6::Right);
+        CHECK(field.characterMenu().option() == 1);
+        press(ff6::Left);
+        select();  // Equip: the slots
+        CHECK(!field.characterMenu().inOptions() && !field.characterMenu().removing());
         press(ff6::Down);
         press(ff6::Down);
         CHECK(field.characterMenu().cursor() == 1);
         field.draw();
         select();
         CHECK(sound.commands.back().command == FF6_SFX_MENU_INVALID);  // without the game behind it, nothing can be changed
+        field.update(cancel);
+        CHECK(field.characterMenu().inOptions());
         field.update(cancel);
         field.update(cancel);
         press(ff6::Up);  // Equip, then Skills
@@ -356,6 +369,9 @@ void testMenu() {
         select();
         select();
         CHECK(field.inCharacter() && field.characterMenu().which() == ff6::CharacterScreen::Equip);
+        field.draw();
+        CHECK(field.characterMenu().inOptions());
+        select();  // Equip: the slots
         select();  // the right hand: the choice of taking the item off comes first
         const ff6::CharacterMenu& character = field.characterMenu();
         CHECK(character.picking() && character.choices() == std::vector<int>({FF6_ITEM_EMPTY, 4, 7}) && character.pick() == 0);
@@ -375,6 +391,47 @@ void testMenu() {
         select();
         CHECK(character.picking() && character.choices().size() == 1);
         field.update(cancel);
+        field.update(cancel);
+        CHECK(character.inOptions() && field.inCharacter());
+        // Optimum and Empty ask the game; Rmove takes the item of the slot off.
+        press(ff6::Right);
+        select();
+        CHECK(sound.commands.back().command == FF6_SFX_MENU_INVALID);  // no hook
+        int optimized = 0, emptied = 0;
+        status.equip.optimum = [&](int) {
+            ++optimized;
+            ff6::MenuCharacter best = terra;
+            best.equipment[0] = 7;
+            return best;
+        };
+        status.equip.empty = [&](int) {
+            ++emptied;
+            ff6::MenuCharacter bare = terra;
+            bare.equipment[0] = FF6_ITEM_EMPTY;
+            return bare;
+        };
+        field.update(cancel);
+        CHECK(!field.inCharacter());
+        field.open(status, config);  // again, with the hooks
+        press(ff6::Down);
+        press(ff6::Down);
+        select();
+        select();
+        press(ff6::Right);
+        select();  // Optimum
+        CHECK(optimized == 1 && character.character().equipment[0] == 7 && character.inOptions());
+        press(ff6::Right);
+        press(ff6::Right);
+        select();  // Empty
+        CHECK(emptied == 1 && character.character().equipment[0] == FF6_ITEM_EMPTY && character.inOptions());
+        press(ff6::Left);
+        select();  // Rmove: the slots, and the item of the slot goes
+        CHECK(!character.inOptions() && character.removing());
+        field.draw();
+        select();
+        CHECK(equipped == FF6_ITEM_EMPTY && character.character().equipment[0] == FF6_ITEM_EMPTY);
+        field.update(cancel);
+        CHECK(character.inOptions());
         field.update(cancel);
         CHECK(!field.inCharacter());
     }
@@ -418,19 +475,188 @@ void testMenu() {
         select();  // Item
         select();  // Use
         const ff6::ItemMenu& items = field.itemMenu();
-        select();  // the first item
-        CHECK(items.targeting() && items.target() == 0);
+        select();  // the first item is picked
+        CHECK(!items.targeting() && items.picked() == 0);
+        select();  // and picked again: it is used
+        CHECK(items.targeting() && items.target() == 0 && items.picked() == -1);
         field.draw();
         select();
         CHECK(hp == 35 && quantity == 1 && items.targeting() && items.party()[0].hp == 35);
         select();
         CHECK(hp == 60 && quantity == 0 && !items.targeting());  // the last potion is gone: back to the list
         CHECK(items.items().size() == 1 && items.items()[0].id == 7);
+        select();
         select();  // an item that the menu cannot use
         CHECK(!items.targeting() && sound.commands.back().command == FF6_SFX_MENU_INVALID);
         field.update(cancel);
         field.update(cancel);
         CHECK(!field.inItems());
+    }
+
+    {  // Order: left of the options, A on two characters swaps them, A twice on one changes its row, B leaves
+        ff6::MenuScreen screen(common, menu);
+        test::RecordingSound sound;
+        ff6::FieldMenu field(screen, sound);
+        ff6::GameConfig config;
+        ff6::MenuStatus status;
+        for (const int id : {0, 5, 11}) {
+            ff6::MenuCharacter character;
+            character.id = id;
+            status.party.push_back(character);
+        }
+        std::vector<ff6::MenuCharacter> party = status.party;
+        status.order.swap = [&](int from, int to) {
+            std::swap(party[static_cast<size_t>(from)], party[static_cast<size_t>(to)]);
+            return party;
+        };
+        status.order.row = [&](int place) {
+            party[static_cast<size_t>(place)].backRow = !party[static_cast<size_t>(place)].backRow;
+            return party;
+        };
+        const auto press = [&](int direction) {
+            field.update({direction, false});
+            field.update({});
+        };
+        const auto select = [&] { field.update({FF6_NO_DIRECTION, true}); };
+        ff6::InputState cancel;
+        cancel.cancel = true;
+        field.open(status, config);
+        const auto wait = [&](int frames) {
+            for (int frame = 0; frame < frames; ++frame) {
+                field.draw();
+                field.update({});
+            }
+        };
+        press(ff6::Left);
+        CHECK(field.ordering() && field.orderAnimating());
+        select();  // the screen is still sliding: nothing is picked
+        wait(FF6_MENU_ORDER_SLIDE_FRAMES);
+        CHECK(field.ordering() && !field.orderAnimating() && field.orderFrom() == -1);
+        field.draw();
+        select();  // the first character
+        CHECK(field.orderFrom() == 0);
+        press(ff6::Down);
+        field.draw();
+        select();  // and the second: they change places
+        CHECK(field.orderFrom() == -1 && field.party()[0].id == 5 && field.party()[1].id == 0 && field.orderAnimating());
+        wait(2 * FF6_MENU_ORDER_ROW_FRAMES);
+        CHECK(!field.orderAnimating());
+        select();
+        select();  // the same one twice (the hand stayed on the second place): its row
+        CHECK(field.party()[1].backRow && !field.party()[0].backRow && field.orderFrom() == -1 && field.orderAnimating());
+        wait(FF6_MENU_ORDER_ROW_FRAMES);
+        field.draw();
+        select();
+        field.update(cancel);  // B takes the pick back, and the hand goes back to it
+        CHECK(field.ordering() && field.orderFrom() == -1 && !field.orderAnimating());
+        field.update(cancel);  // and the screen slides back
+        CHECK(field.ordering() && field.orderAnimating());
+        wait(FF6_MENU_ORDER_SLIDE_FRAMES);
+        CHECK(!field.ordering() && !field.closed());
+        press(ff6::Left);
+        wait(FF6_MENU_ORDER_SLIDE_FRAMES);
+        press(ff6::Right);  // Right leaves too
+        wait(FF6_MENU_ORDER_SLIDE_FRAMES);
+        CHECK(!field.ordering());
+    }
+
+    {  // the inventory: a pick and another place swap the items, Arrange sorts them, Rare lists the key items
+        ff6::MenuScreen screen(common, menu);
+        test::RecordingSound sound;
+        ff6::FieldMenu field(screen, sound);
+        ff6::GameConfig config;
+        ff6::MenuStatus status;
+        status.party.push_back(ff6::MenuCharacter());
+        std::vector<ff6::MenuItem> inventory = {{233, 2}, {7, 1}, {238, 4}};
+        std::vector<int> rare = {0, 2, 3};
+        status.items = inventory;
+        status.item.items = [&] { return inventory; };
+        status.item.swap = [&](int first, int second) { std::swap(inventory[static_cast<size_t>(first)], inventory[static_cast<size_t>(second)]); };
+        int arranged = 0;
+        status.item.arrange = [&] {
+            ++arranged;
+            std::sort(inventory.begin(), inventory.end(), [](const ff6::MenuItem& a, const ff6::MenuItem& b) { return a.id < b.id; });
+        };
+        status.item.rareItems = [&] { return rare; };
+        const auto press = [&](int direction) {
+            field.update({direction, false});
+            field.update({});
+        };
+        const auto select = [&] { field.update({FF6_NO_DIRECTION, true}); };
+        ff6::InputState cancel;
+        cancel.cancel = true;
+        field.open(status, config);
+        select();  // Item
+        const ff6::ItemMenu& items = field.itemMenu();
+        select();  // Use: the list
+        select();  // the first is picked
+        press(ff6::Down);
+        press(ff6::Down);
+        select();  // the third takes its place
+        CHECK(inventory[0].id == 238 && inventory[2].id == 233 && items.items()[0].id == 238 && items.picked() == -1);
+        select();
+        field.update(cancel);  // B takes the pick back
+        CHECK(items.picked() == -1 && items.inList());
+        field.update(cancel);
+        CHECK(!items.inList());
+        press(ff6::Right);  // Arrange
+        select();
+        CHECK(arranged == 1 && items.items()[0].id == 7 && items.selected() == 0);
+        press(ff6::Right);  // Rare
+        select();
+        CHECK(items.inRare() && items.rareCursor() == 0);
+        field.draw();
+        press(ff6::Right);
+        press(ff6::Down);
+        CHECK(items.rareCursor() == 3);
+        press(ff6::Left);
+        press(ff6::Up);
+        press(ff6::Up);  // the cursor wraps over the ten rows
+        CHECK(items.rareCursor() == 18);
+        field.draw();
+        field.update(cancel);
+        CHECK(!items.inRare() && !field.inItems() == false);
+    }
+
+    {  // Save is for the save points: gray, and it does nothing, anywhere else
+        ff6::MenuScreen screen(common, menu);
+        test::RecordingSound sound;
+        ff6::FieldMenu field(screen, sound);
+        ff6::GameConfig config;
+        ff6::MenuStatus status;
+        status.party.push_back(ff6::MenuCharacter());
+        status.canSave = false;
+        field.open(status, config);
+        for (int option = 0; option < FF6_MENU_SAVE_ITEM; ++option) {
+            field.update({ff6::Down, false});
+            field.update({});
+        }
+        field.draw();
+        field.update({FF6_NO_DIRECTION, true});
+        CHECK(!field.confirmingSave() && sound.commands.back().command == FF6_SFX_MENU_INVALID);
+    }
+
+    {  // the tent ends the whole menu, if the game lets it be used here
+        ff6::MenuScreen screen(common, menu);
+        test::RecordingSound sound;
+        ff6::FieldMenu field(screen, sound);
+        ff6::GameConfig config;
+        ff6::MenuStatus status;
+        status.party.push_back(ff6::MenuCharacter());
+        status.items.push_back({FF6_ITEM_TENT, 1});
+        bool allowed = false;
+        status.item.leave = [&](int) { return allowed; };
+        const auto select = [&] { field.update({FF6_NO_DIRECTION, true}); };
+        field.open(status, config);
+        select();  // Item
+        select();  // Use
+        select();  // the tent is picked
+        select();  // and used, here that does nothing
+        CHECK(sound.commands.back().command == FF6_SFX_MENU_INVALID && !field.closed() && field.takeLeaveItem() == -1);
+        allowed = true;
+        select();
+        select();
+        CHECK(field.closed() && field.takeLeaveItem() == FF6_ITEM_TENT && field.takeLeaveItem() == -1);
     }
 
     {  // the name of a character: letters from the grid, one taken away, and Start

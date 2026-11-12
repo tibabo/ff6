@@ -24,6 +24,10 @@ struct ItemHooks {
     std::function<bool(int item, int character)> use;  // does it and takes the item from the inventory
     std::function<std::vector<MenuItem>()> items;  // the inventory as it is now
     std::function<std::vector<MenuCharacter>()> party;  // the party as it is now
+    std::function<bool(int item)> leave;  // the tent and the warp stone: does it if it can be used here, and takes the item
+    std::function<void(int first, int second)> swap;  // the items of two places of the list change places
+    std::function<void()> arrange;  // puts the inventory in the order of the symbols of the items
+    std::function<std::vector<int>()> rareItems;  // the rare items that the party has, by number
 };
 
 // The item menu (src/menu/item.asm): the options Use, Arrange and Rare at the top, the description of the item that the
@@ -48,12 +52,23 @@ public:
     int selected() const { return selected_; }
     int firstRow() const { return first_; }
     int option() const { return option_; }
+    // The hand is on the rare items (two columns, by the number of the place), or the first pick of a move is made.
+    bool inRare() const { return inRare_; }
+    int rareCursor() const { return rareCursor_; }
+    int picked() const { return picked_; }
+    // The tent or the warp stone was used: the menu is over, and the game goes on with the item that left it.
+    int leaveItem() const { return leaveItem_; }
 
 private:
     void move(int step);
     void updateTarget(int direction, const InputState& input);
     void drawTarget();
     void drawDescription();
+    void drawText(const std::vector<uint8_t>& text);
+    void drawRare();
+    void updateRare(int direction, const InputState& input);
+    void drawCount(int count);
+    void refresh();
 
     MenuScreen& screen_;
     Sound& sound_;
@@ -63,8 +78,11 @@ private:
     bool closed_ = false;
     bool inList_ = false;  // the hand is on the list, not on the options
     bool targeting_ = false;
+    bool inRare_ = false;
+    int rareCursor_ = 0, picked_ = -1;
     int target_ = 0;  // the place of the character in the party
     int option_ = 0;
+    int leaveItem_ = -1;
     int selected_ = 0;  // place in the inventory
     int first_ = 0;  // place of the first row of the list
     DirectionRepeat repeat_;

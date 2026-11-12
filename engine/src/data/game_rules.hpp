@@ -20,6 +20,10 @@ struct GameRules {
     std::vector<uint8_t> magicProp;  // FF6_MAGIC_PROP_COUNT attacks of FF6_MAGIC_PROP_BYTES
     std::vector<uint8_t> genjuProp;  // FF6_ESPER_COUNT espers of FF6_GENJU_PROP_BYTES: the spells that they teach and the bonus
 
+    std::vector<uint8_t> charNames;  // FF6_CHAR_PROP_COUNT names of FF6_CHAR_NAME_BYTES letters, the ones of the menus, 0xFF ends them
+
+    // The name that a character takes with the properties of an actor (command 0x7F), as the letters of the game.
+    std::string actorName(int actor) const;
     const uint8_t* actor(int actor) const { return &charProp[static_cast<size_t>(actor) * FF6_CHAR_PROP_BYTES]; }
     const uint8_t* item(int item) const { return &itemProp[static_cast<size_t>(item) * FF6_ITEM_PROP_BYTES]; }
     const uint8_t* shop(int shop) const { return &shopProp[static_cast<size_t>(shop) * FF6_SHOP_PROP_BYTES]; }

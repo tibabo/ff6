@@ -100,7 +100,7 @@ const BattleImage& BattleGfx::background(int index, int step, const uint8_t* pal
         }
     };
     load(prop[0], 0, 0);
-    if (!(prop[0] & FF6_BG_LARGE_FLAG)) load(prop[1], FF6_BG_SECOND_TILE, 0);
+    if (prop[0] == FF6_BG_NONE || !(prop[0] & FF6_BG_LARGE_FLAG)) load(prop[1], FF6_BG_SECOND_TILE, 0);  // a first block that is not there is not a large one
     load(prop[2], FF6_BG_THIRD_TILE, FF6_BG_THIRD_TRIM);
     if (prop[3] >= FF6_BG_TILES_COUNT) return image;
     const uint8_t* map = &bgTiles[static_cast<size_t>(prop[3]) * FF6_BG_TILES_BYTES];
@@ -262,6 +262,26 @@ const BattleImage& BattleGfx::statusSprite(int kind, int frame) const {
     return image;
 }
 
+const BattleImage& BattleGfx::magitekArmor(int frame) const {
+    BattleImage& image = armors_[frame];
+    if (!image.rgba.empty() || frame < 0 || frame >= FF6_MAGITEK_FRAMES) return image;
+    static constexpr uint16_t kPalette[12] = FF6_MAGITEK_PALETTE;
+    static constexpr int kRows[4] = FF6_MAGITEK_ROWS;
+    uint8_t colors[16][FF6_BYTES_PER_PIXEL];
+    for (size_t i = 0; i < 16; ++i) colorToRgba(i < 12 ? kPalette[i] : 0, colors[i]);
+    image.width = image.height = FF6_MAGITEK_SIZE;
+    image.rgba.assign(static_cast<size_t>(image.width) * image.height * FF6_BYTES_PER_PIXEL, 0);
+    const uint8_t* base = &magitekGfx[static_cast<size_t>(frame) * FF6_MAGITEK_FRAME_BYTES];
+    for (int row = 0; row < 4; ++row) {
+        for (int column = 0; column < 4; ++column) {
+            const size_t at = static_cast<size_t>(kRows[row] + column * FF6_TILE_4BPP_BYTES);
+            if (at + FF6_TILE_4BPP_BYTES > FF6_MAGITEK_FRAME_BYTES) continue;
+            decodeTile(base + at, false, colors, image.rgba.data(), image.width, column * FF6_MENU_TILE_SIZE, row * FF6_MENU_TILE_SIZE);
+        }
+    }
+    return image;
+}
+
 BattleGfx loadBattleGfx(const std::string& packDir) {
     const std::vector<uint8_t> file = readFile(packDir + "/" FF6_BATTLE_GFX_FILE);
     ByteReader reader(file);
@@ -282,6 +302,7 @@ BattleGfx loadBattleGfx(const std::string& packDir) {
     gfx.charPal = reader.bytes(static_cast<size_t>(FF6_CHAR_PAL_COUNT) * FF6_CHAR_PAL_BYTES);
     gfx.statusGfx = reader.bytes(FF6_STATUS_GFX_BYTES);
     gfx.statusPal = reader.bytes(FF6_STATUS_PAL_BYTES);
+    gfx.magitekGfx = reader.bytes(static_cast<size_t>(FF6_MAGITEK_FRAMES) * FF6_MAGITEK_FRAME_BYTES);
     if (reader.remaining() != 0) throw std::runtime_error("battle graphics have trailing bytes");
     return gfx;
 }

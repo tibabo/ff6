@@ -21,11 +21,12 @@ private:
     void initHardware();
     void loadGraphics();
     void state();
-    void sparks();  // _7e6f4c and _7e6f97: what comes by chance at each frame
+    void sparks();  // _7e6f97 and _7e6f4c: what comes by chance at each frame
     uint8_t chance();  // _7e6f83
 
     CutsceneCore core_;
     uint8_t chanceCounter_ = 0;
+    bool carry_ = false;  // the carry of the last addition of chance()
     bool ending_ = false, done_ = false;
 };
 

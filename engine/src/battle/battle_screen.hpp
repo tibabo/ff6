@@ -33,6 +33,8 @@ public:
     // One frame of the game.
     void update(const InputState& input);
     void draw();
+    // The graphics that each character of the story wears on the field (the battle draws the same ones), -1 for its own.
+    void setCharacterGfx(const std::array<int, FF6_CHAR_COUNT>& gfx) { characterGfx_ = gfx; }
     // The graphics to draw the battle with; without them it is text only.
     void setGfx(const BattleGfx* gfx) { gfx_ = gfx; }
     // The animations of the attacks: spells and techniques play as the game scripts them; without them, by hand.
@@ -42,7 +44,7 @@ public:
         if (anim) player_.emplace(*anim);
     }
     // Whether an animation of an attack is playing: the messages wait for it.
-    bool animating() const { return (player_ && !player_->done()) || esperGfx_ >= 0; }
+    bool animating() const { return castLead_ > 0 || (player_ && !player_->done()) || esperGfx_ >= 0; }
     // Plays the animation of an attack from the first monster to the characters, for looking at it.
     void playAnimation(int attack);
     // Plays a battle event (F7) of the scenes of the game, for captures.
@@ -67,6 +69,8 @@ public:
     // The combatant over which the damage of the message is shown, and the damage; -1 when there is none.
     int popupTarget() const { return popupTarget_; }
     int popupDamage() const { return popupDamage_; }
+    // Whether everything that happened has been shown: no message, animation or number is left to come.
+    bool resolved() const { return messages_.empty() && messageTimer_ == 0 && pendingPopup_.target < 0 && !animating(); }
     // Ends the battle and lets go of it: the party keeps what it won.
     void close();
 
@@ -127,7 +131,7 @@ private:
     // The line of a monster in the window at the bottom: the first rows of the names are taller than the last.
     int monsterRowPx(int row) const;
     // Where a monster and a character stand: the battle types that surprise the party turn the sides round.
-    bool mirrored(size_t monster) const;
+    bool mirrored(size_t monster, int width) const;
     int monsterX(size_t monster, int width) const;
     // The picture of a monster of the formation; Gau, who jumps in after a battle of the veldt, is a character facing the party.
     const BattleImage& monsterImage(size_t slot) const;
@@ -135,6 +139,7 @@ private:
     int monsterTop(size_t monster) const;
     int characterTop(int slot) const;
     int characterX(int slot) const;
+    bool facesRight(int slot) const;
     Codes statusName(uint32_t status) const;
 
     MenuScreen& screen_;
@@ -169,6 +174,7 @@ private:
         enum class Effect { None, Cast, Strike, Defend, Hurt, Fade, Heal, Escape, Animate, Scene, Visible } effect = Effect::None;
         int actor = -1, subject = -1, element = 0;
         bool flash = false;
+        int hpAfter = -1;  // the hit points that the target has once the damage is shown
         int attack = -1;  // the attack whose animation plays when the message comes, on these combatants
         int sfx = -1;  // a sound effect that plays when the message comes
         std::vector<int> animTargets{};
@@ -176,6 +182,7 @@ private:
         std::vector<SceneAttack> sceneAttacks{};
         bool leftHand = false;  // a blow: the weapon is the one in the left hand; `attack` is its animation
         bool instant = false;  // it has no text and takes no time: the next message comes at once
+        bool moves = false;  // the characters stay where the animation leaves them, in the pose that it gives them (as after a scene)
     };
     void trigger(const Message& message);
     void startAnimation(const Message& message);
@@ -193,6 +200,8 @@ private:
     bool frontShown_ = false;
     std::array<std::vector<uint8_t>, 3> layerPixels_;  // the layers of background of the animation, apart (1 and 2)
     void tickEffects();
+    int castLead_ = 0;  // frames left before the animation of a spell starts, while its caster gets ready
+    Message castPending_;
     std::array<int, FF6_BATTLE_COMBATANTS> poseTimer_{}, poseValue_{}, stepTimer_{}, blinkTimer_{}, fadeTimer_{}, escapeTimer_{};
     std::array<bool, FF6_BATTLE_COMBATANTS> dying_{};  // a monster that fell stays until its message fades it
     int flashTimer_ = 0, flashColor_[3] = {255, 255, 255};
@@ -218,6 +227,7 @@ private:
     bool keptFlip_[FF6_BATTLE_PARTY_SLOTS] = {false, false, false, false};
     int gfxOverride_[FF6_BATTLE_PARTY_SLOTS] = {-1, -1, -1, -1};  // the picture that a scene gave to a character
     int bgShake_ = 0;  // the field shakes (a scene asked, 0x80 for the horizontal shake only)
+    int eventPalette_ = -1;  // the sparkles that a scene gave the first monster, -1 for its own colors
     bool keptHidden_[FF6_BATTLE_PARTY_SLOTS] = {false, false, false, false};  // the characters that a scene took off the field
     bool sceneControlled_[FF6_BATTLE_PARTY_SLOTS] = {false, false, false, false};  // a scene decides whether they are seen
     // The drawn effects over the targets: a slash, a ring of the element, sparkles that rise.
@@ -233,7 +243,23 @@ private:
     void drawFx();
     std::deque<Message> messages_;
     Codes current_;
+    std::array<int, FF6_CHAR_COUNT> characterGfx_ = [] {
+        std::array<int, FF6_CHAR_COUNT> none;
+        none.fill(-1);
+        return none;
+    }();
     int popupTarget_ = -1, popupDamage_ = -1;
+    // The damage and the hit points show when the animation of the blow is over, not when the battle has worked them out.
+    struct PendingPopup {
+        int target = -1, damage = -1, hp = -1;
+    } pendingPopup_;
+    std::array<int, FF6_BATTLE_COMBATANTS> prevHp_{}, heldHp_{}, queuedHp_{};  // before the action, shown until its message, after the queued messages
+    int shownHp(int combatant) const;
+    bool monsterListed(int combatant) const;
+    bool attackFlips(const AnimBody& attacker, const AnimBody& target) const;  // whether the attacker faces right
+    bool magitekMode() const;  // anyone rides an armor: the whole party does (wMagitekModeEnabled)
+    void revealPopup();
+    int advanceHp(int target, int delta);
     int messageTimer_ = 0;
     int frames_ = 0;
     int active_ = -1, command_ = 0, target_ = FF6_BATTLE_PARTY_SLOTS;

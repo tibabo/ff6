@@ -54,6 +54,14 @@ export function readCharProp(rom) {
   return Buffer.from(rom.subarray(CHAR_PROP, CHAR_PROP + CHAR_PROP_COUNT * CHAR_PROP_BYTES));
 }
 
+// The names that the commands char_name give (CharName), 6 letters of the menus each; the ones of the actors from 0 on.
+const CHAR_NAMES = 0x0478c0;
+export const CHAR_NAME_BYTES = 6;
+
+export function readCharNames(rom) {
+  return Buffer.from(rom.subarray(CHAR_NAMES, CHAR_NAMES + CHAR_PROP_COUNT * CHAR_NAME_BYTES));
+}
+
 export function readItemProp(rom) {
   return Buffer.from(rom.subarray(ITEM_PROP, ITEM_PROP + ITEM_PROP_COUNT * ITEM_PROP_BYTES));
 }
@@ -71,5 +79,5 @@ export function buildRulesData(rom, version) {
   const header = Buffer.alloc(12);
   header.write(RULES_MAGIC, 0, 8, 'ascii');
   header.writeUInt32LE(version, 8);
-  return Buffer.concat([header, readCharProp(rom), readItemProp(rom), readLevelUp(rom), readShopProp(rom), readAbilityLevels(rom), readMagicProp(rom), readGenjuProp(rom)]);
+  return Buffer.concat([header, readCharProp(rom), readItemProp(rom), readLevelUp(rom), readShopProp(rom), readAbilityLevels(rom), readMagicProp(rom), readGenjuProp(rom), readCharNames(rom)]);
 }

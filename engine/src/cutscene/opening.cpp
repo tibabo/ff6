@@ -377,6 +377,9 @@ void OpeningScene::openingState() {
 
 void OpeningScene::tick(const InputState& input) {
     core_.pressed = input.confirm;
+    // The console does not finish the work of a turn of the loop (the tasks, the snow, the ground of mode 7) in one frame, so
+    // it only advances every other frame (the counters count the turns, and the music goes on at its own pace).
+    if (phase_ == Phase::Run && ++lag_ % FF6_OPENING_FRAMES_PER_STEP != 0 && !core_.pressed) return;
     for (;;) {
         switch (phase_) {
             case Phase::Run:
