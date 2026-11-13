@@ -52,6 +52,20 @@ int menuPortrait(int character) {
     return character >= 0 && character < FF6_CHAR_COUNT ? kPortraits[character] : -1;
 }
 
+int wornPortrait(int character, int gfx, bool imp) {
+    static constexpr int kOfGfx[FF6_MENU_PORTRAIT_GFX_COUNT] = FF6_MENU_PORTRAIT_OF_GFX;
+    if (imp) return FF6_MENU_PORTRAIT_IMP;
+    if (character == FF6_MENU_PORTRAIT_LOCKE) return FF6_MENU_PORTRAIT_LOCKE;
+    return gfx >= 0 && gfx < FF6_MENU_PORTRAIT_GFX_COUNT ? kOfGfx[gfx] : menuPortrait(character);
+}
+
+int MenuScreen::characterPortrait(int character) const {
+    if (character >= 0 && character < FF6_CHAR_COUNT && characterPortraits_[static_cast<size_t>(character)] >= 0) {
+        return characterPortraits_[static_cast<size_t>(character)];
+    }
+    return menuPortrait(character);
+}
+
 MenuScreen::MenuScreen(const CommonData& common, const MenuData& menu) : common_(common), menu_(menu) {
     pixels_.assign(static_cast<size_t>(FF6_SCREEN_WIDTH) * FF6_SCREEN_HEIGHT * FF6_BYTES_PER_PIXEL, 0);
 }

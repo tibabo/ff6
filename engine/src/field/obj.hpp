@@ -71,6 +71,9 @@ struct Npc {
     int tileY() const { return posY >> 12; }
     bool aligned() const { return (posX & (FF6_OBJ_TILE_SUBPIXELS - 1)) == 0 && (posY & (FF6_OBJ_TILE_SUBPIXELS - 1)) == 0; }
     bool blocks() const { return enabled && visible && !prop.special; }
+    // InitNPCMap: in the object map, where it stops the party and can be talked to; not one that scrolls with bg2 or whose
+    // sprite priority is not the normal one (a save point, which the party walks onto).
+    bool solid() const { return blocks() && !prop.scrollBg2 && prop.order == FF6_NPC_ORDER_NORMAL; }
     bool topIsAbove() const;
     bool bottomIsAbove() const;
 };

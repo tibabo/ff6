@@ -148,7 +148,7 @@ bool Objects::occupied(int tileX, int tileY) const {
     tileX = wrapX(tileX);
     tileY = wrapY(tileY);
     for (const Npc& npc : npcs_) {
-        if (npc.blocks() && covers(npc, tileX, tileY)) return true;
+        if (npc.solid() && covers(npc, tileX, tileY)) return true;
     }
     for (const Npc& character : chars_) {
         if (character.blocks() && character.map == mapId_ && covers(character, tileX, tileY)) return true;
@@ -160,7 +160,7 @@ Npc* Objects::npcAt(int tileX, int tileY) {
     tileX = wrapX(tileX);
     tileY = wrapY(tileY);
     for (Npc& npc : npcs_) {
-        if (npc.blocks() && covers(npc, tileX, tileY)) return &npc;
+        if (npc.solid() && covers(npc, tileX, tileY)) return &npc;
     }
     return nullptr;
 }

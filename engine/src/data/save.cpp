@@ -86,6 +86,7 @@ std::string saveToJson(const SaveState& state) {
         out << "null";
     }
     out << ",\n  \"airship\": {\"x\": " << state.airshipX << ", \"y\": " << state.airshipY << ", \"doomGaze\": " << state.doomGazeCounter << "}";
+    out << ",\n  \"playFrames\": " << state.playFrames;
     out << ",\n  \"config\": ";
     appendList(out, std::vector<int>(state.config.begin(), state.config.end()));
     if (!state.names.empty()) {
@@ -213,6 +214,7 @@ SaveState saveFromJson(const std::string& text) {
         state.airshipY = number(*airship, "y", 0, FF6_WORLD_SIZE - 1);
         state.doomGazeCounter = number(*airship, "doomGaze", 0, 255);
     }
+    if (root.find("playFrames")) state.playFrames = number(root, "playFrames", 0, FF6_SAVE_MAX_PLAY_FRAMES);
     if (root.find("config")) {
         const std::vector<int> config = ids(root, "config", FF6_BYTE_VALUES);
         if (config.size() != state.config.size()) throw std::runtime_error("save: there must be 3 config bytes");

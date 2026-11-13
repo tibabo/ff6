@@ -286,6 +286,7 @@ void AttackAnimPlayer::begin(const AnimBody& attacker, bool flipped) {
     for (AnimTint& tint : tints_) tint = AnimTint();
     for (AnimWave& wave : waves_) wave = AnimWave();
     for (AnimBlend& blend : blends_) blend = AnimBlend();
+    fieldBlend_ = AnimBlend();
     for (AnimCycle& turn : cycles_) turn = AnimCycle();
     circle_ = Circle();
     w12_ = w34_ = -1;
@@ -308,6 +309,7 @@ void AttackAnimPlayer::begin(const AnimBody& attacker, bool flipped) {
     mainLayers_ = kMainLayersAll;
     spritePriority_ = 3;
     bg3High_ = true;
+    bg1Monsters_ = -1;
     rotateScale_ = 0xFF;
     bg1Base_[0] = bg1Base_[1] = bg1Cur_[0] = bg1Cur_[1] = 0;
     bg1Shift_[0] = bg1Shift_[1] = bg3Shift_[0] = bg3Shift_[1] = 0;
@@ -459,6 +461,11 @@ void AttackAnimPlayer::addAttack(int attack, const AnimBody& attacker, const std
         break;
     }
     const int initType = prop.init & 0x7F;
+    static constexpr int kOwnBg1[] = FF6_ATTACK_INITS_TARGET_BG1;
+    if (std::find(std::begin(kOwnBg1), std::end(kOwnBg1), initType) != std::end(kOwnBg1)) {
+        // ANIM_TYPE $1d (MonstersToBG1): only the monster that it aims at stays on bg1, the others become sprites; none for a character
+        bg1Monsters_ = !targets.empty() && targets.front().monster ? 1 << targets.front().slot : 0;
+    }
     if (initType == 0x4E) paused_[0] = paused_[2] = true;  // the beams: the flare and the glow wait for the armor to be in place
     if (initType == FF6_ATTACK_INIT_JUSTICE || initType == FF6_ATTACK_INIT_POSSESS) bg3High_ = false;
     if (initType == FF6_ATTACK_INIT_JUSTICE) {
@@ -734,6 +741,7 @@ void AttackAnimPlayer::setBlends(int cgadsub) {
     for (int layer = 0; layer < 3; ++layer) {
         blends_[layer] = (cgadsub & masks[layer]) ? AnimBlend{true, (cgadsub & 0x80) != 0, (cgadsub & 0x40) != 0} : AnimBlend();
     }
+    fieldBlend_ = (cgadsub & 0x02) ? AnimBlend{true, (cgadsub & 0x80) != 0, (cgadsub & 0x40) != 0} : AnimBlend();
 }
 
 // Window 2 is the circle; window 1 is empty. A layer with a window enabled is hidden where the window mask is set, and the
@@ -1254,14 +1262,14 @@ void AttackAnimPlayer::special(Thread& thread, const uint8_t* code, size_t at) {
             break;
         case 0x7E: if (!thread.target.monster) shifts_[bodyIndex(thread.target)].flipY = !shifts_[bodyIndex(thread.target)].flipY; break;
         case 0x7F: for (int slot = 4; slot < 10; ++slot) shifts_[slot].hidden = true; break;  // every monster is hidden
-        case 0x80: {  // the monsters fade: the colors named take a little more away at each use (the boss dying)
-            AnimTint& tint = tints_[kTintMonsters];
+        case 0x80: {  // the monsters fade (the boss dying): DecPal takes the offset of each color named away, which grows by the amount
+            AnimTint& tint = tints_[kTintMonsters];  // (_c1eabb: the bit 0x10 makes it shrink instead)
             const int flags = code[at + 2], amount = flags & 0x0F;
-            if (!(flags & 0x10)) break;
+            const bool lessened = (flags & 0x10) != 0;
             int* parts[3] = {&tint.r, &tint.g, &tint.b};
             const bool affected[3] = {(flags & 0x80) != 0, (flags & 0x40) != 0, (flags & 0x20) != 0};
             for (int part = 0; part < 3; ++part) {
-                if (affected[part]) *parts[part] = std::min(*parts[part] + amount, kTintMax);
+                if (affected[part]) *parts[part] = std::clamp(*parts[part] + (lessened ? -amount : amount), 0, kTintMax);
             }
             tint.subtract = true;
             tint.active = tint.r || tint.g || tint.b;
@@ -1391,6 +1399,7 @@ void AttackAnimPlayer::command(Thread& thread, const uint8_t* code, size_t at) {
         }
         case 0xD4: {  // color math: with the subscreen, the layers it names are added to (or taken from) what is under them
             for (AnimBlend& blend : blends_) blend = AnimBlend();
+    fieldBlend_ = AnimBlend();
             fixedMath_ = (code[at + 1] & 0x02) ? 0 : code[at + 2];
             if (code[at + 1] & 0x02) {
                 setBlends(code[at + 2]);
@@ -1436,6 +1445,7 @@ void AttackAnimPlayer::command(Thread& thread, const uint8_t* code, size_t at) {
                 int pose = code[at + 1 + (thread.flipped ? 1 : 0)];
                 shift.flip = pose >= kFlipped;
                 shift.pose = shift.flip ? pose - kFlipped : pose;
+                if (shift.pose == FF6_CHAR_FRAME_NONE) shift.pose = -1, shift.flip = false;  // NONE: no frame of its own (UpdateCharFrame)
                 shift.action = 0;
             }
             break;

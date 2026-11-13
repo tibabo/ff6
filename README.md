@@ -157,6 +157,7 @@ Le rendu des combats et des animations est decrit dans
 l'emulateur Ares ; `--ares-colors 1` (ou F8) assombrit les demi-teintes comme
 Ares (courbe gamma de 1,15). Les deux restent desactives par defaut et ne
 changent pas les captures.
+Sur macOS, le menu Display de la barre de menus coche ou decoche les deux.
 
 Sans option de depart (`--map`, `--party`, `--battle`, `--load`, `--stock`),
 le jeu commence comme sur la console : l'ecran de licence, le titre (l'orage
@@ -210,8 +211,19 @@ Controles :
 | Annuler | Z / Retour arriere | B |
 | Echelle entiere | F10 | |
 | Sauvegarder | F5 | |
+| Emplacement de sauvegarde rapide | 1 a 9 | |
+| Sauvegarde rapide / la recharger | F6 / F7 | |
+| Pixels 8:7 / couleurs d'Ares | F9 / F8 | |
 | Plein ecran | F11 / Alt+Entree | |
 | Quitter | Echap | |
+
+La sauvegarde rapide (F6, ou le menu Game sur macOS) ecrit l'emplacement choisi avec les
+touches 1 a 9 (`ff6-quick-1.json` a `ff6-quick-9.json`, ou le nom de `--quick` numerote
+de la meme facon) et F7 le recharge sur place, sans relancer le jeu : pratique pour
+rejouer un passage. Elle ne se fait que quand le groupe marche librement (pas
+d'evenement, de combat, de menu ni de dialogue), parce qu'elle garde ce que garde une
+sauvegarde : la carte, la case, le groupe, les bits d'evenement, l'inventaire et le temps
+de jeu du menu (`playFrames` ; une sauvegarde plus ancienne repart de 0:00).
 
 La fenetre est redimensionnable. L'image 256 x 224 est agrandie au plus proche
 avec des bandes noires. Les manettes reconnues par SDL (Xbox, PlayStation,
@@ -361,7 +373,8 @@ Limites actuelles :
   commande attend son delai (`CmdDelayTbl`), puis son tour dans la file des actions,
   jouees une a une, et la jauge de son personnage reste pleine jusqu'a la fin de
   l'action ; les monstres passent par la meme file ; les menus s'ouvrent dans l'ordre
-  ou les jauges se sont remplies, aussi pendant les actions. Les nombres au hasard
+  ou les jauges se sont remplies, aussi pendant les actions, avec le son du jeu
+  (`PlayerSfx`, son systeme 0x28). Les nombres au hasard
   viennent de la table du jeu (`RNGTbl`). Avant d'agir, un monstre clignote en noir a
   contour blanc ; le nom d'une attaque reste seul la duree de la vitesse des messages
   avant l'animation, et un personnage qu'une animation a emmene revient en marchant.
@@ -431,8 +444,12 @@ Limites actuelles :
   retour a cette sauvegarde ; sans sauvegarde, elle remet le groupe debout avec
   tous ses PV. La musique du combat vient des proprietes du combat (theme de
   combat, bataille decisive, bataille acharnee, Returners, Save Them, Dancing
-  Mad) ; le morceau de la carte attend et revient apres, et une victoire joue
-  la fanfare, sauf pour les combats qui n'en ont pas ou quand Shadow part. Le
+  Mad) ; une victoire joue la fanfare des qu'elle commence (77 images apres la
+  derniere action), avec la danse des personnages (un tour sur eux-memes puis les bras
+  leves en boucle), sauf pour les combats qui n'en ont pas ou quand Shadow part, et la fanfare s'eteint avec l'ecran a la
+  sortie. Chaque carte joue son morceau a son chargement et au retour d'un combat
+  (`PlayMapSong` : octet 28 de ses proprietes, ou le dernier morceau des evenements
+  quand le bit 0x1CC le demande ; une carte sans morceau garde celui qui joue). Le
   combat conditionnel du jeu (0x1C4 devient 0x1A8 avec son interrupteur) est lu.
   Quand quelqu'un a le statut Magitek, tout le groupe est dessine dans son armure
   (les quatre images de `MagitekGfxPtrs`, 32 x 32 pixels devant le passager, qui
@@ -741,7 +758,8 @@ genere par `build-pack`, pour leurs tests sur les vraies donnees.
 - Combat : les scintillements de la glace de Tritoch (premiere scene) colorent le premier monstre, sans que le jeu ait ete consulte sur lequel ; le tremblement du dernier Kefka n'est que de 0 a 2 pixels sur le monstre, sans le defilement de bg1 que le jeu cache ; les effets d'animation encore approches (§ 10 de `docs/rendu-et-animations.md`) ; les objets utilisables jouent leur animation (table `ItemAnimPtrs`).
 - Audio natif sans emulation du SPC700 : mode mono.
 - Interface adaptable aux ecrans larges et remappage des commandes.
-- Gestion des graphismes HD.
+- Gestion des graphismes HD : le plan (decors en 3D, personnages en 2D, sprites
+  haute resolution indexes) est dans [docs/rendu-hd-2d.md](docs/rendu-hd-2d.md).
 - Validation du moteur sous Windows.
 
 Les outils ont ete executes sur macOS avec Node.js 25.8.1. Le code n'utilise

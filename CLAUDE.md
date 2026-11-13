@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Moteur natif C++17 de Final Fantasy VI (`engine/`) et outils Node qui génèrent ses données (`tools/`). Chantier en cours : reproduire fidèlement le premier combat de Narshe enregistré dans `narshee-first-battle.mov`. Les écarts sont listés dans `bugs.md` (B01–B34) : tous sont cochés ; les approximations (durées mesurées et non portées, index de départ du hasard) y sont notées.
+Moteur natif C++17 de Final Fantasy VI (`engine/`) et outils Node qui génèrent ses données (`tools/`). Chantier en cours : reproduire fidèlement le premier combat de Narshe enregistré dans `narshee-first-battle.mov`. Les écarts sont listés dans `bugs.md` (B01–B47) : tous sont cochés ; les approximations (durées mesurées et non portées, index de départ du hasard) y sont notées.
 
 Skills du projet (`.claude/skills/`) : `ff6-comparer-video` (mesurer un écart avec l'enregistrement), `ff6-porter-desassemblage` (trouver la règle du jeu dans everything8215/ff6 et la ROM), `ff6-boucle-combat` (déroulé et minutage d'un combat dans le moteur).
 
@@ -50,7 +50,7 @@ Prérequis : `python3` avec `numpy` et `Pillow`, `clang++`, `ffmpeg` (seulement 
 - Compile d'abord `dump.cpp` contre `build/engine/lib*.a` (`build.sh`, erreurs dans `build.out`) : `cmake --build build/engine` doit être passé.
 - Écrit `NOM.rgb` (images PREMIERE..DERNIERE, 256×224×3 brut, indice = image − PREMIERE), `NOM.log` (état du combat à chaque image), `NOM.sum` (résumé du journal par `logsum.py` : modes, messages, PV, personnages prêts) et `NOM.snd`.
 - `1` en 4e argument = mode Active (le défaut du moteur est Wait, qui fige l'ATB dans les menus ; la vidéo se joue en Active) ; `a-b:n` = appuyer sur A toutes les n images de a à b.
-- Variables d'environnement : `FF6_ACTIVE`, `FF6_AUTO` (les deux arguments ci-dessus), **`FF6_AUTO_MENU=1`** (n'appuie que dans les menus du combat ; sans elle, un A pendant une animation ou un message la coupe), `FF6_LOG` (chemin du journal), `FF6_BATTLE_SPEED` (vitesse brute de la config).
+- Variables d'environnement : `FF6_ACTIVE`, `FF6_AUTO` (les deux arguments ci-dessus), **`FF6_AUTO_MENU=1`** (n'appuie que dans les menus du combat ; un A ne coupe plus ni animation ni message, mais ouvre les menus plus tôt), `FF6_LOG` (chemin du journal), `FF6_BATTLE_SPEED` (vitesse brute de la config).
 - Route d'une nouvelle partie jusqu'au premier combat : copier `.scratch/drv/try14.txt` (`900 A`, `1000 A`, `10300 A`, `10694 A`, `10823-11010 U`, `11132 A`). Repères en Active (ils bougent avec les correctifs, voir `NOM.sum`) : combat lancé f11160, mosaïque f11161–11191, noir jusqu'à f11296, fondu du combat f11297–11333, temps du combat à f11341, gardes en place à f11362 ; le reste dépend du hasard et des appuis (voir `NOM.sum`). Le pilote (`FF6_AUTO_MENU`) n'appuie que si aucun message n'est affiché : il laisse traîner les menus pendant les actions. Les messages qui attendent une touche (l'expérience) demandent un appui explicite dans le script.
 - `dump.cpp` lit des membres privés de `Game` (`#define private public`) : s'ils sont renommés, il ne compile plus. Lancement direct : `.scratch/drv/dump PACK SCRIPT PREMIERE DERNIERE PAS SORTIE.rgb [sons.log|-] [map:N|battle:N]`.
 

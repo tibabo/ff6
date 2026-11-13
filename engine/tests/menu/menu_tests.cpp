@@ -55,6 +55,18 @@ void testMenu() {
     const ff6::MenuData menu = syntheticMenu();
     const ff6::CommonData common = syntheticCommon();
 
+    // The portrait follows the sprite that the character wears (LoadPortraitGfx): Vicks and Wedge (14 and 15) wear the
+    // soldier's (sprite 14), Locke keeps his own, an imp has the imp's; without a sprite the character's own one stays.
+    CHECK(ff6::wornPortrait(14, 14, false) == 14 && ff6::wornPortrait(15, 14, false) == 14);
+    CHECK(ff6::wornPortrait(1, 19, false) == 1 && ff6::wornPortrait(0, 0, true) == FF6_MENU_PORTRAIT_IMP);
+    CHECK(ff6::wornPortrait(0, 18, false) == 0 && ff6::wornPortrait(6, 26, false) == 6 && ff6::wornPortrait(14, -1, false) == ff6::menuPortrait(14));
+    ff6::MenuScreen portraits(common, menu);
+    std::array<int, FF6_CHAR_COUNT> worn;
+    worn.fill(-1);
+    worn[15] = 14;
+    portraits.setCharacterPortraits(worn);
+    CHECK(portraits.characterPortrait(15) == 14 && portraits.characterPortrait(14) == ff6::menuPortrait(14));
+
     // The text of the menus is made of the codes of the font: letters, digits and symbols.
     CHECK(ff6::menuCode('A') == 0x80 && ff6::menuCode('Z') == 0x99 && ff6::menuCode('a') == 0x9A && ff6::menuCode('z') == 0xB3);
     CHECK(ff6::menuCode('0') == 0xB4 && ff6::menuCode('9') == 0xBD && ff6::menuCode('!') == 0xBE && ff6::menuCode('/') == 0xC0);

@@ -77,6 +77,13 @@ public:
     // How many numbers of damage are jumping over the combatants (the game keeps four at most).
     size_t numeralCount() const { return numerals_.size(); }
     // Whether everything that happened has been shown: no message, animation or number is left to come.
+    // The battle is won and its end has begun (WinBattle): the fanfare plays now.
+    // The name of an item as a message writes it (DlgTextCmd_0e): no icon, no padding.
+    std::vector<uint8_t> messageItemName(int item) const;
+    // The way a character faces (w7e7b10); one that attacks a monster turns to it first (magic_front).
+    bool facesRight(int slot) const;
+    void faceTarget(int actor, int target);
+    bool victoryShown() const { return won() && victoryFrames_ >= FF6_BATTLE_WIN_START; }
     bool resolved() const { return messages_.empty() && messageTimer_ == 0 && pendingPopup_.target < 0 && !animating(); }
     // Ends the battle and lets go of it: the party keeps what it won.
     void close();
@@ -97,7 +104,11 @@ private:
     void queue(const Codes& message, int target = -1, int damage = -1);
     void queueWith(const Codes& message, int target, int damage, int effect, int actor, int subject, int element, bool flash);
     void collectEvents();
-    void advanceMessage(bool skip);
+    void advanceMessage(bool pressed);
+    bool sceneHolds() const;  // a battle event with its dialogs is shown: the battle loop waits for it
+    static Codes dialogCodes(const std::vector<std::string>& lines);
+    static int letterCount(const Codes& codes);
+    int messageWait() const;  // MsgSpeedTbl: how long a message stays at the speed of the config
     void finish();
     bool keepsMenu();
     bool presenting() const;  // a message, a number or an animation is being shown
@@ -165,7 +176,7 @@ private:
     int monsterTop(size_t monster) const;
     int characterTop(int slot) const;
     int characterX(int slot) const;
-    bool facesRight(int slot) const;
+    void resetFacing();
     Codes statusName(uint32_t status) const;
 
     MenuScreen& screen_;
@@ -206,14 +217,16 @@ private:
         int attack = -1;  // the attack whose animation plays when the message comes, on these combatants
         int sfx = -1;  // a sound effect that plays when the message comes
         std::vector<int> animTargets{};
+        int entryBatch = -1;  // F5: the monsters of one command come or go together (entering, or not)
+        bool entering = false;
         std::vector<SceneThread> sceneThreads{};  // the scripts of the characters of a scene of a battle event, and its attacks
         std::vector<SceneAttack> sceneAttacks{};
         bool leftHand = false;  // a blow: the weapon is the one in the left hand; `attack` is its animation
         bool instant = false;  // it has no text and takes no time: the next message comes at once
         bool moves = false;  // the characters stay where the animation leaves them, in the pose that it gives them (as after a scene)
         int wait = -1;  // how many frames it stays once its number shows, -1 for the usual time
-        bool fixed = false;  // the button does not cut it short
         bool keyWait = false;  // it stays until the button is pressed
+        bool reveal = false;  // a dialog: its letters come one a frame (DrawLargeText), on lines that FF6_BATTLE_LINE_BREAK parts
         bool largeName = false;  // the name of the special attack of a monster, in the large font
     };
     void trigger(const Message& message);
@@ -228,6 +241,9 @@ private:
     BattleImage plane_;
     int planeCycle_ = -1;
     std::vector<uint8_t> bgPixels_, objectPixels_, behindPixels_;  // the field, what stands on it, and what bg1 covers; RGBA, field size
+    // What stands on the field apart, for the subscreen: the sprites (characters and monsters), and the monsters that an
+    // animation copied to bg1 (ANIM_TYPE $1d, MonstersToBG1: the one it aims at).
+    std::vector<uint8_t> charPixels_, monsterPixels_;
     std::vector<uint8_t> frontPixels_;  // the combatants that a script put in front of bg1
     bool frontShown_ = false;
     std::array<std::vector<uint8_t>, 3> layerPixels_;  // the layers of background of the animation, apart (1 and 2)
@@ -236,8 +252,16 @@ private:
     Message castPending_;
     std::array<int, FF6_BATTLE_COMBATANTS> poseTimer_{}, poseValue_{}, stepTimer_{}, blinkTimer_{}, fadeTimer_{}, escapeTimer_{};
     std::array<bool, FF6_BATTLE_COMBATANTS> dying_{};  // a monster that fell stays until its message fades it
+    // F5: a monster that leaves stays on the screen until its animation is over (1 waits for it, 2 plays it); one that comes stays
+    // away until its animation starts.
+    std::array<int, FF6_BATTLE_COMBATANTS> leaving_{};
+    std::array<bool, FF6_BATTLE_COMBATANTS> arriving_{};
+    int entryBatch_ = 0;
     int flashTimer_ = 0, flashColor_[3] = {255, 255, 255};
     int animation_ = 0;  // frames, for what moves by itself
+    std::array<bool, FF6_BATTLE_PARTY_SLOTS> facing_{};  // the characters that face right (w7e7b10)
+    int victoryFrames_ = 0;  // frames since the battle was won and the victory began to be told: the spin, then the cheer
+    bool won() const { return finishing_ && battle_ && battle_->outcome() == BattleOutcome::Won; }
     int scrollX_ = 0, scrollY_ = 0;  // where the field has scrolled to: the clouds, the waterfall and the trains move
     AnimShift keptShift_[FF6_BATTLE_COMBATANTS];  // how far the animations of the scripts moved a monster for good
     // The echoes of a character (the trail of the quadra slam): where and how it was at the last 8 times that a script asked to keep it.
@@ -282,7 +306,9 @@ private:
     Message blowPending_;
     std::array<std::pair<int, int>, FF6_BATTLE_PARTY_SLOTS> stepFrom_{};  // where the animation left the characters
     int stepBack_ = 0, afterAnim_ = 0;  // frames of their way back, and before the numbers  // frames left of the window of the name of the attack
-    bool currentKeyWait_ = false, currentFixed_ = false;  // of the message that is shown
+    bool currentKeyWait_ = false;  // of the message that is shown
+    bool currentReveal_ = false;
+    int revealed_ = 0;  // the letters of a dialog that are shown so far
     std::vector<Codes> victory_;  // the levels and what was learned, told after the experience
     int messageSpeed_ = FF6_BATTLE_MSG_SPEED_DEFAULT;
     bool gameRandom_ = false;

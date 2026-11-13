@@ -262,7 +262,7 @@ void PartyMenu::draw() {
     if (who >= 0) {
         const PartyMenuCharacter& c = characters_[static_cast<size_t>(who)];
         const int color = (c.status & FF6_ST_DEAD) ? FF6_MENU_BG1_GRAY : FF6_MENU_BG1_DEFAULT;
-        screen_.portrait(kPortraitX, kPortraitY, menuPortrait(who));
+        screen_.portrait(kPortraitX, kPortraitY, screen_.characterPortrait(who));
         drawStatus(c);
         drawText(18, kLevelY, "LV", FF6_MENU_BG1_TEAL);
         drawText(18, kHpY, "HP", FF6_MENU_BG1_TEAL);

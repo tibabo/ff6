@@ -53,7 +53,7 @@ void NameMenu::draw() {
     screen_.window(8, 1, 20, 2);
     screen_.window(9, 5, 18, 2);
     screen_.window(7, 8, 22, 17);
-    screen_.portrait(8, 8, menuPortrait(character_));
+    screen_.portrait(8, 8, screen_.characterPortrait(character_));
     screen_.text(9, 2, "Please enter a name.", Layer::Bg3, FF6_MENU_BG3_DEFAULT);
     std::string shown = name_;
     while (static_cast<int>(shown.size()) < kMaxLength) shown.push_back('_');

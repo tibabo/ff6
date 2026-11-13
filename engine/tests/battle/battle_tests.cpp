@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 
 #include "../check.hpp"
@@ -10,6 +12,10 @@
 #include "state/party_ops.hpp"
 
 namespace {
+
+constexpr int FF6_TEST_PINCER_BATTLE = 14;  // a formation that can come as a pincer attack
+constexpr int FF6_TEST_WHELK_BATTLE = 432;  // Whelk: the shell (50000 hp) and the head, which hides in it
+constexpr int FF6_TEST_WHELK_HEAD = FF6_BATTLE_PARTY_SLOTS + 1;
 
 void testFormulas() {
     CHECK(ff6::invertEvade(0) == 0xFF && ff6::invertEvade(20) == 216 && ff6::invertEvade(128) == 1);
@@ -87,6 +93,25 @@ void testBattle() {
     CHECK(party.gil == battle.reward().gil);
     CHECK(party.characters[0].experience > 0 || battle.reward().exp == 0);
     CHECK(!battle.takeEvents().empty() && battle.takeEvents().empty());
+
+    {  // Whelk: its head hides in the shell and comes out again (F5); when it falls, its last answer (boss_death) ends the battle
+        ff6::PartyState strong = party;
+        ff6::Battle whelk(data, rules, strong, {0}, FF6_TEST_WHELK_BATTLE, 7);
+        bool hid = false, cameBack = false;
+        for (int ticks = 0; ticks < 60000 && whelk.outcome() == ff6::BattleOutcome::Fighting; ++ticks) {
+            whelk.tick();
+            const ff6::Combatant& head = whelk.combatants()[FF6_TEST_WHELK_HEAD];
+            if (head.status & FF6_ST_HIDE) hid = true;
+            else if (hid && head.alive()) cameBack = true;
+            const int ready = whelk.readyCharacter();
+            if (ready >= 0) {
+                if (head.alive()) whelk.fight(ready, FF6_TEST_WHELK_HEAD);
+                else whelk.defend(ready);
+            }
+        }
+        CHECK(hid && cameBack);
+        CHECK(whelk.outcome() == ff6::BattleOutcome::Won && whelk.combatants()[FF6_TEST_WHELK_HEAD].hp == 0);
+    }
 
     // The party that is all at 0 hp has lost before it starts.
     ff6::PartyState dead = party;
@@ -171,14 +196,43 @@ void testBattle() {
         }
     }
     CHECK(lit > 1000);
+    {  // A pincer attack: a character turns to the monster that it attacks, on either side, and stays so
+        bool pincer = false;
+        for (uint32_t seed = 0; seed < 64 && !pincer; ++seed) {
+            view.start(data, rules, played, {0}, FF6_TEST_PINCER_BATTLE, seed, FF6_BATTLE_SPEED_DEFAULT, true);
+            pincer = view.battle()->battleType() == FF6_BATTLE_TYPE_PINCER;
+        }
+        CHECK(pincer);
+        bool left = false, right = false;
+        for (int monster = FF6_BATTLE_PARTY_SLOTS; monster < FF6_BATTLE_COMBATANTS; ++monster) {
+            if (!view.battle()->combatants()[static_cast<size_t>(monster)].alive()) continue;
+            view.faceTarget(0, monster);
+            (view.facesRight(0) ? right : left) = true;
+        }
+        CHECK(left && right);
+    }
+    {  // As in the game, the button does not cut an animation short (Fire Beam goes to its end)
+        const ff6::AttackAnim anim = ff6::loadAttackAnim(pack);
+        view.start(data, rules, played, {0}, 0, 1, FF6_BATTLE_SPEED_DEFAULT, true);
+        view.setAttackAnim(&anim);
+        view.playAnimation(FF6_ATTACK_FIRST_MAGITEK);
+        CHECK(view.animating());
+        for (int frame = 0; frame < 20; ++frame) view.update(press);
+        CHECK(view.animating());
+        for (int frame = 0; frame < 2000 && view.animating(); ++frame) view.update(ff6::InputState());
+        CHECK(!view.animating());
+        view.setAttackAnim(nullptr);
+    }
     view.start(data, rules, played, {0}, 0, 1, FF6_BATTLE_SPEED_DEFAULT, true);
     bool sawCommand = false, sawTarget = false, sawPopup = false, drew = false, sawLate = false, silent = true, numbers = false, fewNumbers = true;
+    bool trimmed = true;
     for (int frame = 0; frame < 60000 && !view.finished(); ++frame) {
         sawCommand = sawCommand || view.mode() == ff6::BattleMode::Command;
         sawTarget = sawTarget || view.mode() == ff6::BattleMode::Target;
         sawPopup = sawPopup || (view.popupTarget() >= 0 && view.popupDamage() > 0);
         numbers = numbers || view.numeralCount() > 0;  // the number that jumps over the target
         fewNumbers = fewNumbers && view.numeralCount() <= 4;
+        trimmed = trimmed && (view.message().empty() || view.message().back() != FF6_BATTLE_NAME_PAD_CODE);  // "Got " has its item
         silent = silent && !(view.popupTarget() >= 0 && view.popupDamage() >= 0 && !view.message().empty());  // the damage has no text: only its number
         sawLate = sawLate || (view.battle()->outcome() == ff6::BattleOutcome::Won && !view.resolved());
         if (frame % 50 == 0 || view.mode() == ff6::BattleMode::Command) {
@@ -190,6 +244,14 @@ void testBattle() {
     CHECK(view.finished() && view.outcome() == ff6::BattleOutcome::Won);
     CHECK(sawCommand && sawTarget && sawPopup && drew && silent && numbers && fewNumbers);
     CHECK(sawLate);  // the blow that wins is shown before the victory
+    CHECK(trimmed);
+    for (int item = 0; item < FF6_ITEM_EMPTY; ++item) {  // a message writes the name of an item without its icon (DlgTextCmd_0e)
+        const uint8_t* raw = menu.itemNames.data() + static_cast<size_t>(item) * FF6_ITEM_NAME_BYTES;
+        const std::vector<uint8_t> name = view.messageItemName(item);
+        CHECK(name.size() <= FF6_ITEM_NAME_BYTES - FF6_ITEM_ICON_BYTES);
+        CHECK(std::equal(name.begin(), name.end(), raw + FF6_ITEM_ICON_BYTES));
+        if (raw[FF6_ITEM_ICON_BYTES] != FF6_BATTLE_NAME_PAD_CODE) CHECK(!name.empty() && name.back() != FF6_BATTLE_NAME_PAD_CODE);
+    }
     CHECK(played.gil == party.gil + view.battle()->reward().gil && played.characters[0].experience >= party.characters[0].experience);
     bool selected = false;
     for (const auto& command : sound.commands) selected = selected || command.command == FF6_SFX_MENU_SELECT;

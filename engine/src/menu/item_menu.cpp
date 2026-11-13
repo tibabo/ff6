@@ -292,12 +292,11 @@ void ItemMenu::drawTarget() {
     const uint8_t* name = screen_.data().itemNames.data() + static_cast<size_t>(chosen.id) * FF6_ITEM_NAME_BYTES;
     screen_.codes(2, 2, std::vector<uint8_t>(name, name + FF6_ITEM_NAME_BYTES), Layer::Bg3, FF6_MENU_BG3_DEFAULT);
     screen_.text(2, 6, ":" + number(chosen.quantity, 2), Layer::Bg3, FF6_MENU_BG3_DEFAULT);
-    static const int kPortraits[FF6_CHAR_COUNT] = FF6_MENU_PORTRAITS_OF_CHARACTER;
     for (size_t slot = 0; slot < party_.size() && slot < FF6_PARTY_SIZE; ++slot) {
         const MenuCharacter& c = party_[slot];
         const int row = 3 + static_cast<int>(slot) * FF6_MENU_BLOCK_STEP;
         if (c.id >= 0 && c.id < FF6_CHAR_COUNT) {
-            screen_.portrait(FF6_ITEM_TARGET_PORTRAIT_X, FF6_MENU_PORTRAIT_Y + static_cast<int>(slot) * FF6_MENU_PORTRAIT_STEP, kPortraits[c.id]);
+            screen_.portrait(FF6_ITEM_TARGET_PORTRAIT_X, FF6_MENU_PORTRAIT_Y + static_cast<int>(slot) * FF6_MENU_PORTRAIT_STEP, screen_.characterPortrait(c.id));
         }
         screen_.text(16, row, characterName(c.id), Layer::Bg1, FF6_MENU_BG1_DEFAULT);
         screen_.text(18, row + 2, "LV", Layer::Bg1, FF6_MENU_BG1_TEAL);

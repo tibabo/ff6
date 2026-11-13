@@ -238,8 +238,11 @@ void testGame() {
         const auto& commands = logged.commands;
         const std::vector<std::array<int, 3>> expected = {
             {FF6_SOUND_PLAY_SONG, 0x17, 0xFF}, {FF6_SOUND_SET_SONG_VOLUME, 0x60, 0x00},
-            {FF6_SOUND_PAUSE_SONG, 0x38, 0xFF}, {FF6_SOUND_PLAY_SONG, 0x17, 0x00}, {FF6_SOUND_SET_SONG_VOLUME, 0x20, 0xFF}};
-        CHECK(commands == expected);  // the town song, a fade out, Nighty Night, then the town song fading in
+            {FF6_SOUND_PAUSE_SONG, 0x38, 0xFF}, {FF6_SOUND_PLAY_SONG, 0x38, 0xFF}, {FF6_SOUND_PLAY_SONG, 0x17, 0x00},
+            {FF6_SOUND_SET_SONG_VOLUME, 0x20, 0xFF}};
+        // The town song, a fade out, Nighty Night (asked for again by PlayMapSong when the room is loaded, which the sound program
+        // ignores), then the town song fading in.
+        CHECK(commands == expected);
         CHECK(doorOpened);  // the event opens the door of the room, with the tiles of the open door
         CHECK(inn.party().gil < 1000 && inn.party().gil > 0);
         CHECK(program.currentSong() == 0x17);
@@ -333,6 +336,7 @@ void testGame() {
         const ff6::SaveState again = restored.saveState();
         CHECK(again.eventBits == saved.eventBits && again.battleFlags == saved.battleFlags);
         CHECK(again.activeParty == saved.activeParty && again.spritePalettes == saved.spritePalettes);
+        CHECK(saved.playFrames > 0 && again.playFrames == saved.playFrames + 40);  // the time played goes on
         for (size_t i = 0; i < saved.characters.size(); ++i) {
             CHECK(again.characters[i].enabled == saved.characters[i].enabled);
             CHECK(again.characters[i].party == saved.characters[i].party && again.characters[i].slot == saved.characters[i].slot);

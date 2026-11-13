@@ -44,6 +44,15 @@ void testObj() {
     CHECK(objects.npcByObject(0x13) == nullptr && objects.npcByObject(0x0F) == nullptr);
     CHECK(objects.npcs()[0].visible && !objects.npcs()[1].enabled && !objects.npcs()[1].visible);
     CHECK(objects.occupied(3, 3) && !objects.occupied(6, 6) && !objects.occupied(9, 9));
+    {  // InitNPCMap: an npc of high sprite priority (a save point) is drawn but the party walks onto it and cannot talk to it
+        ff6::MapData points = test::makeMap();
+        std::vector<uint8_t> point = test::npcBytes(4, 4, 5, 1, 0, ff6::Up);
+        point[7] |= FF6_NPC_ORDER_HIGH << FF6_NPC_ORDER_SHIFT;
+        points.npcProps.insert(points.npcProps.end(), point.begin(), point.end());
+        ff6::Objects field;
+        field.init(points, bits);
+        CHECK(field.npcs()[0].blocks() && !field.npcs()[0].solid() && !field.occupied(4, 4));
+    }
     CHECK(objects.npcs()[0].frame == ff6::stopFrame(ff6::Up) && objects.npcs()[0].posX == 3 * kTile);
 
     // The party faces the npc, also across a counter tile but not across a wall.

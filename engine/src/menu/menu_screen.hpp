@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include <cstdint>
 #include <map>
 #include <string>
@@ -56,6 +58,9 @@ public:
     void hand(int x, int y, bool flip = false);  // `flip`: turned to the left
     // A portrait of the game, 40x40 pixels, with its upper left corner at a pixel of the screen.
     void portrait(int x, int y, int portrait);
+    // The portraits of the characters as the game shows them (by the sprites that they wear), -1 where menuPortrait decides.
+    void setCharacterPortraits(const std::array<int, FF6_CHAR_COUNT>& portraits) { characterPortraits_ = portraits; }
+    int characterPortrait(int character) const;
     // The sprite of a character on the map, facing down, with its upper left corner at a pixel of the screen; `palette` is a
     // sprite palette of the data pack.
     void mapSprite(int x, int y, int gfx, int palette);
@@ -87,6 +92,12 @@ private:
     const uint16_t* bg3Palette_ = nullptr;
     uint16_t fontColor_ = FF6_CONFIG_FONT_COLOR_DEFAULT;
     bool fontColorSet_ = false;
+    std::array<int, FF6_CHAR_COUNT> characterPortraits_ = filledPortraits();
+    static std::array<int, FF6_CHAR_COUNT> filledPortraits() {
+        std::array<int, FF6_CHAR_COUNT> none;
+        none.fill(-1);
+        return none;
+    }
 };
 
 // The code of a character of the text of the menus, FF6_MENU_CODE_SPACE for one that the font does not have.
@@ -98,6 +109,8 @@ void setCharacterName(int id, const std::string& name);
 std::string customCharacterName(int id);
 // The portrait of a character of the game, from 0 for Terra.
 int menuPortrait(int character);
+// LoadPortraitGfx: the portrait of character `character` that wears the sprite `gfx` (-1 when unknown), an imp or not.
+int wornPortrait(int character, int gfx, bool imp);
 // A portrait as an RGBA image of FF6_MENU_PORTRAIT_SIZE square pixels, transparent where its color is 0.
 std::vector<uint8_t> buildPortraitImage(const MenuData& menu, int portrait);
 

@@ -197,7 +197,7 @@ void CharacterMenu::drawName(int x, int row) {
 void CharacterMenu::drawStatus() {
     const MenuCharacter& c = character_;
     screen_.text(2, 2, "Status", Layer::Bg3, FF6_MENU_BG3_TEAL);
-    screen_.portrait(FF6_MENU_PORTRAIT_X, 40, menuPortrait(c.id));
+    screen_.portrait(FF6_MENU_PORTRAIT_X, 40, screen_.characterPortrait(c.id));
     drawName(10, 5);
     screen_.text(10, 7, "LV", Layer::Bg1, FF6_MENU_BG1_TEAL);
     screen_.text(10, 8, "HP", Layer::Bg1, FF6_MENU_BG1_TEAL);

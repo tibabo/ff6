@@ -201,14 +201,13 @@ void FieldMenu::updateOrder(int direction, const InputState& input) {
 void FieldMenu::drawCharacter(const MenuCharacter& character, int slot) {
     const int row = 3 + slot * FF6_MENU_BLOCK_STEP;
     using Layer = MenuScreen::Layer;
-    static const int kPortraits[FF6_CHAR_COUNT] = FF6_MENU_PORTRAITS_OF_CHARACTER;
     const bool swapping = orderAnim_ == OrderAnim::Swap && animFrames_ > FF6_MENU_ORDER_ROW_FRAMES &&
                           (slot == animSlots_[0] || slot == animSlots_[1]);
     if (swapping) return;  // the block of the old place has gone and the new one has not come yet
     int portraitX = FF6_MENU_PORTRAIT_X + (character.backRow ? FF6_MENU_PORTRAIT_BACK_ROW_DX : 0);
     if (orderAnim_ == OrderAnim::Row && slot == animSlots_[0]) portraitX += character.backRow ? -animFrames_ : animFrames_;
     if (character.id >= 0 && character.id < FF6_CHAR_COUNT) {
-        screen_.portrait(portraitX, FF6_MENU_PORTRAIT_Y + slot * FF6_MENU_PORTRAIT_STEP, kPortraits[character.id]);
+        screen_.portrait(portraitX, FF6_MENU_PORTRAIT_Y + slot * FF6_MENU_PORTRAIT_STEP, screen_.characterPortrait(character.id));
     }
     screen_.text(10, row + 2, "LV", Layer::Bg1, FF6_MENU_BG1_TEAL);
     screen_.text(10, row + 3, "HP", Layer::Bg1, FF6_MENU_BG1_TEAL);

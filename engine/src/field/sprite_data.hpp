@@ -24,7 +24,10 @@ std::vector<uint8_t> buildSpriteStripColors(const CommonData& common, int gfx, c
 // Copies `height` rows of a frame from the strip to the screen at (x, y), skipping transparent pixels and
 // anything outside the screen. The screen is RGBA, FF6_SCREEN_WIDTH x FF6_SCREEN_HEIGHT.
 void drawSpriteRows(uint8_t* screen, const std::vector<uint8_t>& strip, int frame, int firstRow, int height, int x,
-                    int y);
+                    int y, bool flip = false);
+// UpdateObjFrame for an npc with an animation of its own (bits 5-7 of its last byte): the frame of the strip at `counter` (the
+// frame counter of the game), and whether it is mirrored then.
+int animatedFrame(int animFrame, int animType, int speed, uint32_t counter, bool& flip);
 
 // A sprite of the vehicle graphics, as the word of the object memory gives it (tile, palette, flip bit 0x4000): an RGBA image of
 // FF6_VEHICLE_SPRITE_SIZE square pixels, painted with a sprite palette.

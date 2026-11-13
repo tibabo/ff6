@@ -26,6 +26,9 @@ public:
     // The event variables (words), the mask of characters or of a comparison that 0xBE chooses by, and the timers.
     int variable(int id) const { return variables_[static_cast<size_t>(id) % variables_.size()]; }
     void setVariable(int id, int value) { variables_[static_cast<size_t>(id) % variables_.size()] = static_cast<uint16_t>(value); }
+    // $1f80: the last song that an event asked for, which the map plays again when the event bit FF6_EVENT_BIT_SONG_OVERRIDE is set.
+    int eventSong() const { return eventSong_; }
+    void setEventSong(int song) { eventSong_ = song; }
     unsigned characterMask() const { return mask_; }
     void setCharacterMask(unsigned mask) { mask_ = static_cast<uint16_t>(mask); }
     // A timer counts frames down; when it is at 0 its event is due, once.
@@ -46,6 +49,7 @@ private:
         uint32_t pointer = 0;  // into the event script, 0 for none
     };
     std::array<uint16_t, FF6_EVENT_VAR_COUNT> variables_{};
+    int eventSong_ = 0;
     uint16_t mask_ = 0;
     std::array<Timer, FF6_EVENT_TIMER_COUNT> timers_{};
     std::array<uint8_t, (FF6_EVENT_BIT_COUNT + 7) / 8> bytes_{};

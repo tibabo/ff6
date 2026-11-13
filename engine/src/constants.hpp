@@ -149,6 +149,7 @@
 #define FF6_MAP_PROP_SIZES_12 23  // 2 bits each: bg1 width, bg1 height, bg2 width, bg2 height
 #define FF6_MAP_PROP_SIZES_3 24  // bits 6-7 bg3 width, bits 4-5 bg3 height
 #define FF6_MAP_PROP_ANIMATION 27  // bits 0-4 bg1/bg2 tile animation, bits 5-7 bg3 animation
+#define FF6_MAP_PROP_SONG 28  // its song ($053c), 0 for none
 #define FF6_MAP_PROP_LIMIT_WIDTH 30  // playable size in tiles, 0 for none
 #define FF6_MAP_PROP_LIMIT_HEIGHT 31
 #define FF6_BG_ANIM_MASK 0x1F
@@ -248,6 +249,13 @@
 #define FF6_SPECIAL_FRAME_MASKS {0, 0, 1, 3}  // ObjAnimFrameMaskTbl, by the number of frames minus one
 #define FF6_NPC_SCROLL_BG2 0x20
 #define FF6_NPC_ANIM_FRAME_SHIFT 5
+// An npc whose bits 5-7 of the last byte are set is animated (InitNPCs): the bits 0-1 give then the kind of animation
+// (NPC_ANIM_TYPE), the bits 5-7 the first frame (ObjSpecialTileTbl), the top bits of the byte of the movement its speed.
+#define FF6_NPC_ANIM_FRAMES 8
+#define FF6_NPC_ANIM_FRAME_BASE {0, 0, 0x32, 0x28, 0, 0, 0, 0}  // SPECIAL_ANIM_1, DEAD_HORZ
+#define FF6_NPC_ANIM_H_FLIP 1
+#define FF6_NPC_ANIM_TWO_FRAMES 2
+#define FF6_NPC_ANIM_FOUR_FRAMES 3
 #define FF6_NPC_LAYER_PRIORITY_SHIFT 3
 #define FF6_NPC_LAYER_PRIORITY_MASK 3
 #define FF6_PROP_NPC_RANDOM 0x80  // high byte of a tile property: an npc may wander onto the tile
@@ -277,6 +285,8 @@
 #define FF6_SPRITE_PALETTE_TOTAL 60
 #define FF6_SAVE_VERSION 1
 #define FF6_SAVE_DEFAULT_FILE "ff6-save.json"
+#define FF6_QUICK_SAVE_DEFAULT_FILE "ff6-quick.json"  // the quick saves (F6, F7): ff6-quick-1.json to ff6-quick-9.json
+#define FF6_QUICK_SAVE_SLOTS 9  // chosen with the keys 1 to 9
 #define FF6_MAX_TILE 255
 #define FF6_BYTE_VALUES 256
 #define FF6_MAX_COLOR 0x7FFF  // BGR555
@@ -640,6 +650,13 @@
 #define FF6_MENU_PORTRAIT_Y 21
 #define FF6_MENU_PORTRAIT_STEP 48
 #define FF6_MENU_PORTRAITS_OF_CHARACTER {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 17}  // Leo and Banon come after two others
+// LoadPortraitGfx: the portrait follows the sprite that the character wears (PortraitGfxPtrs, CharPortraitPalTbl): the first 18
+// in order, then esper Terra as Terra, the merchant as a soldier, the ghost, and Celes in her general's clothes; Locke keeps his
+// own, an imp has the imp's.
+#define FF6_MENU_PORTRAIT_OF_GFX {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 0, 14, 18, 0, 0, 0, 0, 0, 6}
+#define FF6_MENU_PORTRAIT_GFX_COUNT 27
+#define FF6_MENU_PORTRAIT_IMP 15
+#define FF6_MENU_PORTRAIT_LOCKE 1  // the character Locke, and his portrait
 #define FF6_MENU_REPEAT_DELAY 8  // frames before a held direction repeats, then it repeats every FF6_MENU_REPEAT_RATE
 #define FF6_MENU_REPEAT_RATE 3
 #define FF6_MENU_BG1_PALETTE_COLORS 16  // CGRAM colors of a palette of the bg1 text, 4 for the bg3 text
@@ -655,6 +672,7 @@
 #define FF6_MENU_BG3_TEAL 0x2C
 #define FF6_SFX_MENU_SELECT 0x20  // system sound effects
 #define FF6_SFX_MENU_MOVE 0x21
+#define FF6_SFX_CHARACTER_ACTIVE 0x28  // PlayerSfx: a character gets its menu in a battle (0x29 for the second player)
 #define FF6_SFX_MENU_INVALID 0x22
 #define FF6_MENU_ITEM_COUNT 7  // Item, Skills, Equip, Relic, Status, Config, Save
 #define FF6_MENU_ITEM_ITEM 0
@@ -692,6 +710,7 @@
 #define FF6_SKILL_LIST_WINDOW_WIDTH 18
 #define FF6_SKILL_LIST_X 11
 #define FF6_ITEM_NAME_BYTES 13
+#define FF6_ITEM_ICON_BYTES 1  // the name starts with the code of its icon
 #define FF6_ITEM_DESC_BYTES 0x13A0
 #define FF6_RARE_ITEM_COUNT 20  // the key items of the story: the event bits FF6_RARE_ITEM_FIRST_BIT and the next ones say which ones the party has
 #define FF6_RARE_ITEM_FIRST_BIT 0x1D0
@@ -763,6 +782,7 @@
 #define FF6_MENU_FRAMES_PER_MINUTE (FF6_FRAMES_PER_SECOND * 60)
 #define FF6_MENU_MINUTES_PER_HOUR 60
 #define FF6_MENU_MAX_HOURS 99
+#define FF6_SAVE_MAX_PLAY_FRAMES (FF6_MENU_FRAMES_PER_HOUR * (FF6_MENU_MAX_HOURS + 1))  // the time played that a save keeps
 
 // ---- Battles (battle.ff6data) --------------------------------------------------------------------
 #define FF6_BATTLE_FILE "battle.ff6data"
@@ -819,6 +839,11 @@
 #define FF6_CHAR_AI_COUNT 24  // the scenes with characters that act by a script
 #define FF6_CHAR_AI_BYTES 24  // flags, background, targets, song, then four characters of five bytes: actor and flags, sprite, script, x, y
 #define FF6_MONSTER_ANIM_SFX 9  // the command FA of the scripts: the sound effect, and the others are animations of the table of the attacks
+// MonsterEntryScriptPtrs and MonsterExitScriptPtrs: the animation of each MONSTER_ENTRY_EXIT_ANIM (F5), -1 for none (instant).
+#define FF6_ATTACK_INITS_TARGET_BG1 {0x08, 0x1D, 0x24, 0x55, 0x58, 0x66, 0x6F, 0x70, 0x7B, 0x7C}  // the inits that go through ANIM_TYPE $1d
+#define FF6_MONSTER_ENTRY_EXIT_TYPES 18
+#define FF6_MONSTER_ENTRY_ANIMS {-1, 360, 362, 364, 366, 368, 370, 397, 372, 374, 376, 378, -1, -1, 395, 398, -1, -1}
+#define FF6_MONSTER_EXIT_ANIMS {-1, 390, 361, 363, 365, 367, 369, 396, 371, 373, 375, 377, 391, -1, 394, -1, -1, -1}
 #define FF6_MONSTER_ANIMS {274, 273, 272, 383, 382, 389, 388, 393, 392, -1, 399, 400, 401, 403}  // flash, move back and forward, the characters run right and left, Kefka, glows
 #define FF6_MONSTER_ANIM_RUN_RIGHT 5  // the sub-codes of FA that move all the characters
 #define FF6_KEFKA_DEATH_ANIM 403  // the animation of the end of the last battle: its background (36) makes the monster tremble
@@ -1174,6 +1199,7 @@
 #define FF6_BATTLE_MSG_SPEED_STEP 0x10
 #define FF6_BATTLE_MSG_SPEED_DEFAULT 2
 #define FF6_BATTLE_WIN_DELAY 143  // measured: from the end of the last action to the first message of the victory
+#define FF6_BATTLE_WIN_START 77  // measured: from the end of the last action to WinBattle (the fanfare and the spin of the party)
 #define FF6_BATTLE_WIN_GAP_FRAMES 19  // measured: the window closes and opens again between two messages
 #define FF6_BATTLE_WIN_END_FRAMES 9  // measured: after the last message, before the screen fades out
 #define FF6_CMD_DELAY_TABLE {16, 16, 32, 0, 0, 16, 16, 16, 16, 16, 16, 16, 32, 16, 16, 16, 16, 16, 16, 16, 16, 16, 224, 32, 16, 16, 32, 32, 16, 16, 0, 0}  // CmdDelayTbl
@@ -1210,6 +1236,7 @@
 #define FF6_BATTLE_MESSAGE_TEXT_Y 19
 #define FF6_BATTLE_MESSAGE_LARGE_X 12  // the large font of the other messages: where its glyphs start
 #define FF6_BATTLE_MESSAGE_LARGE_Y 19
+#define FF6_BATTLE_LINE_BREAK 0x01  // between the lines of a dialog in a message (no glyph of the menus has it)
 #define FF6_BATTLE_NAME_BOX_X 56  // the name of an attack, in the middle
 #define FF6_BATTLE_NAME_BOX_W 144
 #define FF6_BATTLE_MESSAGE_GRADIENT_START 8  // InitMsgWindowHDMA: a level every two lines from this one
@@ -1305,6 +1332,7 @@
 #define FF6_WIDE_PIXEL_X 8  // the pixels of the console are 8:7 wide on a television
 #define FF6_WIDE_PIXEL_Y 7
 #define FF6_ARES_GAMMA 1.15  // fitted on the colors of the recording: Ares darkens the half tones
+#define FF6_BATTLE_FANFARE_FADE 0x10  // TerminateBattle: how fast the fanfare fades out
 #define FF6_BATTLE_EXIT_BLACK_FRAMES 52  // the black screen after a battle while the map is loaded again, measured on the recording
 #define FF6_BATTLE_LOAD_FRAMES 104  // the black screen while the game loads the battle, measured on the recording
 #define FF6_BATTLE_FADE_LINE 0x4C  // UpdateFadeIn: the field is uncovered from this line, two lines up and down a frame
@@ -1441,7 +1469,21 @@
 #define FF6_CHAR_POSE_ATTACK 6  // the poses of the table that the actions use; the table has no names, they are read off the sheet
 #define FF6_CHAR_POSE_CAST 7
 #define FF6_CHAR_POSE_HURT 27
-#define FF6_CHAR_POSE_VICTORY 23
+// CharVictoryAnim (battle event 1): a spin, a pose every FF6_VICTORY_SPIN_STEP frames (for a character that faces left, then
+// right), then the action JUMPING_FORWARD (walking, arms raised) for good, a pose every 8 frames; arms raised lift it a pixel.
+#define FF6_CHAR_POSE_WALK_FORWARD 5
+#define FF6_CHAR_WALK_FORWARD_FRAMES {4, 5, 6, 5}  // CHAR_ACTION WALKING_FORWARD: a frame every 8 game frames
+#define FF6_CHAR_ACTION_SHIFT 3
+#define FF6_CHAR_POSE_ARMS_FORWARD 7
+#define FF6_CHAR_POSE_ARMS_DOWN 23
+#define FF6_CHAR_POSE_ARMS_UP 24
+#define FF6_CHAR_POSE_FLIPPED 0x30  // added to a pose that faces the other way
+#define FF6_CHAR_FRAME_NONE 0  // attacker_frame NONE: the character goes back to its action
+#define FF6_VICTORY_SPIN_STEP 4
+#define FF6_VICTORY_SPIN_LEFT {FF6_CHAR_POSE_ARMS_DOWN, FF6_CHAR_POSE_ARMS_FORWARD + FF6_CHAR_POSE_FLIPPED, FF6_CHAR_POSE_ARMS_UP, FF6_CHAR_POSE_ARMS_FORWARD}
+#define FF6_VICTORY_SPIN_RIGHT {FF6_CHAR_POSE_ARMS_FORWARD, FF6_CHAR_POSE_ARMS_UP, FF6_CHAR_POSE_ARMS_FORWARD + FF6_CHAR_POSE_FLIPPED, FF6_CHAR_POSE_ARMS_DOWN}
+#define FF6_VICTORY_CHEER {FF6_CHAR_POSE_WALK_FORWARD, FF6_CHAR_POSE_WALK_FORWARD, FF6_CHAR_POSE_ARMS_FORWARD, FF6_CHAR_POSE_ARMS_FORWARD}
+#define FF6_VICTORY_CHEER_SHIFT 3
 #define FF6_CHAR_POSE_DEFEND 8
 #define FF6_CHAR_POSE_RUN 28
 #define FF6_BATTLE_ESCAPE_FRAMES 40  // a character that runs away leaves the screen in this long, so many pixels a frame
@@ -1482,6 +1524,9 @@
 #define FF6_BATTLE_ELEMENT_COLORS {{255, 80, 32}, {96, 200, 255}, {255, 255, 64}, {96, 255, 96}, {176, 255, 176}, {255, 255, 255}, {200, 144, 64}, {64, 96, 255}}
 #define FF6_NEAR_FATAL_DIVISOR 8  // a character with less than this fraction of its hp kneels
 #define FF6_CHAR_SPRITE_DY (-8)  // CharSpriteData: the top of the sprite of a character, from its position
+#define FF6_CHAR_ANIM_CENTER_DY 16  // the center of a character for the animations (w7e803b), from the top of its sprite
+#define FF6_MONSTER_ANIM_BOTTOM_INSET 8  // the bottom of a monster for the animations (w7e8027): its top plus its height, less this
+#define FF6_ANIM_MAGITEK_OFFSET (-12)  // GetMagitekOffset: the characters in their armors are higher for the animations
 #define FF6_BATTLE_CHAR_Y {68, 86, 104, 122}  // of the characters of a battle, from the top
 #define FF6_BATTLE_CHAR_ANGLE 0x70  // how far right of the middle the line of the characters leans
 #define FF6_BATTLE_CHAR_APEX 0x68  // the point where the line starts is this far above the screen
@@ -1880,6 +1925,7 @@
 #define FF6_EVENT_CHANGE_MP 0x8C
 #define FF6_EVENT_REMOVE_EQUIPMENT 0x8D
 #define FF6_EVENT_SHOP 0x9B
+#define FF6_EVENT_BIT_SONG_OVERRIDE 0x1CC  // $1eb9.4: the maps play the last song of the events instead of their own
 #define FF6_EVENT_BATTLE 0x4D  // a group of the event battles, then the flags of the background
 #define FF6_EVENT_BATTLE_COLLISION 0x4C
 #define FF6_EVENT_BATTLE_SECOND_LIMIT 0xC0  // a random byte from it picks the second battle of the group: 1 in 4

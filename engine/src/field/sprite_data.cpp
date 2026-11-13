@@ -91,8 +91,22 @@ std::vector<uint8_t> buildSpriteStripColors(const CommonData& common, int gfx, c
     return strip;
 }
 
+int animatedFrame(int animFrame, int animType, int speed, uint32_t counter, bool& flip) {
+    static constexpr int kBase[FF6_NPC_ANIM_FRAMES] = FF6_NPC_ANIM_FRAME_BASE;  // ObjSpecialTileTbl
+    const uint32_t step = (counter >> 2) >> speed;
+    int offset = 0;
+    flip = false;
+    switch (animType & FF6_NPC_DIR_MASK) {
+        case FF6_NPC_ANIM_H_FLIP: flip = (step & 1) != 0; break;
+        case FF6_NPC_ANIM_TWO_FRAMES: offset = static_cast<int>(step & 1); break;
+        case FF6_NPC_ANIM_FOUR_FRAMES: offset = static_cast<int>(step & 3); break;
+        default: break;
+    }
+    return actionFrame(kBase[animFrame & (FF6_NPC_ANIM_FRAMES - 1)] + offset);
+}
+
 void drawSpriteRows(uint8_t* screen, const std::vector<uint8_t>& strip, int frame, int firstRow, int height, int x,
-                    int y) {
+                    int y, bool flip) {
     const int stripWidth = FF6_FRAME_WIDTH * FF6_FRAME_COUNT;
     for (int row = 0; row < height; ++row) {
         const int screenY = y + row;
@@ -101,7 +115,7 @@ void drawSpriteRows(uint8_t* screen, const std::vector<uint8_t>& strip, int fram
             const int screenX = x + column;
             if (screenX < 0 || screenX >= FF6_SCREEN_WIDTH) continue;
             const uint8_t* source =
-                &strip[(static_cast<size_t>(firstRow + row) * stripWidth + frame * FF6_FRAME_WIDTH + column) * FF6_BYTES_PER_PIXEL];
+                &strip[(static_cast<size_t>(firstRow + row) * stripWidth + frame * FF6_FRAME_WIDTH + (flip ? FF6_FRAME_WIDTH - 1 - column : column)) * FF6_BYTES_PER_PIXEL];
             if (source[FF6_ALPHA_OFFSET] == 0) continue;
             uint8_t* target = screen + (static_cast<size_t>(screenY) * FF6_SCREEN_WIDTH + screenX) * FF6_BYTES_PER_PIXEL;
             for (int channel = 0; channel < FF6_BYTES_PER_PIXEL; ++channel) target[channel] = source[channel];

@@ -226,6 +226,53 @@ Les positions de cette section sont en pixels du jeu, mesurées sur la vidéo re
 ### B34 — Courbe de couleurs (basse)
 - [x] Option : `--ares-colors 1` ou F8 applique une courbe gamma de 1,15 ajustée sur les couleurs de la vidéo (noir et blanc inchangés) ; désactivée par défaut, sans effet sur les captures (`SdlRenderer::setAresColors`).
 
+### B35 — Danse de victoire (moyenne)
+- [x] Jeu (`CharVictoryAnim`) : 77 images après la dernière action (t2740 → t2817), la fanfare et un tour de chaque personnage (4 images par pose, armure comprise), puis bras levés en boucle ; le moteur gardait la pose de combat car la pose de victoire attendait la fin des messages.
+
+### B36 — Armure Magitek au retour (moyenne)
+- [x] L'armure restait tournée vers les monstres quand le pilote revenait à sa place après une attaque : elle suit maintenant le sens de la pose du pilote.
+- [x] Au retour qui suit une animation (`STEP_BACK`, `magic_back`), le personnage glissait sans se retourner. Comme dans la vidéo (Vicks après Fire Beam, t2228–2258), il se tourne vers sa place s'il regarde de l'autre côté, marche (`WALKING_FORWARD`, et l'armure marche : `wMagitekAnimType` 1), puis se retourne à l'arrivée.
+
+### B37 — Animations coupées par un bouton (haute)
+- [x] Un A pendant une animation (par exemple Fire Beam, en choisissant la commande suivante) l'arrêtait : l'armure ne bougeait pas, seule l'explosion et les dégâts restaient. Le jeu ne coupe ni les animations ni les messages ; seul un message qui attend une touche (l'expérience) y répond.
+
+### B38 — « Got » sans nom d'objet (haute)
+- [x] Les messages « Got … », « Stole … » écrivaient le nom de l'objet depuis son premier octet, celui de l'icône : pour un objet sans icône (0xFF, comme Tonic), le nom s'arrêtait aussitôt. Le jeu (`DlgTextCmd_0e`) saute l'icône et s'arrête au premier 0xFF (`BattleScreen::messageItemName`).
+
+### B39 — Tenaille : attaque à reculons (moyenne)
+- [x] En tenaille, un personnage qui attaquait le monstre dans son dos avançait à reculons. Le jeu (`magic_front`) le tourne d'abord vers sa cible ; il reste tourné de ce côté ensuite (`BattleScreen::faceTarget`).
+
+### B40 — Portraits de Vicks et Wedge (moyenne)
+- [x] Le menu montrait les portraits de Leo et Banon. Le jeu (`LoadPortraitGfx`) prend le portrait du sprite que porte le personnage (`PortraitGfxPtrs`) : le soldat pour Vicks et Wedge, Terra pour Terra en Esper, le fantôme, Celes en général ; Locke garde le sien, un Imp a celui de l'Imp (`wornPortrait`).
+
+### B41 — PNJ animés du champ (moyenne)
+- [x] Un PNJ dont les bits 5–7 du dernier octet ne sont pas nuls a une animation à lui (`InitNPCs`, `UpdateObjFrame`) : les bits 0–1 donnent alors le genre (une image, miroir, 2 ou 4 images), les bits 5–7 la première image (`ObjSpecialTileTbl` : `SPECIAL_ANIM_1`, `DEAD_HORZ`), le haut de l'octet du mouvement la vitesse. Le moteur le dessinait comme un personnage tourné (morceaux de flamme dans la mine de Narshe, où c'est l'étoile d'un point de sauvegarde) ; il suit maintenant le jeu (`animatedFrame`).
+
+### B42 — Points de sauvegarde infranchissables (haute)
+- [x] Le PNJ de l'étoile a la priorité de sprite haute : le jeu ne le met pas dans la carte des objets (`InitNPCMap`, ni ceux qui défilent avec BG2), le groupe marche dessus et le déclencheur de la case rend la sauvegarde possible. Le moteur le prenait pour un obstacle. `Npc::solid` suit le jeu ; ces sprites passent devant les autres (priorité basse : derrière).
+
+### B43 — Temps de jeu perdu au chargement (basse)
+- [x] Le temps du menu venait du compteur d'images de la partie, qui repartait de 0 à chaque chargement. La sauvegarde garde maintenant `playFrames` et le chargement le reprend (une ancienne sauvegarde repart de 0:00).
+
+### B44 — Whelk : tête qui ne se cache pas, boss immortel (haute)
+- [x] `F5` (entrée / sortie des monstres) : le moteur marquait le monstre « mourant » sans animation, ce qui le laissait affiché pour toujours. L'événement porte maintenant le type d'animation (`MONSTER_ENTRY_EXIT_ANIM`) ; l'écran joue le script du jeu (`MonsterEntryScriptPtrs` / `MonsterExitScriptPtrs`, constantes `FF6_MONSTER_ENTRY_ANIMS` et `FF6_MONSTER_EXIT_ANIMS`, avec son son), garde le monstre qui sort jusqu'à la fin de son animation et cache celui qui entre jusqu'à son début.
+- [x] Un monstre que le coup tue exécute encore son script de riposte, une fois (`ExecAIRetal`, `w7e3a56`) : `if_self_dead` puis `boss_death` cachent tous les monstres et finissent le combat. Le moteur sautait la riposte d'un monstre mort : la coquille faisait revenir la tête à 1 PV, sans fin.
+- [x] `$80/$80` (`mod_boss_death_pal`) : sans le bit 0x10 le décalage soustrait aux couleurs grandit (le boss vire au rouge puis au noir) ; le moteur ne prenait que l'autre cas.
+- [x] Le boss devenait noir au lieu de disparaître : `BOSS_DEATH_BG1` met les sprites en priorité 0 (derrière le décor) et additionne l'écran secondaire (les sprites) au décor (`color_math {ADD, SUBSCREEN}, BG2, SPRITE`) ; les monstres s'ajoutent donc au décor et s'y fondent quand leurs couleurs tombent au noir (`AttackAnimPlayer::fieldBlend`, `ghostMonsters`).
+- [x] Rideau de `FADE_DOWN_EXIT` / `FADE_UP_ENTRY` : la bande de BG3 s'ajoute à l'écran secondaire (BG2 et sprites). Les monstres sont des sprites ; l'init `$1d` (`MonstersToBG1`, aussi par `$7b`, `$7c` et d'autres) copie le monstre visé sur BG1, qui sort donc de l'écran secondaire : la bande l'efface de haut en bas (ou le fait apparaître de bas en haut), les autres restent (`AttackAnimPlayer::bg1Monsters`, tampons `charPixels_` et `monsterPixels_`).
+
+### B45 — Vicks et Wedge couchés après une animation (moyenne)
+- [x] `attacker_frame NONE` (`$81`/`$82` avec 0) rend le personnage à son action (`UpdateCharFrame` ne prend une image que si elle n'est pas nulle) ; le moteur affichait l'image 0 (`DEAD_HORZ`) et la gardait après l'animation : la tête des soldats en armure à l'envers.
+
+### B46 — Dialogues de combat trop rapides (moyenne)
+- [x] Les dialogues des monstres (`F3`, `MONSTER_DLG`) s'écrivent une lettre par image puis restent la durée de la vitesse des messages (`MsgSpeedTbl`) ; les longs dialogues des scènes (`BATTLE_DLG`) montrent une page de lignes, lettre par lettre, et attendent le bouton au code 7 une fois écrits. Le moteur montrait chaque ligne d'un coup, 40 images.
+- [x] Une scène (événement de combat) suspend la boucle du combat : le temps s'arrête, les menus ne répondent plus et le bouton va au dialogue (`BattleScreen::sceneHolds`). Le moteur laissait ouvrir un menu (Magi Tek au début du combat contre Whelk) qui prenait le bouton : le dialogue restait bloqué.
+
+### B47 — Danse de victoire après une scène (moyenne)
+- [x] `end_battle` (`FB 02`, fin immédiate) ne passe pas par `WinBattle` : ni fanfare, ni danse, ni messages (scène de Tritoch, Leap de Gau). Un combat sans fanfare n'a pas de danse non plus (`BTL_GFX::VICTORY`).
+
+Remarque : un Tonic ne ranime pas un personnage à 0 PV, comme dans le jeu (`CheckCanUseItem` : un personnage KO n'accepte que la Fenix Down).
+
 ## Conforme
 
 - Fond de combat, PV de départ (63, 68, 70), vitesse de remplissage de l'ATB, valeurs d'expérience (32) et d'argent (96), ordre de grandeur des dégâts (6 à 8 pour les gardes, 127 à 129 pour Fire Beam).

@@ -73,6 +73,7 @@ ff6::SaveState sampleState() {
     state.party.veldtBattles[511] = true;
     state.party.veldtPointer = 63;
     state.doomGazeCounter = 99;
+    state.playFrames = 123456;  // the time of the menu, about 34 minutes
     state.airshipX = 137;
     state.airshipY = 199;
     state.party.spells[0][45] = true;
@@ -140,6 +141,7 @@ void testSave() {
     CHECK(back.party.inventory[2].item == FF6_ITEM_EMPTY);
     CHECK(back.party.treasures[11] && back.party.treasures[511] && !back.party.treasures[12]);
     CHECK(back.airshipX == 137 && back.airshipY == 199 && back.doomGazeCounter == 99);
+    CHECK(back.playFrames == 123456);
     CHECK(back.party.veldtBattles[17] && back.party.veldtBattles[511] && !back.party.veldtBattles[18] && back.party.veldtPointer == 63);
     CHECK(back.party.spells[0][45] && back.party.spells[6][1] && !back.party.spells[0][1] && !back.party.spells[1][45]);
     CHECK(back.party.spellLearn[0][3] == 70 && back.party.spellLearn[0][4] == 0 && back.party.rages[0x19] && back.party.rages[255] &&

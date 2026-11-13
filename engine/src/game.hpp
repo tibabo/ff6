@@ -110,6 +110,8 @@ public:
     void setLoadHandler(std::function<std::unique_ptr<SaveState>()> handler) { loadHandler_ = std::move(handler); }
     // The title screen or the opening has the screen.
     bool cutsceneOpen() const { return cutscene_ != nullptr; }
+    // A save holds the whole game only when the party walks freely: no event, battle, menu, dialogue, scene or fade is running.
+    bool canQuickSave() const;
     bool loadMenuOpen() const { return loadMenuOpen_; }
     // The party is on a world map, which has the screen, instead of a map of the field.
     bool worldOpen() const { return world_ != nullptr; }
@@ -148,6 +150,7 @@ private:
     void initialize(uint32_t startMap, const std::vector<int>& party, const SaveState* save, bool newGame = false);
     void restore(const SaveState& save);
     void startFade(bool in, int speed);
+    void playMapSong();
     void updateBrightness();
     void applyBrightness(std::vector<uint8_t>& image) const;
     int stripFor(int gfx, int palette);
@@ -192,6 +195,7 @@ private:
     void checkEncounter();
     void endBattle();
     MenuStatus menuStatus();
+    void updatePortraits();
     bool onSavePoint() const;  // the flag of the main menu that allows the tent and the sleeping bag
     int eventCharacter(int code) const;
     MenuCharacter menuCharacter(int id, const CharacterState& state) const;
@@ -243,8 +247,7 @@ private:
     uint32_t battleSeed_ = 1;
     Encounters encounters_;
     int lastBattle_ = -1;  // the battle that started last
-    int mapSong_ = -1;  // the song that the battle music replaced, to bring back
-    bool fanfarePlayed_ = false;
+    bool fanfarePlayed_ = false, fanfareSounded_ = false;  // its time has come; it was heard (the battle has one)
     int pendingBattle_ = 0;  // the battle that the random battle event starts
     int boxGroup_ = 0;  // the group of the monster in the box that was just opened
     MenuPhase menuPhase_ = MenuPhase::Closed;
@@ -297,6 +300,8 @@ private:
     int brightness_ = FF6_BRIGHTNESS_FULL;
     int fade_ = 0;  // 0 when no fade runs, else the speed, with FF6_FADE_OUT_FLAG for a fade out
     bool fadeInPending_ = false;  // the screen fades in once the startup event of the map is over
+    bool mapSongPending_ = false;  // and its song plays then
+    bool quietMapLoad_ = false;  // the map that a new game loads behind the title screen plays no song
     bool leaving_ = false;  // the screen fades out before the party goes through an entrance
     EntranceTarget leaveTarget_;
 

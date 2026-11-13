@@ -47,6 +47,8 @@ public:
     void setPitchShift(int duration, uint8_t target);  // 0x80 is an octave down, 0x00 none, 0x7F an octave up
     void keepGameSettings(const AkaoSequencer& other);
     void continueSong() { conditionalJump_ = activeChannels_; }
+    // A song that was paused comes back: the notes that were sounding start again on their voices, which other songs used meanwhile.
+    void retrigger() { keyOn_ = static_cast<uint8_t>(keyOn_ | (activeChannels_ & playing_)); }
     // What the sound program tells the game: the output code (port 1), the channels that still wait for the continue
     // command (port 2) and the channels that play (port 3).
     uint8_t outputCode() const { return outputCode_; }

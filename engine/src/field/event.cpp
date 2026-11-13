@@ -25,6 +25,7 @@ void EventBits::init(const CommonData& common) {
     variables_.fill(0);
     timers_.fill(Timer());
     mask_ = 0;
+    eventSong_ = 0;
     const size_t first = FF6_NPC_SWITCH_EVENT_BIT / 8;
     for (size_t i = 0; i < FF6_NPC_SWITCH_BYTES && i < common.npcSwitchDefaults.size() && first + i < bytes_.size(); ++i) {
         bytes_[first + i] = common.npcSwitchDefaults[i];
@@ -479,12 +480,15 @@ bool EventRunner::step(EventHost& host) {
             if (host.fading()) return false;
             return next();
         case FF6_EVENT_PLAY_SONG:
+            bits_.setEventSong(byteAt(1) & FF6_SOUND_SONG_MASK);
             playSong(host.sound(), byteAt(1), FF6_SOUND_FULL_VOLUME);
             return next();
         case FF6_EVENT_PLAY_SONG_VOLUME:
+            bits_.setEventSong(byteAt(1) & FF6_SOUND_SONG_MASK);
             playSong(host.sound(), byteAt(1), byteAt(2));
             return next();
         case FF6_EVENT_FADE_IN_SONG:  // starts quietly and rises to full volume
+            bits_.setEventSong(byteAt(1) & FF6_SOUND_SONG_MASK);
             playSong(host.sound(), byteAt(1), FF6_SOUND_FADE_IN_VOLUME);
             host.sound().command(FF6_SOUND_SET_SONG_VOLUME, byteAt(2), FF6_SOUND_FULL_VOLUME);
             return next();
@@ -494,6 +498,7 @@ bool EventRunner::step(EventHost& host) {
         case FF6_EVENT_FADE_IN_PREVIOUS: {
             Sound& sound = host.sound();
             if (sound.previousSong() >= 0) {
+                bits_.setEventSong(sound.previousSong());
                 sound.command(FF6_SOUND_PLAY_SONG, static_cast<uint8_t>(sound.previousSong()), 0);
                 sound.command(FF6_SOUND_SET_SONG_VOLUME, byteAt(1), FF6_SOUND_FULL_VOLUME);
             }

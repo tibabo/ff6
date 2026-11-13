@@ -1,3 +1,4 @@
+#include <functional>
 #include <SDL.h>
 
 #include <algorithm>
@@ -28,6 +29,7 @@
 #include "state/party_ops.hpp"
 #include "sdl/sdl_audio.hpp"
 #include "sdl/sdl_input.hpp"
+#include "sdl/mac_menu.hpp"
 #include "sdl/sdl_renderer.hpp"
 
 #define FF6_MAX_CATCHUP_FRAMES 5  // longest stall, in frames, that the loop tries to make up for
@@ -139,14 +141,17 @@ void captureFrame(ff6::Game& game, ff6::SdlRenderer& renderer, const Capture& ca
 }
 
 // Fixed-step loop: the game advances FF6_FRAMES_PER_SECOND times per second whatever the display rate.
-void playGame(ff6::Game& game, ff6::SdlRenderer& renderer, const std::string& savePath) {
+// `game` may be replaced by the quick load, which `quickSave` and `quickLoad` do (F6 and F7) in the slot that `selectSlot` chooses
+// (keys 1 to 9).
+void playGame(std::unique_ptr<ff6::Game>& game, ff6::SdlRenderer& renderer, const std::string& savePath,
+              const std::function<void()>& quickSave, const std::function<void()>& quickLoad, const std::function<void(int)>& selectSlot) {
     ff6::SdlInput input;
     const double ticksPerFrame = static_cast<double>(SDL_GetPerformanceFrequency()) / FF6_FRAMES_PER_SECOND;
     Uint64 previous = SDL_GetPerformanceCounter();
     double accumulator = 0;
     std::printf("Arrows/WASD or controller to move, Enter/Space/A to talk (or to end the title screen),\n"
                 "F5 to save to %s, F11 or Alt+Enter for fullscreen, F10 for integer scaling, F9 for 8:7 pixels,\n"
-                "F8 for the colors of Ares, Escape to quit.\n",
+                "F8 for the colors of Ares, 1 to 9 to choose a slot, F6 to save the state in it and F7 to load it again, Escape to quit.\n",
                 savePath.c_str());
     bool running = true;
     while (running) {
@@ -163,9 +168,13 @@ void playGame(ff6::Game& game, ff6::SdlRenderer& renderer, const std::string& sa
                 if (key == SDLK_F10) renderer.toggleIntegerScale();
                 if (key == SDLK_F9) renderer.toggleWideAspect();
                 if (key == SDLK_F8) renderer.toggleAresColors();
-                if (key == SDLK_F5 && !game.cutsceneOpen() && !game.loadMenuOpen()) {
+                if (key >= SDLK_1 && key <= SDLK_9) selectSlot(static_cast<int>(key - SDLK_1) + 1);
+                if (key >= SDLK_KP_1 && key <= SDLK_KP_9) selectSlot(static_cast<int>(key - SDLK_KP_1) + 1);
+                if (key == SDLK_F6) quickSave();
+                if (key == SDLK_F7) quickLoad();
+                if (key == SDLK_F5 && !game->cutsceneOpen() && !game->loadMenuOpen()) {
                     try {
-                        ff6::writeSave(savePath, game.saveState());
+                        ff6::writeSave(savePath, game->saveState());
                         std::printf("Saved the game to %s\n", savePath.c_str());
                     } catch (const std::exception& error) {
                         std::fprintf(stderr, "Could not save: %s\n", error.what());
@@ -179,9 +188,9 @@ void playGame(ff6::Game& game, ff6::SdlRenderer& renderer, const std::string& sa
         previous = now;
         while (accumulator >= ticksPerFrame) {
             accumulator -= ticksPerFrame;
-            game.tick(input.sample());
+            game->tick(input.sample());
         }
-        game.draw();
+        game->draw();
     }
 }
 
@@ -222,6 +231,7 @@ struct Start {
     bool newGame = false;  // begin like the console: the title screen, the story, the opening
     std::string cutscene;  // "title" or "opening": only that scene, for a capture
     bool wideAspect = false, aresColors = false;  // --aspect 8:7, --ares-colors 1
+    std::string quickPath = FF6_QUICK_SAVE_DEFAULT_FILE;  // --quick: the file of the quick saves (F6, F7), numbered by slot
 };
 
 std::unique_ptr<ff6::Game> makeGame(ff6::CommonData common, const std::string& packDir, const Start& start,
@@ -363,6 +373,12 @@ int run(const std::string& packDir, const Start& start, const std::string& saveP
     ff6::SdlRenderer renderer(capture != nullptr);
     renderer.setWideAspect(start.wideAspect);
     renderer.setAresColors(start.aresColors);
+    if (!capture) {  // the same options in the menu bar of macOS
+        const ff6::MenuToggle display[] = {
+            {"8:7 Pixels (F9)", [&renderer] { renderer.toggleWideAspect(); }, [&renderer] { return renderer.wideAspect(); }},
+            {"Ares Colors (F8)", [&renderer] { renderer.toggleAresColors(); }, [&renderer] { return renderer.aresColors(); }}};
+        ff6::installMenu("Display", display, 2);
+    }
     if (capture && !start.cutscene.empty()) {
         captureCutscene(packDir, start.cutscene, *capture, renderer);
         return 0;
@@ -393,7 +409,7 @@ int run(const std::string& packDir, const Start& start, const std::string& saveP
     if (music >= 0 && static_cast<size_t>(music) >= audio.songs.size()) throw std::runtime_error("invalid --music");
     ff6::SoundProgram program(audio);
     ff6::SdlAudio sound(program);
-    const std::unique_ptr<ff6::Game> game = makeGame(std::move(common), packDir, start, renderer, sound);
+    std::unique_ptr<ff6::Game> game = makeGame(std::move(common), packDir, start, renderer, sound);
     if (start.battle >= 0) {
         for (ff6::CharacterState& character : game->party().characters) character.status |= start.partyStatus;
         game->startBattleNumber(start.battle, start.battleBackground);
@@ -407,24 +423,77 @@ int run(const std::string& packDir, const Start& start, const std::string& saveP
         }
     }
     if (music >= 0) sound.command(FF6_SOUND_PLAY_SONG, static_cast<uint8_t>(music), FF6_SOUND_FULL_VOLUME);  // over the song of the map
-    game->setSaveHandler([&savePath](const ff6::SaveState& state) {
+    const auto configure = [&savePath](ff6::Game& configured) {
+        configured.setSaveHandler([&savePath](const ff6::SaveState& state) {
+            try {
+                ff6::writeSave(savePath, state);
+                std::printf("Saved the game to %s\n", savePath.c_str());
+            } catch (const std::exception& error) {
+                std::fprintf(stderr, "Could not save: %s\n", error.what());
+            }
+        });
+        configured.setLoadHandler([&savePath]() -> std::unique_ptr<ff6::SaveState> {
+            if (!std::ifstream(savePath).good()) return nullptr;
+            try {
+                return std::make_unique<ff6::SaveState>(ff6::readSave(savePath));
+            } catch (const std::exception& error) {
+                std::fprintf(stderr, "Could not load %s: %s\n", savePath.c_str(), error.what());
+                return nullptr;
+            }
+        });
+    };
+    configure(*game);
+    // The quick save: the state of the game where the party walks freely, written at once and loaded again without a restart, in
+    // one of FF6_QUICK_SAVE_SLOTS slots: the file of --quick with the number of the slot before its extension.
+    int slot = 1;
+    const auto slotPath = [&](int number) {
+        const std::string& base = start.quickPath;
+        const size_t dot = base.rfind('.');
+        const std::string suffix = "-" + std::to_string(number);
+        return dot == std::string::npos ? base + suffix : base.substr(0, dot) + suffix + base.substr(dot);
+    };
+    std::string quickPath = slotPath(slot);
+    const std::function<void(int)> selectSlot = [&](int number) {
+        slot = number;
+        quickPath = slotPath(slot);
+        std::printf("Quick save slot %d (%s%s)\n", slot, quickPath.c_str(), std::ifstream(quickPath).good() ? "" : ", empty");
+    };
+    const std::function<void()> quickSave = [&] {
+        if (!game->canQuickSave()) {
+            std::printf("No quick save now: wait until the party walks freely (no event, battle, menu or dialogue)\n");
+            return;
+        }
         try {
-            ff6::writeSave(savePath, state);
-            std::printf("Saved the game to %s\n", savePath.c_str());
+            ff6::writeSave(quickPath, game->saveState());
+            std::printf("Quick save in %s\n", quickPath.c_str());
         } catch (const std::exception& error) {
             std::fprintf(stderr, "Could not save: %s\n", error.what());
         }
-    });
-    game->setLoadHandler([&savePath]() -> std::unique_ptr<ff6::SaveState> {
-        if (!std::ifstream(savePath).good()) return nullptr;
-        try {
-            return std::make_unique<ff6::SaveState>(ff6::readSave(savePath));
-        } catch (const std::exception& error) {
-            std::fprintf(stderr, "Could not load %s: %s\n", savePath.c_str(), error.what());
-            return nullptr;
+    };
+    const std::function<void()> quickLoad = [&] {
+        if (!std::ifstream(quickPath).good()) {
+            std::printf("No quick save in %s yet (F6)\n", quickPath.c_str());
+            return;
         }
-    });
-    playGame(*game, renderer, savePath);
+        try {
+            Start loaded;
+            loaded.save = std::make_unique<ff6::SaveState>(ff6::readSave(quickPath));
+            sound.command(FF6_SOUND_STOP_ALL, 0, 0);
+            std::unique_ptr<ff6::Game> fresh = makeGame(ff6::loadCommonData(packDir), packDir, loaded, renderer, sound);
+            configure(*fresh);
+            game = std::move(fresh);
+            std::printf("Quick load from %s\n", quickPath.c_str());
+        } catch (const std::exception& error) {
+            std::fprintf(stderr, "Could not load %s: %s\n", quickPath.c_str(), error.what());
+        }
+    };
+    std::vector<ff6::MenuToggle> quick = {{"Quick Save (F6)", quickSave, nullptr}, {"Quick Load (F7)", quickLoad, nullptr}};
+    static const char* const kSlotTitles[FF6_QUICK_SAVE_SLOTS] = {"Slot 1", "Slot 2", "Slot 3", "Slot 4", "Slot 5", "Slot 6", "Slot 7", "Slot 8", "Slot 9"};
+    for (int number = 1; number <= FF6_QUICK_SAVE_SLOTS; ++number) {
+        quick.push_back({kSlotTitles[number - 1], [&selectSlot, number] { selectSlot(number); }, [&slot, number] { return slot == number; }});
+    }
+    ff6::installMenu("Game", quick.data(), static_cast<int>(quick.size()));
+    playGame(game, renderer, savePath, quickSave, quickLoad, selectSlot);
     return 0;
 }
 
@@ -469,7 +538,7 @@ void writeAnimSheet(const std::string& packDir, int attack, int layer, const std
 }  // namespace
 
 int main(int argc, char** argv) {
-    const char* usage = "Usage: %s <data-pack-dir> [--map n] [--party terra,locke,...] [--battle n [--bg n]] [--play attack] [--status bits] [--scene n] [--stock 1] [--anim attack [--layer 0|1|2]] [--load save.json] [--save save.json] [--music song] [--new-game 1] [--aspect 8:7] [--ares-colors 1] [--cutscene title|opening|ruin|floating|falcon|end|all|endingN [--capture out.bmp --wait frames]] [--capture out.bmp [--at x,y] [--wait frames] [--moves URDL...] [--talk frames] [--keys ABURDL.] [--after frames]]\n";
+    const char* usage = "Usage: %s <data-pack-dir> [--map n] [--party terra,locke,...] [--battle n [--bg n]] [--play attack] [--status bits] [--scene n] [--stock 1] [--anim attack [--layer 0|1|2]] [--load save.json] [--save save.json] [--music song] [--new-game 1] [--aspect 8:7] [--ares-colors 1] [--quick quick.json] [--cutscene title|opening|ruin|floating|falcon|end|all|endingN [--capture out.bmp --wait frames]] [--capture out.bmp [--at x,y] [--wait frames] [--moves URDL...] [--talk frames] [--keys ABURDL.] [--after frames]]\n";
     if (argc < 2) {
         std::fprintf(stderr, usage, argc > 0 ? argv[0] : "ff6");
         return 2;
@@ -486,6 +555,7 @@ int main(int argc, char** argv) {
         bool mapGiven = false;
         bool forceNewGame = false;
         bool wideAspect = false, aresColors = false;
+        std::string quickPath = FF6_QUICK_SAVE_DEFAULT_FILE;
         std::string cutscene;
         std::string loadPath;
         std::string savePath = FF6_SAVE_DEFAULT_FILE;
@@ -499,6 +569,8 @@ int main(int argc, char** argv) {
                 mapGiven = true;
             } else if (option == "--cutscene") {
                 cutscene = argv[i + 1];
+            } else if (option == "--quick") {
+                quickPath = argv[i + 1];
             } else if (option == "--aspect") {
                 const std::string value = argv[i + 1];
                 if (value != "8:7" && value != "1:1") throw std::runtime_error("--aspect takes 8:7 or 1:1");
@@ -595,6 +667,7 @@ int main(int argc, char** argv) {
         start.party = party;
         start.cutscene = cutscene;
         start.wideAspect = wideAspect;
+        start.quickPath = quickPath;
         start.aresColors = aresColors;
         // Without a map, a party, a battle or a save to start from, the game begins like the console does.
         start.newGame = forceNewGame || (capture.path.empty() && !mapGiven && party.empty() && battle < 0 && loadPath.empty() && !stock && playAnimation < 0);

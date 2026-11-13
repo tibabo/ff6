@@ -10,6 +10,8 @@
 
 namespace {
 
+constexpr int FF6_TEST_FADE_DOWN_EXIT = 371;  // MonsterExitScriptPtrs: FADE_DOWN
+
 ff6::AnimBody monster(int slot, int centerX, int bottomY) {
     ff6::AnimBody body;
     body.monster = true;
@@ -35,6 +37,13 @@ void testAttackAnimPlayer() {
     attacker.centerY = 100;
     attacker.topY = 88;
     attacker.bottomY = 112;
+
+    // ANIM_TYPE $1d (MonstersToBG1): the exit of a monster (FADE_DOWN_EXIT) copies the one that it aims at to bg1, the others stay
+    // sprites; the beams leave all the monsters sprites.
+    player.start(FF6_TEST_FADE_DOWN_EXIT, attacker, {monster(1, 120, 84)}, false);
+    CHECK(player.bg1Monsters() == 1 << 1);
+    player.start(FF6_ATTACK_FIRST_MAGITEK, attacker, {monster(1, 120, 84)}, false);
+    CHECK(player.bg1Monsters() < 0);
 
     // The attacks with a circle (the Wave Cannon, the Meteor, Ultima, a blob) show a layer of background only inside it.
     for (const int circle : {183, 19, 20, 18}) {

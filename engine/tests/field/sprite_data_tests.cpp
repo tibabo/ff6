@@ -13,6 +13,14 @@ void testSpriteData() {
     CHECK(ff6::actionFrame(0) == 0 && ff6::actionFrame(0x46) == 9 && ff6::actionFrame(0x2f) == FF6_FRAME_RIDING_LEFT + 1);
     CHECK(ff6::actionFrame(0x2c) >= 16 && ff6::actionFrame(0x2c) < FF6_FRAME_COUNT && ff6::actionFrame(0x20) != ff6::actionFrame(0x2c));
     CHECK(ff6::actionFrame(0x7f) == 1);  // a frame that is not in the sheet shows the one facing down
+    // An animated npc (UpdateObjFrame): four frames from SPECIAL_ANIM_1, one every 4 game frames at the fastest speed; the
+    // kind that flips shows its frame mirrored every other step.
+    bool flipped = true;
+    CHECK(ff6::animatedFrame(2, FF6_NPC_ANIM_FOUR_FRAMES, 0, 0, flipped) == ff6::actionFrame(0x32) && !flipped);
+    CHECK(ff6::animatedFrame(2, FF6_NPC_ANIM_FOUR_FRAMES, 0, 4, flipped) == ff6::actionFrame(0x33));
+    CHECK(ff6::animatedFrame(2, FF6_NPC_ANIM_FOUR_FRAMES, 0, 12, flipped) == ff6::actionFrame(0x35));
+    CHECK(ff6::animatedFrame(2, FF6_NPC_ANIM_FOUR_FRAMES, 1, 12, flipped) == ff6::actionFrame(0x33));
+    CHECK(ff6::animatedFrame(3, FF6_NPC_ANIM_H_FLIP, 0, 4, flipped) == ff6::actionFrame(0x28) && flipped);
     CHECK(ff6::moveFrame(ff6::Down, 16) == 1 && ff6::moveFrame(ff6::Down, 24) == 0);  // the walk cycle
 
     // Graphics 0 with palette 1: index 3 is the second color, index 0 stays transparent.

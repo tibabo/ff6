@@ -28,9 +28,11 @@ public:
     // The pixels 8:7 wide, as the console shows them on a television (and Ares); the captures stay square.
     void setWideAspect(bool wide);
     void toggleWideAspect() { setWideAspect(!wideAspect_); }
+    bool wideAspect() const { return wideAspect_; }
     // The darker half tones of Ares (a gamma on each channel); black and white stay.
     void setAresColors(bool ares);
     void toggleAresColors() { setAresColors(!aresColors_); }
+    bool aresColors() const { return aresColors_; }
     // Writes the last frame as a BMP file. Offscreen renderers only.
     void saveFrame(const std::string& path);
 

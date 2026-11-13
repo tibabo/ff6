@@ -32,6 +32,7 @@ struct SaveState {
     int parentMap = 0, parentX = 0, parentY = 0, parentFacing = 0;
     int doomGazeCounter = 0;  // where the squares of Doom Gaze come from in the table of random numbers
     int airshipX = 0, airshipY = 0;  // the tile of the world map where the airship is parked
+    int playFrames = 0;  // the time played, in frames (the time of the menu); a save without it starts at 0:00
     std::array<int, 3> config{FF6_CONFIG_BATTLE_DEFAULT, 0, 0};  // the bytes of GameConfig; a save without them has the defaults
     // The colors that the player chose; without them the font is white and the windows have the colors of the ROM.
     bool hasColors = false;

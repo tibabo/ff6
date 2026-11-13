@@ -112,6 +112,7 @@ struct Combatant {
     // failed then, its timer and variable, and what hit it last.
     int aiStart = -1, aiCounter = -1, aiLoop = 0, aiCount = FF6_AI_NO_LOOP, timer = 0, variable = 0;
     int retalAttacker = -1, retalCommand = -1, retalAttack = -1, retalItem = -1, retalElement = 0;
+    bool rattled = false;  // a monster that died had its last retaliation (w7e3a56): a boss ends the battle in it
     bool alive() const { return present && !escaped && !offstage && hp > 0 && !(status & FF6_ST_GONE) && !(monster && (status & FF6_ST_HIDE)); }
     bool undead() const { return (monsterFlags & FF6_MONSTER_FLAG_UNDEAD) != 0 || (status & FF6_ST_ZOMBIE) != 0; }
 };
@@ -363,7 +364,7 @@ private:
     int sceneBackground_ = -1, sceneSong_ = -1;
     int targetMask_ = 0xFF;  // the monsters that can be aimed at (w7e2f46), a bit for each place; the scripts change it
     void aiChangeBattle(int battle, bool restore);
-    void aiEntryExit(int index, int mode, uint16_t mask);
+    void aiEntryExit(int index, int anim, int mode, uint16_t mask);
     void aiItem(int index, bool throwing, int item, uint16_t mask);
     void runScript(int index, size_t start, bool counter);
     bool aiCondition(int index, int condition, int first, int second, uint16_t& mask);

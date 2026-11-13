@@ -334,7 +334,7 @@ void Battle::aiChangeBattle(int battle, bool restore) {
 
 // F5: monsters come into the battle or go out of it. Mode 0 brings them back with all their hp, 2 with the hp that they have, 1 and
 // 3 hide them, 4 hides them and keeps the battle from ending, 5 hides them for dead.
-void Battle::aiEntryExit(int index, int mode, uint16_t mask) {
+void Battle::aiEntryExit(int index, int anim, int mode, uint16_t mask) {
     (void)index;
     for (int slot = 0; slot < FF6_BATTLE_SLOTS; ++slot) {
         if (!(mask & (1u << slot))) continue;
@@ -345,10 +345,12 @@ void Battle::aiEntryExit(int index, int mode, uint16_t mask) {
         entry.kind = BattleEvent::Kind::Entry;
         entry.attacker = static_cast<int>(at);
         entry.damage = mode;
+        entry.attack = anim;  // MONSTER_ENTRY_EXIT_ANIM: how the screen shows it
         if (mode == 0 || mode == 2) {
             if (mode == 0 || m.hp == 0) m.hp = mode == 0 ? m.maxHp : 1;
             m.status &= ~(FF6_ST_DEAD | FF6_ST_PETRIFY | FF6_ST_ZOMBIE | FF6_ST_IMP | FF6_ST_HIDE);
             m.escaped = false;
+            m.rattled = false;
             holdEnd_ = false;
         } else if (mode >= 1 && mode <= 5) {
             m.status |= FF6_ST_HIDE;
@@ -422,7 +424,7 @@ void Battle::runScript(int index, size_t start, bool counter) {
                     events_.push_back(said);
                     break;
                 }
-                case 0xF5: aiEntryExit(index, second, static_cast<uint16_t>(third ? third : monsterBit(index))); break;
+                case 0xF5: aiEntryExit(index, first, second, static_cast<uint16_t>(third ? third : monsterBit(index))); break;
                 case 0xF6: {
                     const int pick = (std::array<int, 3>{second, third, third})[static_cast<size_t>(random_.below(3))];
                     aiItem(index, first != 0, pick, mask);
@@ -506,7 +508,7 @@ void Battle::runScript(int index, size_t start, bool counter) {
                 default: break;  // dialogs, changes of battle, entries, events and animations
             }
         }
-        if (outcome_ != BattleOutcome::Fighting || !self.alive()) return;
+        if (outcome_ != BattleOutcome::Fighting || (!self.alive() && !(counter && self.rattled))) return;  // the last answer goes on
     }
 }
 
@@ -531,7 +533,11 @@ void Battle::noteHit(int user, int target, int command, int attack, int item, in
     c.retalAttack = attack;
     c.retalItem = item;
     c.retalElement = element;
-    if (aiRunning_ || !c.alive() || c.aiCounter < 0) return;
+    if (aiRunning_ || c.aiCounter < 0) return;
+    if (!c.alive()) {  // ExecAIRetal: a monster that the blow killed still answers it, once (if_self_dead, boss_death)
+        if (!c.monster || !c.present || c.rattled || !(c.status & FF6_ST_DEAD)) return;
+        c.rattled = true;
+    }
     aiRunning_ = true;
     runScript(target, static_cast<size_t>(c.aiCounter), true);
     aiRunning_ = false;

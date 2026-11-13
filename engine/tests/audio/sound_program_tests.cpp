@@ -5,7 +5,11 @@
 #include "../check.hpp"
 #include "../test_helpers.hpp"
 #include "../tests.hpp"
+#include "audio/audio_data.hpp"
 #include "audio/sound_program.hpp"
+
+#define FF6_TEST_TOWN_SONG 57
+#define FF6_TEST_BATTLE_SONG 0x24
 
 namespace {
 
@@ -105,6 +109,17 @@ void testSoundProgram() {
         program.command(FF6_SOUND_PLAY_SONG, 1, 0xFF);
         program.command(FF6_SOUND_PLAY_SONG, 0, 0xFF);
         CHECK(program.port(1) == 0);
+    }
+    if (const char* pack = std::getenv("FF6_PACK")) {  // a paused song is heard again at once: its sounding notes start again
+        const ff6::AudioData audio = ff6::loadAudioData(pack);
+        ff6::SoundProgram program(audio);
+        program.command(FF6_SOUND_PLAY_SONG, FF6_TEST_TOWN_SONG, 0xFF);  // the music of Narshe
+        CHECK(renderPeak(program, 2.0) > 1000);
+        program.command(FF6_SOUND_PLAY_SONG, FF6_TEST_BATTLE_SONG, 0xFF);  // the battle theme pauses it
+        renderPeak(program, 1.0);
+        program.command(FF6_SOUND_PLAY_SONG, FF6_TEST_TOWN_SONG, 0xFF);
+        renderPeak(program, 0.5);
+        CHECK(renderPeak(program, 1.5) > 1000);  // its tied notes were silent before
     }
     {  // the continue command makes a conditional jump of the song happen once
         std::vector<uint8_t> body = test::prologue();

@@ -41,6 +41,7 @@ void Synth::playSong(size_t song, uint8_t volume, bool alternateStart, bool susp
         sequencer_ = suspended_;
         sequencer_.keepGameSettings(current);
         sequencer_.setSongVolume(0, volume);
+        sequencer_.retrigger();
         return;
     }
     sequencer_.load(audio_, song, volume, alternateStart);

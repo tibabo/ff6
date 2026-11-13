@@ -26,6 +26,7 @@ struct Drawable {
     bool onVehicle = false;
     VehicleLook look;  // what it rides, when it does
     const Npc* special = nullptr;  // a special npc, which has graphics of its own
+    bool flip = false;  // mirrored (an animated npc)
 };
 
 }  // namespace
@@ -84,7 +85,10 @@ void Game::initialize(uint32_t startMap, const std::vector<int>& party, const Sa
         facing = save->facing;
     }
     common_.windowTiles = buildWindowTiles(menuData_, config_);
-    if (!loadMapNow(startMap, x, y, facing, !newGame, !newGame)) throw std::runtime_error("the start map is not in the data pack");
+    quietMapLoad_ = newGame;  // the map waits behind the title screen, whose music plays
+    const bool loaded = loadMapNow(startMap, x, y, facing, !newGame, !newGame);
+    quietMapLoad_ = false;
+    if (!loaded) throw std::runtime_error("the start map is not in the data pack");
     if (newGame) startEvent(FF6_EVENT_SCRIPT_GAME_START);  // the screen stays dark: the first command shows the title
 }
 
@@ -114,6 +118,7 @@ void Game::restore(const SaveState& save) {
     for (size_t i = 0; i < spritePalette_.size(); ++i) spritePalette_[i] = save.spritePalettes[i];
     resetSpriteColors();
     doomGazeCounter_ = save.doomGazeCounter;
+    frame_ = static_cast<uint32_t>(save.playFrames);  // the time of the menu goes on from where it was
     airshipX_ = save.airshipX;
     airshipY_ = save.airshipY;
     flightSaved_ = false;
@@ -131,6 +136,12 @@ void Game::restore(const SaveState& save) {
             config_.windowColors[i / FF6_MENU_WINDOW_COLORS][i % FF6_MENU_WINDOW_COLORS] = static_cast<uint16_t>(save.windowColors[i]);
         }
     }
+}
+
+bool Game::canQuickSave() const {
+    if (cutscene_ || loadMenuOpen_ || battleOpen_ || menuPhase_ != MenuPhase::Closed || fading() || leaving_) return false;
+    if (event_.running() || dialogue_.active()) return false;
+    return !world_ || !world_->storyScriptRunning();
 }
 
 SaveState Game::saveState() const {
@@ -160,6 +171,7 @@ SaveState Game::saveState() const {
     save.timers = bits_.timerValues();
     for (size_t i = 0; i < spritePalette_.size(); ++i) save.spritePalettes[i] = spritePalette_[i];
     save.doomGazeCounter = doomGazeCounter_;
+    save.playFrames = static_cast<int>(std::min<uint32_t>(frame_, FF6_SAVE_MAX_PLAY_FRAMES));
     save.airshipX = world_ ? world_->airshipX() : airshipX_;
     save.airshipY = world_ ? world_->airshipY() : airshipY_;
     save.hasParent = hasParent_;
@@ -335,6 +347,12 @@ bool Game::loadMapNow(uint32_t mapId, int x, int y, int facing, bool startupEven
     brightness_ = 0;
     fade_ = 0;
     fadeInPending_ = false;
+    mapSongPending_ = false;
+    if (startupStarted) {
+        mapSongPending_ = true;
+    } else if (!quietMapLoad_) {
+        playMapSong();
+    }
     if (fadeIn) {
         if (startupStarted) {
             fadeInPending_ = true;
@@ -527,6 +545,19 @@ void Game::tickWorld(const InputState& input) {
         launchBattle(battleData_.eventBattle(FF6_DOOM_GAZE_BATTLE_GROUP, 0), FF6_BATTLE_BG_AIRSHIP_WOR);
         doomGazeBattle_ = battleOpen_;
     }
+}
+
+// PlayMapSong: the song of the map, or the one of the events when they asked for it to stay; a map without one keeps what plays.
+void Game::playMapSong() {
+    int song = map_.prop[FF6_MAP_PROP_SONG];
+    if (bits_.get(FF6_EVENT_BIT_SONG_OVERRIDE)) {
+        song = bits_.eventSong();
+    } else if (song == 0) {
+        return;
+    } else {
+        bits_.setEventSong(song);
+    }
+    sound_.command(FF6_SOUND_PLAY_SONG, static_cast<uint8_t>(song), FF6_SOUND_FULL_VOLUME);
 }
 
 // FadeIn and FadeOut: a fade in starts from one step of brightness, a fade out from full brightness.
@@ -726,8 +757,7 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
         case FF6_EVENT_PARTY_USER:  // what the lead does once the event is over
             leadSavedMovement_ = FF6_OBJ_MOVE_USER;
             break;
-        case FF6_EVENT_PARTY_SCRIPT:
-            leadSavedMovement_ = FF6_OBJ_MOVE_NONE;
+        case FF6_EVENT_PARTY_SCRIPT:  // EventCmd_3b sets only $087c: the movement saved at the start ($087d) comes back at the end
             break;
         case FF6_EVENT_SET_PARTY: {
             std::array<int, FF6_PARTY_SIZE> slots;
@@ -822,6 +852,7 @@ void Game::fieldCommand(uint8_t op, const uint8_t* bytes, size_t size) {
             break;
         }
         case FF6_EVENT_NAME_MENU:
+            updatePortraits();
             nameMenu_.open(byteAt(0), characterName(byteAt(0)));
             nameOpen_ = true;
             menuPhase_ = MenuPhase::FadingOut;
@@ -1172,6 +1203,10 @@ void Game::tick(const InputState& input) {
         fadeInPending_ = false;
         startFade(true, FF6_BRIGHTNESS_STEP);
     }
+    if (mapSongPending_ && !event_.running()) {  // after the startup event, as the game does
+        mapSongPending_ = false;
+        playMapSong();
+    }
     uint32_t timerEvent = 0;  // a timer that ran out starts its event once the party stands still and no event runs
     if (!event_.running() && !dialogue_.active() && !player_.moving() && !leaving_ && bits_.takeTimerEvent(&timerEvent)) {
         startEvent(timerEvent);
@@ -1359,7 +1394,19 @@ int Game::eventCharacter(int code) const {
 }
 
 // The menu keeps hooks into the game: the equipment screens list, preview and change what a character wears.
+// LoadPortraitGfx: the menus show the portrait of the sprite that each character wears (Vicks and Wedge as soldiers).
+void Game::updatePortraits() {
+    std::array<int, FF6_CHAR_COUNT> portraits;
+    portraits.fill(-1);
+    for (int id = 0; id < FF6_CHAR_COUNT; ++id) {
+        const int gfx = static_cast<size_t>(id) < objects_.characters().size() ? objects_.characters()[static_cast<size_t>(id)].prop.gfx : -1;
+        portraits[static_cast<size_t>(id)] = wornPortrait(id, gfx, (state_.characters[static_cast<size_t>(id)].status & FF6_ST_IMP) != 0);
+    }
+    menuScreen_.setCharacterPortraits(portraits);
+}
+
 MenuStatus Game::menuStatus() {
+    updatePortraits();
     MenuStatus status;
     status.party = partyCharacters();
     status.items = inventoryItems();
@@ -1619,6 +1666,7 @@ void Game::openPartySelect(int parties, unsigned forced) {
         }
         if (character.info.equippedEsper >= 0) character.esper = menuData_.esperName(character.info.equippedEsper);
     }
+    updatePortraits();
     partyMenu_.open(setup);
     partyOpen_ = true;
     menuPhase_ = MenuPhase::FadingOut;
@@ -1716,9 +1764,8 @@ void Game::launchBattle(int battle, int background, bool veldt, BattleEntry entr
         story.magicOnly = bits_.battle(FF6_BATTLE_FLAG_MAGIC_ONLY);
         battleScreen_.setStory(story);
     }
-    // The music of the battle comes from its properties; the song of the map waits, and comes back afterwards.
-    mapSong_ = -1;
-    fanfarePlayed_ = false;
+    // The music of the battle comes from its properties; the song of the map comes back with the map (PlayMapSong).
+    fanfarePlayed_ = fanfareSounded_ = false;
     const uint16_t aux = battleData_.formation(battle).aux;
     static constexpr uint8_t kSongs[8] = FF6_BATTLE_SONGS;
     uint8_t song = kSongs[(aux & FF6_BATTLE_AUX_SONG_MASK) >> FF6_BATTLE_AUX_SONG_SHIFT];
@@ -1727,7 +1774,6 @@ void Game::launchBattle(int battle, int background, bool veldt, BattleEntry entr
     }
     if (!(aux & FF6_BATTLE_AUX_KEEP_SONG) && song != 0xFF) {
         sound_.command(FF6_SOUND_PLAY_SONG, song, FF6_SOUND_FULL_VOLUME);
-        mapSong_ = sound_.previousSong();
     }
     battleOpen_ = true;
     menuPhase_ = MenuPhase::FadingOut;
@@ -1896,8 +1942,7 @@ void Game::endBattle() {
     doomGazeBattle_ = false;
     if (gameOver && world_) startEvent(FF6_EVENT_SCRIPT_GAME_OVER);  // the battles of the world have no event of their own
     if (world_ && !gameOver) world_->restartMusic();
-    if (!world_ && !gameOver && mapSong_ >= 0) sound_.command(FF6_SOUND_PLAY_SONG, static_cast<uint8_t>(mapSong_), FF6_SOUND_FULL_VOLUME);
-    mapSong_ = -1;
+    if (!world_ && !gameOver) playMapSong();  // ExecBattle loads the map again, which plays its song
 }
 
 void Game::tickMenu(const InputState& input) {
@@ -1922,16 +1967,19 @@ void Game::tickMenu(const InputState& input) {
     } else if (menuPhase_ == MenuPhase::Open && battleOpen_) {
         battleScreen_.update(input);
         if (const Battle* fought = battleScreen_.battle()) {  // the fanfare of a victory, unless the battle has none
-            if (fought->victory() && battleScreen_.resolved() && !fanfarePlayed_) {
+            if (fought->victory() && battleScreen_.victoryShown() && !fanfarePlayed_) {  // BTL_GFX::VICTORY, as the victory begins
                 fanfarePlayed_ = true;
                 if (!(battleData_.formation(lastBattle_).flags & FF6_BATTLE_FLAG_NO_FANFARE) && !fought->shadowLeft()) {
                     sound_.command(FF6_SOUND_PLAY_SONG, FF6_SONG_VICTORY_FANFARE, FF6_SOUND_FULL_VOLUME);
+                    fanfareSounded_ = true;
                 }
             }
         }
         if (battleScreen_.finished()) {
             menuPhase_ = MenuPhase::Leaving;
             startFade(false, FF6_BRIGHTNESS_STEP);
+            // TerminateBattle: the fanfare fades out with the screen.
+            if (fanfareSounded_) sound_.command(FF6_SOUND_SET_SONG_VOLUME, FF6_BATTLE_FANFARE_FADE, 0);
         }
     } else if (menuPhase_ == MenuPhase::Open && partyOpen_) {
         partyMenu_.update(input);
@@ -2179,6 +2227,12 @@ void Game::drawSprites(bool above) {
         Drawable drawable{object.pixelY(), stripOf(object), object.frame, object.pixelX() - scroll_.x(layer),
                           object.pixelY() - FF6_SPRITE_Y_OFFSET - object.jumpHeight - scroll_.y(layer) - stage_.shakeOffset(3),
                           object.topIsAbove(), object.bottomIsAbove()};
+        // DrawObj: a sprite of high priority goes in front of the others (a save point, over the party), one of low priority behind
+        if (object.prop.order == FF6_NPC_ORDER_HIGH) drawable.sortY = INT_MAX;
+        if (object.prop.order == FF6_NPC_ORDER_LOW) drawable.sortY = INT_MIN;
+        if (object.prop.animFrame != 0 && !object.prop.special && object.party == 0) {  // UpdateObjFrame: an animation of its own
+            drawable.frame = animatedFrame(object.prop.animFrame, object.prop.facing, object.prop.speedShift, frame_, drawable.flip);
+        }
         if ((object.vehicle & FF6_VEHICLE_MASK) != 0) {
             drawable.topAbove = drawable.bottomAbove = false;  // a vehicle is always drawn at the normal priority, whatever the tile
             // The steps come from the position along the axis that it moves on, and the lead is moved by the player.
@@ -2232,11 +2286,11 @@ void Game::drawSprites(bool above) {
             continue;
         }
         if (sprite.topAbove == above) {
-            drawSpriteRows(screen, strip, sprite.frame, 0, FF6_SPRITE_TOP_HEIGHT, sprite.screenX, sprite.screenY);
+            drawSpriteRows(screen, strip, sprite.frame, 0, FF6_SPRITE_TOP_HEIGHT, sprite.screenX, sprite.screenY, sprite.flip);
         }
         if (sprite.bottomAbove == above) {
             drawSpriteRows(screen, strip, sprite.frame, FF6_SPRITE_TOP_HEIGHT, FF6_SPRITE_BOTTOM_HEIGHT, sprite.screenX,
-                           sprite.screenY + FF6_SPRITE_TOP_HEIGHT);
+                           sprite.screenY + FF6_SPRITE_TOP_HEIGHT, sprite.flip);
         }
     }
 }

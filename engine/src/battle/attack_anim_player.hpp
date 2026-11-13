@@ -188,6 +188,7 @@ public:
     // The waves of a layer of background (1 or 2).
     const AnimWave& wave(int layer) const { return waves_[layer]; }
     const AnimBlend& blend(int layer) const { return blends_[layer]; }
+    const AnimBlend& fieldBlend() const { return fieldBlend_; }  // bg2, the field: the color math that adds the subscreen to it
     // The scroll line by line of a layer of background (1 or 2), which the random scrolls, the quasar, the moon song and the
     // seizing tentacles set.
     const AnimLineScroll& lineScroll(int layer) const { return lines_[layer]; }
@@ -222,6 +223,8 @@ public:
     int spritePriority() const { return spritePriority_; }
     // Whether the tiles of bg3 are over everything (the usual), or behind the field, where bg3 only shows through the color math.
     bool bg3High() const { return bg3High_; }
+    // The monsters that the animation copied to bg1, a bit for each place; -1 when it did not (they are all sprites).
+    int bg1Monsters() const { return bg1Monsters_; }
     // The line under which a combatant is in front of bg1; the ones above it are behind it. 0 when the order is not set.
     int behindBg1Limit() const { return behindLimit_; }
     // The screen mosaic register that a script set ($2106: the size in the high nibble, the layers in the low one), and how many
@@ -313,6 +316,7 @@ private:
     AnimTint tints_[kTintGroups];
     AnimWave waves_[3];
     AnimBlend blends_[3];
+    AnimBlend fieldBlend_;
     AnimCycle cycles_[3];
     // The circle of the scripts, and the window 2 that it makes: for each line, the first and the last column inside it.
     struct Circle {
@@ -351,6 +355,7 @@ private:
     AnimEsperSheet esperSheet_;
     int mainLayers_ = 0x17, spritePriority_ = 3, rotateScale_ = 0xFF;
     bool bg3High_ = true;
+    int bg1Monsters_ = -1;
     int behindLimit_ = 0;
     bool veilBg3_ = false;  // the frames of bg1 and bg3 are those of Justice
     int bg1Base_[2] = {0, 0}, bg1Cur_[2] = {0, 0};  // where bg1 was set to start, and where its thread is: their gap is the scroll

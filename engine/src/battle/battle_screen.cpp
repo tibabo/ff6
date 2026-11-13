@@ -1,6 +1,7 @@
 #include "battle/battle_screen.hpp"
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -58,6 +59,37 @@ std::vector<std::string> dialogLines(const std::vector<uint8_t>& raw) {
     return lines;
 }
 
+// The same text cut in pages, as DrawLargeText shows them: the lines (code 1) of a page stay together until the code 7, where the
+// game waits for the button; the wait (5) is only a pause in the drawing of the letters.
+struct DialogPage {
+    std::vector<std::string> lines;
+    bool key = false;
+};
+std::vector<DialogPage> dialogPages(const std::vector<uint8_t>& raw) {
+    std::vector<DialogPage> pages(1);
+    size_t start = 0;
+    const auto take = [&](size_t end) {  // the letters from start to end, as dialogLines reads them
+        for (const std::string& line : dialogLines(std::vector<uint8_t>(raw.begin() + static_cast<std::ptrdiff_t>(start), raw.begin() + static_cast<std::ptrdiff_t>(end)))) {
+            pages.back().lines.push_back(line);
+        }
+        start = end + 1;
+    };
+    for (size_t i = 0; i < raw.size(); ++i) {
+        if (raw[i] == 0x02) {
+            ++i;  // the character of a name
+        } else if (raw[i] == 0x01) {
+            take(i);
+        } else if (raw[i] == 0x07) {
+            take(i);
+            pages.back().key = true;
+            pages.emplace_back();
+        }
+    }
+    take(raw.size());
+    if (pages.back().lines.empty()) pages.pop_back();
+    return pages;
+}
+
 // The colors of a picture with what a palette command adds to them or takes from them (a step of the game is 8 here).
 std::vector<uint8_t> colored(const std::vector<uint8_t>& rgba, const AnimTint& tint) {
     std::vector<uint8_t> result = rgba;
@@ -102,6 +134,7 @@ void BattleScreen::start(const BattleData& data, const GameRules& rules, PartySt
     formation_ = data.formation(battle);
     battle_.emplace(data, rules, party, characters, battle, seed, battleSpeed, colosseum, gameRandom_);
     battle_->setQueuedTurns(true);
+    resetFacing();
     introFrame_ = 0;
     waiting_.clear();
     actions_.clear();
@@ -144,6 +177,8 @@ void BattleScreen::start(const BattleData& data, const GameRules& rules, PartySt
     fadeTimer_.fill(0);
     escapeTimer_.fill(0);
     dying_.fill(false);
+    leaving_.fill(0);
+    arriving_.fill(false);
     fx_.clear();
     numerals_.clear();
     lastElement_ = 0;
@@ -151,7 +186,7 @@ void BattleScreen::start(const BattleData& data, const GameRules& rules, PartySt
     messages_.clear();
     current_.clear();
     victory_.clear();
-    currentKeyWait_ = currentFixed_ = false;
+    currentKeyWait_ = false;
     messageTimer_ = 0;
     popupTarget_ = popupDamage_ = -1;
     pendingPopup_ = PendingPopup();
@@ -163,6 +198,7 @@ void BattleScreen::start(const BattleData& data, const GameRules& rules, PartySt
     command_ = 0;
     running_ = false;
     finishing_ = false;
+    victoryFrames_ = 0;
     wait_ = wait;
     repeat_.reset();
     if (battle_->preemptive()) {
@@ -309,8 +345,16 @@ bool BattleScreen::body(int combatant, AnimBody& out) const {
         out.monster = false;
         out.slot = combatant;
         out.backRow = battle_->combatants()[static_cast<size_t>(combatant)].backRow;
+        // CalcAttackerPos and CalcTargetPos: the sprite starts 8 lines above the position of the character, its center is 8 lines
+        // below it and its bottom 16; in a magitek armor (GetMagitekOffset) all of them are 12 lines higher.
         x = characterX(combatant);
-        y = characterTop(combatant);
+        y = characterTop(combatant) + FF6_CHAR_SPRITE_DY + (magitekMode() ? FF6_ANIM_MAGITEK_OFFSET : 0);
+        out.centerX = x + width / 2;
+        out.centerY = y + FF6_CHAR_ANIM_CENTER_DY;
+        out.topY = y;
+        out.bottomY = y + height;
+        out.width = width;
+        return true;
     } else {
         if (!gfx_) return false;
         const size_t slot = static_cast<size_t>(combatant - FF6_BATTLE_PARTY_SLOTS);
@@ -325,7 +369,7 @@ bool BattleScreen::body(int combatant, AnimBody& out) const {
     out.centerX = x + width / 2;
     out.centerY = y + height / 2;
     out.topY = y;
-    out.bottomY = y + height;
+    out.bottomY = y + height - FF6_MONSTER_ANIM_BOTTOM_INSET;  // w7e8027: the bottom of a monster for the animations is 8 lines up
     out.width = width;
     return true;
 }
@@ -626,9 +670,10 @@ void BattleScreen::drawAnimation() {
             if (subscreen & 0x10) take(behindPixels_, false);
             if (justice && layer == 2 && (subscreen & 0x10)) take(layerPixels_[0], false);  // under bg1
             if ((subscreen & 0x04) && layer != 2) take(layerPixels_[2], false);
+            if (subscreen & 0x01) take(monsterPixels_, false);  // the monsters copied to bg1
             if ((subscreen & 0x01) && layer != 1) take(layerPixels_[1], false);
             if (subscreen & 0x10) {
-                take(objectPixels_, false);
+                take(charPixels_, false);  // the sprites: the characters, and the monsters that are not on bg1
                 if (layer == 2 && !justice) take(layerPixels_[0], false);
             }
             for (int channel = 0; channel < 3; ++channel) {
@@ -710,6 +755,7 @@ void BattleScreen::trigger(const Message& message) {
     switch (message.effect) {
         case Message::Effect::Cast: {
             lastElement_ = message.element;
+            if (!message.animTargets.empty()) faceTarget(message.actor, message.animTargets.front());
             if (message.actor >= FF6_BATTLE_PARTY_SLOTS) monsterFlash_[static_cast<size_t>(message.actor)] = FF6_MONSTER_FLASH_FRAMES;  // it acts
             // The name of the attack stays alone in its window for the time of the message speed, then the animation comes.
             nameTimer_ = message.text.empty() ? 0 : message.largeName ? FF6_MONSTER_SPECIAL_NAME_FRAMES : FF6_BATTLE_MSG_SPEED_BASE + FF6_BATTLE_MSG_SPEED_STEP * messageSpeed_;
@@ -735,6 +781,7 @@ void BattleScreen::trigger(const Message& message) {
                 blowLead_ = FF6_MONSTER_BLOW_LEAD;
                 break;
             }
+            faceTarget(message.actor, message.subject);
             if (message.actor < FF6_BATTLE_PARTY_SLOTS) pose(message.actor, FF6_CHAR_POSE_ATTACK, FF6_BATTLE_POSE_FRAMES / 2, FF6_BATTLE_POSE_FRAMES / 2);
             startBlow(message);
             hurt(message.subject);
@@ -768,11 +815,18 @@ void BattleScreen::trigger(const Message& message) {
         case Message::Effect::Animate:
             startAnimation(message);
             if (animated_ && message.moves) sceneActive_ = true;  // flushScene keeps where the characters ended up
-            if (animated_ && message.actor >= FF6_BATTLE_PARTY_SLOTS && !message.moves) {
+            if (animated_ && message.actor >= FF6_BATTLE_PARTY_SLOTS && !message.moves && message.entryBatch < 0) {
                 persistSlot_ = message.actor;
                 persistLast_ = AnimShift();
             }
             break;
+    }
+    if (message.entryBatch >= 0) {  // the monsters that come show now; the ones that go stay for their animation
+        for (const int monster : message.animTargets) {
+            const size_t slot = static_cast<size_t>(monster);
+            if (message.entering) arriving_[slot] = false;
+            else leaving_[slot] = animated_ ? 2 : 0;
+        }
     }
     if (message.sfx >= 0) sound_.command(FF6_SOUND_GAME_SFX, static_cast<uint8_t>(message.sfx), FF6_SFX_PAN_CENTER);
     if (message.flash) {
@@ -785,16 +839,34 @@ void BattleScreen::trigger(const Message& message) {
 }
 
 // A dialog of a scene: its lines are messages, and the name of who talks goes with the first one.
+// BATTLE_DLG: the window shows a page of lines, one letter a frame, and waits for the button where the text says so.
 void BattleScreen::queueDialog(int dialog, std::string& speaker) {
-    for (const std::string& part : dialogLines(data_->battleDialog(dialog))) {
-        if (!part.empty() && part.back() == ':') {
-            speaker = part + " ";
-            continue;
-        }
-        queue(text(speaker + part));
-        speaker.clear();
+    speaker.clear();
+    for (const DialogPage& page : dialogPages(data_->battleDialog(dialog))) {
+        Message shown{dialogCodes(page.lines)};
+        shown.reveal = true;
+        shown.keyWait = page.key;
+        shown.wait = page.key ? -1 : letterCount(shown.text) + messageWait();
+        messages_.push_back(shown);
     }
 }
+
+// The lines of a page as one text, the code FF6_BATTLE_LINE_BREAK between them.
+BattleScreen::Codes BattleScreen::dialogCodes(const std::vector<std::string>& lines) {
+    Codes codes;
+    for (const std::string& line : lines) {
+        if (!codes.empty()) codes.push_back(FF6_BATTLE_LINE_BREAK);
+        const Codes part = text(line);
+        codes.insert(codes.end(), part.begin(), part.end());
+    }
+    return codes;
+}
+
+int BattleScreen::letterCount(const Codes& codes) {
+    return static_cast<int>(std::count_if(codes.begin(), codes.end(), [](uint8_t code) { return code != FF6_BATTLE_LINE_BREAK; }));
+}
+
+int BattleScreen::messageWait() const { return FF6_BATTLE_MSG_SPEED_BASE + FF6_BATTLE_MSG_SPEED_STEP * messageSpeed_; }
 
 // A battle event (F7) as its script says: the dialogs, and what the characters do between them, which plays when the script asks.
 void BattleScreen::queueScene(int event) {
@@ -1037,6 +1109,7 @@ void BattleScreen::tickEffects() {
         if (blinkTimer_[i] > 0) --blinkTimer_[i];
         if (monsterFlash_[i] > 0) --monsterFlash_[i];
         if (fadeTimer_[i] > 0 && --fadeTimer_[i] == 0) dying_[i] = false;
+        if (leaving_[i] == 2 && !animating()) leaving_[i] = 0;  // its exit is over
         if (escapeTimer_[i] > 0) --escapeTimer_[i];
     }
     // A number stays for a little over a second, and goes with the monster that it is over when this one is no longer shown.
@@ -1053,6 +1126,7 @@ void BattleScreen::tickEffects() {
 
 void BattleScreen::collectEvents() {
     const std::vector<BattleEvent> events = battle_->takeEvents();
+    ++entryBatch_;
     // The game says nothing of the damage, the recoveries and the monsters that fall: the numbers jump over the combatants. When the
     // next event is the fall of the monster that took the blow, its fade starts a few frames after the number shows.
     const auto soon = [&](size_t index, int target) {
@@ -1174,8 +1248,7 @@ void BattleScreen::collectEvents() {
                 break;
             case BattleEvent::Kind::NoEffect: queue(text("No effect")); break;
             case BattleEvent::Kind::Stole: {
-                const uint8_t* name = screen_.data().itemNames.data() + static_cast<size_t>(event.item) * FF6_ITEM_NAME_BYTES;
-                queue(join({text("Stole "), Codes(name, name + FF6_ITEM_NAME_BYTES)}));
+                queue(join({text("Stole "), messageItemName(event.item)}));
                 break;
             }
             case BattleEvent::Kind::StealFailed: queue(text("Couldn't steal anything")); break;
@@ -1191,8 +1264,7 @@ void BattleScreen::collectEvents() {
                 break;
             }
             case BattleEvent::Kind::GotItem: {
-                const uint8_t* name = screen_.data().itemNames.data() + static_cast<size_t>(event.item) * FF6_ITEM_NAME_BYTES;
-                queue(join({text("Got "), Codes(name, name + FF6_ITEM_NAME_BYTES)}));
+                queue(join({text("Got "), messageItemName(event.item)}));
                 break;
             }
             case BattleEvent::Kind::ChangedRow:
@@ -1215,15 +1287,42 @@ void BattleScreen::collectEvents() {
                 break;
             }
             case BattleEvent::Kind::Dialog:
-                for (const std::string& part : dialogLines(data_->monsterDialog(event.damage))) queue(text(part));
+                for (const DialogPage& page : dialogPages(data_->monsterDialog(event.damage))) {  // MONSTER_DLG: one letter a frame, then
+                    Message said{dialogCodes(page.lines)};                                     // the time of the message speed (MsgSpeedTbl)
+                    said.reveal = true;
+                    said.wait = letterCount(said.text) + messageWait();
+                    messages_.push_back(said);
+                }
                 break;
             case BattleEvent::Kind::ChangeBattle:
                 formation_ = data_->formation(event.damage);
                 dying_.fill(false);
                 break;
-            case BattleEvent::Kind::Entry:
-                if (event.attacker >= FF6_BATTLE_PARTY_SLOTS) dying_[static_cast<size_t>(event.attacker)] = event.damage == 1 || event.damage >= 3;
+            case BattleEvent::Kind::Entry: {  // F5 (MONSTER_ENTRY_EXIT): the monster goes or comes, by its animation
+                if (event.attacker < FF6_BATTLE_PARTY_SLOTS) break;
+                static constexpr int kEntry[FF6_MONSTER_ENTRY_EXIT_TYPES] = FF6_MONSTER_ENTRY_ANIMS, kExit[FF6_MONSTER_ENTRY_EXIT_TYPES] = FF6_MONSTER_EXIT_ANIMS;
+                const size_t slot = static_cast<size_t>(event.attacker);
+                const bool entering = event.damage == 0 || event.damage == 2;
+                const int type = event.attack;
+                const int anim = type >= 0 && type < FF6_MONSTER_ENTRY_EXIT_TYPES ? (entering ? kEntry : kExit)[type] : -1;
+                dying_[slot] = false;
+                if (entering) arriving_[slot] = true;
+                else leaving_[slot] = 1;
+                if (!messages_.empty() && messages_.back().entryBatch == entryBatch_ && messages_.back().entering == entering &&
+                    messages_.back().attack == anim) {
+                    messages_.back().animTargets.push_back(event.attacker);
+                    break;
+                }
+                Message shown;
+                shown.effect = anim >= 0 && player_ ? Message::Effect::Animate : Message::Effect::None;
+                shown.attack = anim;
+                shown.actor = event.attacker;
+                shown.animTargets = {event.attacker};
+                shown.entryBatch = entryBatch_;
+                shown.entering = entering;
+                messages_.push_back(shown);
                 break;
+            }
             case BattleEvent::Kind::Rage: {
                 Codes name = data_->name(event.attack);
                 name.erase(std::find(name.begin(), name.end(), FF6_BATTLE_NAME_PAD_CODE), name.end());
@@ -1350,23 +1449,27 @@ void BattleScreen::revealPopup() {
     pendingPopup_ = PendingPopup();
 }
 
-void BattleScreen::advanceMessage(bool skip) {
-    if (animating()) {  // the damage waits for the end of the animation, unless the button cuts it short
-        if (!skip || sceneActive_) return;  // a scene is not cut: the characters would stop half way
-        castLead_ = 0;
-        if (player_) player_->stop();
-        flushPersist();
-    }
+// As in the game, a button cuts neither an animation nor a message short: it only lets go of a message that waits for it.
+// DlgTextCmd_0e: the name of an item in a message, without its icon (the first byte), up to the first 0xFF.
+std::vector<uint8_t> BattleScreen::messageItemName(int item) const {
+    const uint8_t* name = screen_.data().itemNames.data() + static_cast<size_t>(item) * FF6_ITEM_NAME_BYTES;
+    Codes words(name + FF6_ITEM_ICON_BYTES, name + FF6_ITEM_NAME_BYTES);
+    words.erase(std::find(words.begin(), words.end(), FF6_BATTLE_NAME_PAD_CODE), words.end());
+    return words;
+}
+
+void BattleScreen::advanceMessage(bool pressed) {
+    if (animating()) return;  // the damage waits for the end of the animation
     revealPopup();
-    if (currentKeyWait_) {  // the message stays until a button is pressed
-        if (!skip) return;
-    } else if (currentFixed_) {
-        skip = false;
+    bool skip = false;
+    if (currentKeyWait_) {  // the message stays until a button is pressed, once all its letters are there
+        if (!pressed || (currentReveal_ && revealed_ < letterCount(current_))) return;
+        skip = true;
     }
     if (messageTimer_ > 0 && !skip && --messageTimer_ > 0) return;
     messageTimer_ = 0;
     current_.clear();
-    currentKeyWait_ = currentFixed_ = false;
+    currentKeyWait_ = false;
     popupTarget_ = popupDamage_ = -1;
     pendingPopup_ = PendingPopup();
     while (!messages_.empty() && messages_.front().instant) {
@@ -1381,7 +1484,8 @@ void BattleScreen::advanceMessage(bool skip) {
     currentName_ = messages_.front().effect == Message::Effect::Cast;
     currentLarge_ = messages_.front().largeName;
     currentKeyWait_ = messages_.front().keyWait;
-    currentFixed_ = messages_.front().fixed;
+    currentReveal_ = messages_.front().reveal;
+    revealed_ = 0;
     trigger(messages_.front());
     pendingPopup_ = {messages_.front().target, messages_.front().damage, messages_.front().hpAfter, messages_.front().wait,
                      messages_.front().effect == Message::Effect::Heal};
@@ -1395,19 +1499,21 @@ void BattleScreen::advanceMessage(bool skip) {
 // points, the levels and what was learned, the items and the gil, each one for the time of the message speed (MsgSpeedTbl),
 // with the window closed in between; the battle ends a few frames after the last one.
 void BattleScreen::finish() {
+    if (battle_->outcome() == BattleOutcome::Won && !battle_->victory()) {  // FB 02 (end_battle): no WinBattle, the battle just ends
+        mode_ = BattleMode::Done;
+        return;
+    }
     if (battle_->outcome() == BattleOutcome::Won && !finishing_) {
         finishing_ = true;
         const auto pause = [&](int frames) {
             Message gap;
             gap.wait = frames;
-            gap.fixed = true;
             messages_.push_back(gap);
         };
         const auto say = [&](const Codes& words, bool keyWait) {
             if (!messages_.empty() && messages_.back().text.empty() == false) pause(FF6_BATTLE_WIN_GAP_FRAMES);
             Message shown{words};
             shown.wait = FF6_BATTLE_MSG_SPEED_BASE + FF6_BATTLE_MSG_SPEED_STEP * messageSpeed_;
-            shown.fixed = true;
             shown.keyWait = keyWait;
             messages_.push_back(shown);
         };
@@ -1416,10 +1522,7 @@ void BattleScreen::finish() {
         if (reward.exp > 0) say(join({text("Got "), text(std::to_string(reward.exp)), text(" Exp. point(s)")}), true);
         for (const Codes& line : victory_) say(line, false);
         for (const int item : reward.items) {
-            const uint8_t* name = screen_.data().itemNames.data() + static_cast<size_t>(item) * FF6_ITEM_NAME_BYTES;
-            Codes words = Codes(name, name + FF6_ITEM_NAME_BYTES);
-            words.erase(std::find(words.begin(), words.end(), FF6_BATTLE_NAME_PAD_CODE), words.end());
-            say(join({text("Got "), words}), false);
+            say(join({text("Got "), messageItemName(item)}), false);
         }
         if (reward.gil > 0) say(join({text("Got "), text(std::to_string(reward.gil)), text(" GP")}), false);
         pause(FF6_BATTLE_WIN_END_FRAMES);
@@ -1445,6 +1548,8 @@ void BattleScreen::finish() {
 void BattleScreen::update(const InputState& input) {
     if (!battle_ || mode_ == BattleMode::Done) return;
     ++introFrame_;
+    if (won()) ++victoryFrames_;
+    if (!current_.empty()) ++revealed_;  // one letter a frame
     tickEffects();
     if (!presenting() && actions_.empty()) {  // nothing is left to show
         heldHp_.fill(-1);
@@ -1462,12 +1567,15 @@ void BattleScreen::update(const InputState& input) {
         return;
     }
     const bool menuOpen = mode_ != BattleMode::Fighting;
-    if (battle_->outcome() == BattleOutcome::Fighting) {
+    // A scene (battle event) holds the battle loop: the time stops, the menus wait, and the button goes to its dialog.
+    const bool scene = sceneHolds();
+    if (battle_->outcome() == BattleOutcome::Fighting && !scene) {
         if (!presenting()) battle_->stepRandom();  // the main loop turns while no action is shown
         tickTime();
         runActions();
     }
-    if (!messages_.empty() || messageTimer_ > 0) advanceMessage(input.confirm && !menuOpen);
+    if (!messages_.empty() || messageTimer_ > 0) advanceMessage(input.confirm && (!menuOpen || scene));
+    if (scene && battle_->outcome() == BattleOutcome::Fighting) return;
     if (battle_->outcome() != BattleOutcome::Fighting) {
         if (menuOpen && mode_ != BattleMode::Done) mode_ = BattleMode::Fighting;
         if (!presenting()) finish();
@@ -1484,6 +1592,11 @@ void BattleScreen::update(const InputState& input) {
         case BattleMode::Result:
         case BattleMode::Done: break;
     }
+}
+
+bool BattleScreen::sceneHolds() const {
+    if (sceneActive_ || (currentKeyWait_ && currentReveal_)) return true;
+    return std::any_of(messages_.begin(), messages_.end(), [](const Message& message) { return message.keyWait && message.reveal; });
 }
 
 bool BattleScreen::presenting() const {
@@ -1576,7 +1689,10 @@ void BattleScreen::updateFighting(const InputState& input) {
     }
     if (running_) return;
     if (menuDelay_ > 0) {
-        if (--menuDelay_ == 0) openCommands();
+        if (--menuDelay_ == 0) {
+            openCommands();
+            sound_.command(FF6_SFX_CHARACTER_ACTIVE, 0, 0);  // PlayerSfx: the window of the commands of a character opens
+        }
         return;
     }
     while (!menuQueue_.empty()) {
@@ -2312,10 +2428,24 @@ int BattleScreen::characterX(int slot) const {
 
 // CharFlipTbl: the characters that face right, by the type of the battle: all of them in a back attack, every other one in a pincer
 // attack and the two last in a side attack.
-bool BattleScreen::facesRight(int slot) const {
+bool BattleScreen::facesRight(int slot) const { return facing_[static_cast<size_t>(slot)]; }
+
+// The way each character faces when the battle starts, by the type of the battle.
+void BattleScreen::resetFacing() {
     static constexpr bool kFlip[FF6_BATTLE_TYPE_COUNT][FF6_BATTLE_PARTY_SLOTS] = {
         {false, false, false, false}, {true, true, true, true}, {true, false, true, false}, {false, false, true, true}};
-    return kFlip[std::clamp(battle_->battleType(), 0, FF6_BATTLE_TYPE_COUNT - 1)][slot];
+    const int type = std::clamp(battle_->battleType(), 0, FF6_BATTLE_TYPE_COUNT - 1);
+    for (int slot = 0; slot < FF6_BATTLE_PARTY_SLOTS; ++slot) facing_[static_cast<size_t>(slot)] = kFlip[type][slot];
+}
+
+// magic_front: a character that attacks a monster turns to it first, and keeps facing that way.
+void BattleScreen::faceTarget(int actor, int target) {
+    if (actor < 0 || actor >= FF6_BATTLE_PARTY_SLOTS || target < FF6_BATTLE_PARTY_SLOTS) return;
+    AnimBody attacker, aimed;
+    if (!body(actor, attacker) || !body(target, aimed)) return;
+    if (facing_[static_cast<size_t>(actor)] ? aimed.centerX < attacker.centerX : aimed.centerX >= attacker.centerX) {
+        facing_[static_cast<size_t>(actor)] = !facing_[static_cast<size_t>(actor)];
+    }
 }
 
 namespace {
@@ -2471,6 +2601,9 @@ void BattleScreen::drawField() {
     bgPixels_.assign(screen_.pixels().begin(), screen_.pixels().begin() + static_cast<std::ptrdiff_t>(fieldBytes));
     objectPixels_.assign(fieldBytes, 0);
     behindPixels_.assign(fieldBytes, 0);
+    charPixels_.assign(fieldBytes, 0);
+    monsterPixels_.assign(fieldBytes, 0);
+    bool monsterDraw = false;  // the combatant being drawn is a monster that an animation copied to bg1, not a sprite
     for (std::vector<uint8_t>& layer : layerPixels_) layer.assign(fieldBytes, 0);
     frontPixels_.assign(fieldBytes, 0);
     frontShown_ = false;
@@ -2486,6 +2619,7 @@ void BattleScreen::drawField() {
                 if (from[FF6_ALPHA_OFFSET] == 0) continue;
                 const size_t at = (static_cast<size_t>(y + row) * FF6_SCREEN_WIDTH + x + column) * FF6_BYTES_PER_PIXEL;
                 std::copy(from, from + FF6_BYTES_PER_PIXEL, &target[at]);
+                std::copy(from, from + FF6_BYTES_PER_PIXEL, &(monsterDraw ? monsterPixels_ : charPixels_)[at]);
                 if (frontDraw && !behind) {
                     std::copy(from, from + FF6_BYTES_PER_PIXEL, &frontPixels_[at]);
                     frontShown_ = true;
@@ -2494,16 +2628,22 @@ void BattleScreen::drawField() {
         }
     };
     const AnimTint monsterTint = tintOf(kTintMonsters), characterTint = tintOf(kTintCharacters);
+    // BOSS_DEATH: the monsters (sprites of priority 0) go behind the field, which adds the subscreen where they are: as their
+    // colors go to black, they melt into the field.
+    const bool ghostMonsters = scripted && !mode7Shown() && player_->spritePriority() == 0 && player_->fieldBlend().math && (player_->subscreen() & 0x10);
     for (size_t i = 0; i < formation_.monsters.size(); ++i) {
         const size_t slot = FF6_BATTLE_PARTY_SLOTS + i;
         const Combatant& monster = battle_->combatants()[slot];
         const AnimShift shift = shiftOf(true, static_cast<int>(i));
         frontDraw = scripted && shift.priority == FF6_ANIM_PRIORITY_FRONT;
+        monsterDraw = scripted && player_->bg1Monsters() >= 0 && (player_->bg1Monsters() & (1 << i));  // copied to bg1 (MonstersToBG1), not a sprite
         const bool blinkOff = blinkTimer_[slot] > 0 && (blinkTimer_[slot] / FF6_BATTLE_BLINK_PERIOD) % 2 == 0;
         bool shown = monster.alive() && !(monster.status & FF6_ST_HIDE) && !blinkOff;
         const bool entering = battle_->battleType() == FF6_BATTLE_TYPE_NORMAL && monster.placeX < 0 && introFrame_ < FF6_BATTLE_ENTRY_START + FF6_BATTLE_ENTRY_FRAMES;
         if (entering && introFrame_ < FF6_BATTLE_ENTRY_START) shown = false;  // the monsters come once the fade in is over
         if (dying_[slot]) shown = true;
+        if (leaving_[slot]) shown = !blinkOff;
+        if (arriving_[slot]) shown = false;
         if (!shown || shift.hidden) continue;
         const BattleImage& stock = monsterImage(i);
         if (stock.rgba.empty()) continue;
@@ -2542,6 +2682,11 @@ void BattleScreen::drawField() {
             continue;
         }
         const std::vector<uint8_t> lit = monsterTint.active ? colored(whole.rgba, monsterTint) : std::vector<uint8_t>();
+        if (ghostMonsters && !monsterDraw) {  // behind the field, on the subscreen that is added to it: the field shows through
+            screen_.imageMath(monsterX(i, image.width) + shift.x + shift.vx + tremble, monsterTop + shift.y + shift.vy, image.width, image.height,
+                              monsterTint.active ? lit.data() : whole.rgba.data(), player_->fieldBlend().subtract, player_->fieldBlend().half);
+            continue;
+        }
         place(monsterX(i, image.width) + shift.x + shift.vx + tremble, monsterTop + shift.y + shift.vy, image.width, image.height,
               monsterTint.active ? lit.data() : whole.rgba.data(), behindLimit > 0 && monsterTop + image.height - 8 < behindLimit);
     }
@@ -2557,14 +2702,28 @@ void BattleScreen::drawField() {
         const int hp = shownHp(i);
         int pose = FF6_CHAR_POSE_FIGHT;
         bool poseFlip = false;
+        int cheerLift = 0;  // the frame JUMPING_FORWARD of an action is drawn a pixel higher
         const AnimShift shift = shiftOf(false, i);
         frontDraw = scripted && shift.priority == FF6_ANIM_PRIORITY_FRONT;
+        monsterDraw = false;
+        const bool walkingBack = !scripted && stepBack_ > 0 && hp > 0 &&
+                                 (stepFrom_[static_cast<size_t>(i)].first != 0 || stepFrom_[static_cast<size_t>(i)].second != 0);
         if (c.escaped) {
             pose = FF6_CHAR_POSE_RUN;
         } else if (hp == 0) {
             pose = FF6_CHAR_POSE_DEAD;
-        } else if (battle_->outcome() == BattleOutcome::Won && resolved()) {
-            pose = FF6_CHAR_POSE_VICTORY;
+        } else if (victoryShown() && !(formation_.flags & FF6_BATTLE_FLAG_NO_FANFARE)) {  // CharVictoryAnim (BTL_GFX::VICTORY skips it without a fanfare)
+            static constexpr int kLeft[4] = FF6_VICTORY_SPIN_LEFT, kRight[4] = FF6_VICTORY_SPIN_RIGHT, kCheer[4] = FF6_VICTORY_CHEER;
+            const int step = (victoryFrames_ - FF6_BATTLE_WIN_START) / FF6_VICTORY_SPIN_STEP;
+            const int frame = step < 4 ? (facesRight(i) ? kRight : kLeft)[step] : kCheer[(animation_ >> FF6_VICTORY_CHEER_SHIFT) & 3];
+            poseFlip = frame >= FF6_CHAR_POSE_FLIPPED;
+            pose = poseFlip ? frame - FF6_CHAR_POSE_FLIPPED : frame;
+            if (step >= 4 && pose == FF6_CHAR_POSE_ARMS_FORWARD) cheerLift = 1;
+        } else if (walkingBack) {  // STEP_BACK: it walks (WALKING_FORWARD), turned to where it goes if it faces the other way
+            static constexpr int kWalk[4] = FF6_CHAR_WALK_FORWARD_FRAMES;
+            pose = kWalk[(animation_ >> FF6_CHAR_ACTION_SHIFT) & 3];
+            const int dx = -stepFrom_[static_cast<size_t>(i)].first;  // it goes back to its place
+            poseFlip = dx != 0 && (dx > 0) != facesRight(i);
         } else if (poseTimer_[static_cast<size_t>(i)] > 0) {
             pose = poseValue_[static_cast<size_t>(i)];
         } else if (c.ready && !running_) {
@@ -2617,7 +2776,7 @@ void BattleScreen::drawField() {
         const BattleImage& shadow = gfx_->statusSprite(FF6_STATUS_SPRITE_SHADOW, 0);  // under the feet, behind the character
         if (!shadow.rgba.empty() && !armored) place(x, characterTop(i) + FF6_CHAR_SPRITE_DY + FF6_CHAR_HEIGHT + shift.y, shadow.width, shadow.height, shadow.rgba.data(), behindBg1);
         const std::vector<uint8_t>& drawnPixels = characterTint.active ? lit : faced.rgba;
-        const int drawnTop = characterTop(i) + FF6_CHAR_SPRITE_DY + shift.y + shift.vy - lift;  // CharSpriteData: the sprite starts 8 lines above PosY
+        const int drawnTop = characterTop(i) + FF6_CHAR_SPRITE_DY + shift.y + shift.vy - lift - cheerLift;  // CharSpriteData: the sprite starts 8 lines above PosY
         if (scripted && player_->echo().on && player_->echo().slot == i) {  // the echoes come first, behind the character
             if ((animation_ & player_->echo().mask) == 0) {
                 for (size_t k = echoHistory_.size() - 1; k > 0; --k) echoHistory_[k] = echoHistory_[k - 1];
@@ -2631,11 +2790,12 @@ void BattleScreen::drawField() {
         place(x, drawnTop - (armored && hp > 0 ? FF6_MAGITEK_LIFT : 0), image.width, image.height, drawnPixels.data(), behindBg1);
         if (armored && hp > 0) {  // the armor covers the legs of the rider
             static constexpr int kWalk[4] = {0, 1, 0, 2};
-            const BattleImage& armor = gfx_->magitekArmor(shift.armor == 2 ? 3 : shift.armor == 1 || step != 0 ? kWalk[(animation_ >> 2) & 3] : 0);
+            const BattleImage& armor = gfx_->magitekArmor(shift.armor == 2 ? 3 : shift.armor == 1 || step != 0 || walkingBack ? kWalk[(animation_ >> 2) & 3] : 0);  // wMagitekAnimType 1 on the way back
+            const bool armorBack = turnedPose;  // the armor turns with its rider (the way back, the spin of the victory)
             if (!armor.rgba.empty()) {
-                const BattleImage mirrored = back ? turned(armor) : BattleImage();
-                place(back ? x + FF6_CHAR_WIDTH - FF6_MAGITEK_X - armor.width : x + FF6_MAGITEK_X, drawnTop + FF6_MAGITEK_Y, armor.width,
-                      armor.height, (back ? mirrored : armor).rgba.data(), behindBg1);
+                const BattleImage mirrored = armorBack ? turned(armor) : BattleImage();
+                place(armorBack ? x + FF6_CHAR_WIDTH - FF6_MAGITEK_X - armor.width : x + FF6_MAGITEK_X, drawnTop + cheerLift + FF6_MAGITEK_Y,
+                      armor.width, armor.height, (armorBack ? mirrored : armor).rgba.data(), behindBg1);
             }
         }
         const int kind = hp > 0 && !armored ? statusSpriteKind(status) : 0;  // a sprite over the head: the bubbles, the dots, the zzz
@@ -2866,9 +3026,24 @@ void BattleScreen::draw() {
     if (!current_.empty() && !mode7Shown() && (!currentName_ || nameTimer_ > 0)) {
         const int x = currentName_ ? FF6_BATTLE_NAME_BOX_X : FF6_BATTLE_MESSAGE_BOX_X;
         const int w = currentName_ ? FF6_BATTLE_NAME_BOX_W : FF6_BATTLE_MESSAGE_BOX_W;
-        screen_.windowPx(x, FF6_BATTLE_MESSAGE_BOX_Y, w, FF6_BATTLE_MESSAGE_BOX_H, FF6_BATTLE_MESSAGE_GRADIENT_START, FF6_BATTLE_MESSAGE_GRADIENT_LINES);
+        std::vector<Codes> lines(1);  // a dialog: its lines, and only the letters that have come so far
+        int left = currentReveal_ ? revealed_ : INT_MAX;
+        for (const uint8_t code : current_) {
+            if (code == FF6_BATTLE_LINE_BREAK) {
+                lines.emplace_back();
+            } else if (left > 0) {
+                lines.back().push_back(code);
+                --left;
+            }
+        }
+        const int extra = static_cast<int>(lines.size() - 1) * FF6_TEXT_LINE_HEIGHT;
+        screen_.windowPx(x, FF6_BATTLE_MESSAGE_BOX_Y, w, FF6_BATTLE_MESSAGE_BOX_H + extra, FF6_BATTLE_MESSAGE_GRADIENT_START, FF6_BATTLE_MESSAGE_GRADIENT_LINES);
         const int length = static_cast<int>(current_.size()) * FF6_MENU_TILE_SIZE;
-        if (currentName_ && currentLarge_) {  // the name of the special attack of a monster, in the middle (_c19887)
+        if (lines.size() > 1 || currentReveal_) {
+            for (size_t line = 0; line < lines.size(); ++line) {
+                screen_.largeText(FF6_BATTLE_MESSAGE_LARGE_X, FF6_BATTLE_MESSAGE_LARGE_Y + static_cast<int>(line) * FF6_TEXT_LINE_HEIGHT, lines[line]);
+            }
+        } else if (currentName_ && currentLarge_) {  // the name of the special attack of a monster, in the middle (_c19887)
             screen_.largeText(x + w / 2, FF6_BATTLE_MESSAGE_LARGE_Y, current_, true);
         } else if (currentName_) {  // the small font of the menus
             putAt(x + (w - length) / 2, FF6_BATTLE_MESSAGE_TEXT_Y, current_, FF6_MENU_BG3_DEFAULT);
