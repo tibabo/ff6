@@ -32,6 +32,12 @@ const BattleImage& BattleGfx::monster(int id) const {
 
 BattleImage BattleGfx::monsterWith(int id, const std::array<uint16_t, 8>& colors) const { return decodeMonster(id, colors.data(), colors.size()); }
 
+BattleImage BattleGfx::monsterFlash(int id) const {
+    uint16_t colors[16] = {};
+    colors[1] = FF6_MONSTER_FLASH_OUTLINE;
+    return decodeMonster(id, colors, 16);
+}
+
 BattleImage BattleGfx::monsterFading(int id, int step) const {
     static constexpr uint16_t kPurples[16] = FF6_MONSTER_DEATH_PALETTE;
     uint16_t faded[16];
@@ -273,6 +279,20 @@ const BattleImage& BattleGfx::statusSprite(int kind, int frame) const {
     return image;
 }
 
+BattleImage BattleGfx::statusSprite(int tile, const uint16_t* colors) const {
+    BattleImage image;
+    uint8_t rgba[16][FF6_BYTES_PER_PIXEL] = {};
+    for (int c = 12; c < 16; ++c) colorToRgba(colors[c - 12], rgba[c]);
+    image.width = image.height = 2 * FF6_MENU_TILE_SIZE;
+    image.rgba.assign(static_cast<size_t>(image.width) * image.height * FF6_BYTES_PER_PIXEL, 0);
+    for (int part = 0; part < 4; ++part) {
+        const size_t at = static_cast<size_t>(tile + part % 2 + part / 2 * 16) * FF6_TILE_4BPP_BYTES;
+        if (at + FF6_TILE_4BPP_BYTES > statusGfx.size()) continue;
+        decodeTile(&statusGfx[at], false, rgba, image.rgba.data(), image.width, part % 2 * FF6_MENU_TILE_SIZE, part / 2 * FF6_MENU_TILE_SIZE);
+    }
+    return image;
+}
+
 const BattleImage& BattleGfx::numeral(int value, bool green) const {
     const int key = (value + 1) * 2 + (green ? 1 : 0);
     const auto found = numerals_.find(key);
@@ -340,6 +360,8 @@ BattleGfx loadBattleGfx(const std::string& packDir) {
     gfx.statusGfx = reader.bytes(FF6_STATUS_GFX_BYTES);
     gfx.statusPal = reader.bytes(FF6_STATUS_PAL_BYTES);
     gfx.magitekGfx = reader.bytes(static_cast<size_t>(FF6_MAGITEK_FRAMES) * FF6_MAGITEK_FRAME_BYTES);
+    const std::vector<uint8_t> fontPal = reader.bytes(static_cast<size_t>(FF6_BATTLE_FONT_PAL_COLORS) * 2);
+    for (size_t i = 0; i < gfx.fontPal.size(); ++i) gfx.fontPal[i] = static_cast<uint16_t>(fontPal[i * 2] | (fontPal[i * 2 + 1] << 8));
     if (reader.remaining() != 0) throw std::runtime_error("battle graphics have trailing bytes");
     return gfx;
 }

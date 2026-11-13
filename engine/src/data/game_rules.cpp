@@ -6,16 +6,17 @@
 
 namespace ff6 {
 
-// The names of the ROM are in capitals; the first letter keeps its case, as the other names of the engine.
+// The names as the ROM has them: capitals, and question marks for a character that has none yet.
 std::string GameRules::actorName(int actor) const {
     std::string name;
     if (actor < 0 || actor >= FF6_CHAR_PROP_COUNT || charNames.size() < static_cast<size_t>(actor + 1) * FF6_CHAR_NAME_BYTES) return name;
     for (int i = 0; i < FF6_CHAR_NAME_BYTES; ++i) {
         const uint8_t code = charNames[static_cast<size_t>(actor) * FF6_CHAR_NAME_BYTES + static_cast<size_t>(i)];
         char letter = 0;
-        if (code >= FF6_MENU_CODE_UPPER_A && code < FF6_MENU_CODE_LOWER_A) letter = static_cast<char>((i == 0 ? 'A' : 'a') + code - FF6_MENU_CODE_UPPER_A);
+        if (code >= FF6_MENU_CODE_UPPER_A && code < FF6_MENU_CODE_LOWER_A) letter = static_cast<char>('A' + code - FF6_MENU_CODE_UPPER_A);
         else if (code >= FF6_MENU_CODE_LOWER_A && code < FF6_MENU_CODE_ZERO) letter = static_cast<char>('a' + code - FF6_MENU_CODE_LOWER_A);
         else if (code >= FF6_MENU_CODE_ZERO && code < FF6_MENU_CODE_ZERO + 10) letter = static_cast<char>('0' + code - FF6_MENU_CODE_ZERO);
+        else if (code == FF6_MENU_CODE_QUESTION) letter = '?';
         if (letter == 0) break;
         name.push_back(letter);
     }

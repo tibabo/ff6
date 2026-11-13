@@ -8,6 +8,7 @@ export const MONSTER_ITEM_BYTES = 4;  // rare steal, common steal, rare drop, co
 const MONSTER_ITEMS = 0x0f3000;  // CF/3000
 export const MONSTER_NAME_BYTES = 10;
 const MONSTER_NAMES = 0x0fc050;  // CF/C050, in the codes of the small font
+const MONSTER_SPECIAL_NAMES = 0x0fd0d0;  // CF/D0D0 (MonsterSpecialName): the name of the special attack of each monster, 10 codes of the large font
 
 export const BATTLE_COUNT = 576;
 export const BATTLE_PROP_BYTES = 4;
@@ -75,6 +76,7 @@ const table = (rom, start, count, size) => Buffer.from(rom.subarray(start, start
 export const readMonsterProp = rom => table(rom, MONSTER_PROP, MONSTER_COUNT, MONSTER_PROP_BYTES);
 export const readMonsterItems = rom => table(rom, MONSTER_ITEMS, MONSTER_COUNT, MONSTER_ITEM_BYTES);
 export const readMonsterNames = rom => table(rom, MONSTER_NAMES, MONSTER_COUNT, MONSTER_NAME_BYTES);
+export const readMonsterSpecialNames = rom => table(rom, MONSTER_SPECIAL_NAMES, MONSTER_COUNT, MONSTER_NAME_BYTES);
 export const readBattleProp = rom => table(rom, BATTLE_PROP, BATTLE_COUNT, BATTLE_PROP_BYTES);
 export const readBattleMonsters = rom => table(rom, BATTLE_MONSTERS, BATTLE_COUNT, BATTLE_MONSTER_BYTES);
 export const readRandBattleGroups = rom => table(rom, RAND_BATTLE_GROUP, RAND_GROUP_COUNT, 8);
@@ -112,5 +114,5 @@ export function buildBattleData(rom, version) {
     readAttackNames(rom), readSketch(rom), readControl(rom), readMagicPoints(rom), readMonsterRage(rom),
     readDanceProp(rom), readBattleBgDance(rom), readDanceBg(rom), readMonsterDlgPtrs(rom), readMonsterDlg(rom),
     readBattleDlgPtrs(rom), readBattleDlg(rom), readMetamorph(rom), readCharAi(rom),
-    readColosseum(rom)]);
+    readColosseum(rom), readMonsterSpecialNames(rom)]);
 }

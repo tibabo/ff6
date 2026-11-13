@@ -392,7 +392,8 @@ void testParty() {
     CHECK(rules.charProp.size() == static_cast<size_t>(FF6_CHAR_PROP_COUNT) * FF6_CHAR_PROP_BYTES);
     CHECK(rules.levelExp.size() == FF6_LEVEL_STEPS && rules.levelExp[0] == 4 && rules.levelExp[FF6_LEVEL_STEPS - 1] == 11111);
     CHECK(rules.levelHp[0] == 11 && rules.levelMp[0] == 4);
-    CHECK(rules.actorName(0) == "Terra" && rules.actorName(0x20) == "Wedge" && rules.actorName(0x21) == "Vicks");  // char_name
+    CHECK(rules.actorName(0) == "TERRA" && rules.actorName(0x20) == "WEDGE" && rules.actorName(0x21) == "VICKS");  // char_name
+    CHECK(rules.actorName(0x10) == "?????");  // a character with no name yet
     testCharacters(rules);
     testStats(rules);
     testHpChanges(rules);

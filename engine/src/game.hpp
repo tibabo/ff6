@@ -52,6 +52,10 @@ namespace ff6 {
 // The menu takes the screen: the field fades out, the menu fades in, and the other way round when it is closed.
 enum class MenuPhase { Closed, FadingOut, Open, Leaving };
 
+// The way into a battle. The field has the mosaic of BattleMosaic, or a cut to black when the event turns it off; the world
+// map and the cutscenes fade out. Then the screen stays black while the game loads the battle, and the battle fades in.
+enum class BattleEntry { None, Fade, Mosaic, Cut, Loading, FadeIn };
+
 // Marks a game that begins like the console: the title screen, then the story and the opening, which ends with the choice
 // of a new game or a saved one.
 struct NewGame {};
@@ -180,7 +184,10 @@ private:
     void restoreSavedGame();
     void startBattle(int group, int flags);
     void beginBattle(int battle, int flags);
-    void launchBattle(int battle, int background, bool veldt = false);
+    void launchBattle(int battle, int background, bool veldt = false, BattleEntry entry = BattleEntry::Fade);
+    bool tickBattleEntry();
+    int battleMosaicSize() const;
+    void applyBattleFadeIn(std::vector<uint8_t>& image) const;
     void recordVeldtBattle();
     void checkEncounter();
     void endBattle();
@@ -230,6 +237,9 @@ private:
     AttackAnim attackAnim_;
     BattleScreen battleScreen_;
     bool battleOpen_ = false;  // the screen is the battle: it takes the place of the menu
+    BattleEntry battleEntry_ = BattleEntry::None;
+    int battleEntryFrame_ = 0;  // the frames of the step of the entry
+    int battleExitFrame_ = 0;  // the frames of black once the battle has faded out
     uint32_t battleSeed_ = 1;
     Encounters encounters_;
     int lastBattle_ = -1;  // the battle that started last

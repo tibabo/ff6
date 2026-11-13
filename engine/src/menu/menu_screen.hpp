@@ -32,10 +32,19 @@ public:
         clipTop_ = top;
         clipBottom_ = bottom;
     }
+    // Codes of the menus written in the large font of the dialogues (variable widths, with its shadow), from a pixel of the screen
+    // (the top of the glyphs); `centered` puts the middle of the text there.
+    void largeText(int x, int y, const std::vector<uint8_t>& codes, bool centered = false);
     // The pattern and colors of the windows, and the color of the font, that the config has chosen.
     void applyConfig(const GameConfig& config);
     // A window with its frame at the tile x, y, and an inside of w x h tiles (DrawWindow).
     void window(int x, int y, int w, int h);
+    // A window of w x h pixels, frame included, at a pixel of the screen: the corners and the edges are the tiles of the window,
+    // the right and bottom ones placed against the far side. With `gradientLine` >= 0, the colors are those of the battles: the
+    // palette brightened by FF6_BATTLE_WINDOW_BRIGHTEN, then a level taken off every `gradientLines` lines from that line (the HDMA of the game).
+    void windowPx(int x, int y, int w, int h, int gradientLine = -1, int gradientLines = 1);
+    // The palettes of the text of the second layer (BGR555, four colors each) to use instead of the ones of the menus; null for those.
+    void setBg3Palette(const uint16_t* colors) { bg3Palette_ = colors; }
     // Text from the tile x, y; `color` is the text color byte of the game, a tile attribute (FF6_MENU_BG1_*, FF6_MENU_BG3_*).
     void text(int x, int y, const std::string& text, Layer layer, int color);
     // The same with the codes of the font, for its symbols (arrows, gauges, swatches of color).
@@ -44,7 +53,7 @@ public:
     void swatch(int x, int y, uint16_t color);
     const MenuData& data() const { return menu_; }
     // The hand cursor, with the position that the game gives to its sprite.
-    void hand(int x, int y);
+    void hand(int x, int y, bool flip = false);  // `flip`: turned to the left
     // A portrait of the game, 40x40 pixels, with its upper left corner at a pixel of the screen.
     void portrait(int x, int y, int portrait);
     // The sprite of a character on the map, facing down, with its upper left corner at a pixel of the screen; `palette` is a
@@ -75,6 +84,7 @@ private:
     int originX_ = 0;
     int clipTop_ = 0, clipBottom_ = FF6_SCREEN_HEIGHT;
     std::vector<uint8_t> windowTiles_;  // empty until the config is applied: then the tiles of the common data are used
+    const uint16_t* bg3Palette_ = nullptr;
     uint16_t fontColor_ = FF6_CONFIG_FONT_COLOR_DEFAULT;
     bool fontColorSet_ = false;
 };

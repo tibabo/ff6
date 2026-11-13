@@ -117,6 +117,7 @@ BattleData loadBattleData(const std::string& packDir) {
     data.metamorph = reader.bytes(FF6_METAMORPH_BYTES);
     data.charAi = reader.bytes(static_cast<size_t>(FF6_CHAR_AI_COUNT) * FF6_CHAR_AI_BYTES);
     data.colosseum = reader.bytes(FF6_COLOSSEUM_BYTES);
+    data.monsterSpecialNames = reader.bytes(static_cast<size_t>(FF6_MONSTER_COUNT) * FF6_MONSTER_NAME_BYTES);
     if (reader.remaining() != 0) throw std::runtime_error("battle data has trailing bytes");
     return data;
 }

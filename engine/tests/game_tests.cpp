@@ -417,11 +417,21 @@ void testGame() {
         CHECK(box.party().treasures[static_cast<size_t>(boxBit)]);
         for (int i = 0; i < 3000 && !box.battleOpen(); ++i) box.tick(i % 20 == 0 ? confirm : idle);
         CHECK(box.battleOpen());
-        bool battleSong = false;  // the battle brings its own music, from its properties
+        bool battleSong = false, battleSfx = false;  // the battle brings its own music, from its properties
         for (const test::RecordingSound::Command& sent : boxSound.commands) {
             battleSong = battleSong || (sent.command == FF6_SOUND_PLAY_SONG && (sent.arg1 == 0x24 || sent.arg1 == 0x14 || sent.arg1 == 0x33 || sent.arg1 == 0x2E));
+            battleSfx = battleSfx || (sent.command == FF6_SOUND_GAME_SFX && sent.arg1 == FF6_BATTLE_SFX);
         }
-        CHECK(battleSong);
+        CHECK(battleSong && battleSfx);
+        // BattleMosaic on the field at full brightness, then a black screen while the battle loads, then its fade in.
+        for (int i = 1; i < FF6_BATTLE_MOSAIC_FRAMES; ++i) box.tick(idle);
+        CHECK(box.menuPhase() == ff6::MenuPhase::FadingOut && box.brightness() == FF6_BRIGHTNESS_FULL);
+        box.tick(idle);
+        CHECK(box.menuPhase() == ff6::MenuPhase::FadingOut && box.brightness() == 0);
+        for (int i = 0; i < FF6_BATTLE_LOAD_FRAMES; ++i) box.tick(idle);
+        CHECK(box.menuPhase() == ff6::MenuPhase::Open && box.brightness() == 0);
+        for (int i = 0; i < FF6_BATTLE_FADE_FRAMES; ++i) box.tick(idle);
+        CHECK(box.brightness() == FF6_BRIGHTNESS_FULL && !box.fading());
     }
     {  // a new game begins with the title screen; a press of the button ends it, and a new game starts the story
         test::RecordingSound startSound;

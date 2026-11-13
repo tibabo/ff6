@@ -557,19 +557,9 @@ void Game::finishFade() {
 }
 
 // The brightness of the PPU: the colors are scaled by the level plus one, out of 16.
-// What the events do to the whole picture: the mosaic makes blocks of the pixel at their corner, and the flashlight leaves
-// only a circle around the lead (outside the window of the PPU, the screen is black).
+// What the events do to the whole picture: the pyramid and the flashlight leave only a shape around an object (outside the
+// window of the PPU, the screen is black). The mosaic is done on the layers, in draw.
 void Game::applyStage(std::vector<uint8_t>& image) {
-    const int block = stage_.mosaicSize();
-    if (block > 1) {
-        for (int y = 0; y < FF6_SCREEN_HEIGHT; ++y) {
-            for (int x = 0; x < FF6_SCREEN_WIDTH; ++x) {
-                const size_t from = (static_cast<size_t>(y / block * block) * FF6_SCREEN_WIDTH + static_cast<size_t>(x / block * block)) * FF6_BYTES_PER_PIXEL;
-                const size_t to = (static_cast<size_t>(y) * FF6_SCREEN_WIDTH + static_cast<size_t>(x)) * FF6_BYTES_PER_PIXEL;
-                for (size_t c = 0; c < FF6_BYTES_PER_PIXEL; ++c) image[to + c] = image[from + c];
-            }
-        }
-    }
     if (stage_.pyramidOn()) {
         const Npc* object = objects_.object(stage_.pyramidObject());
         int corners[3][2];
@@ -606,6 +596,10 @@ void Game::applyStage(std::vector<uint8_t>& image) {
 void Game::applyBrightness(std::vector<uint8_t>& image) const {
     const int level = brightness_ >> FF6_BRIGHTNESS_SHIFT;
     if (level >= FF6_BRIGHTNESS_LEVELS - 1) return;
+    if (battleOpen_ && level == 0) {  // the battle turns the screen off at no brightness, and so it is while it loads
+        for (size_t i = 0; i < image.size(); i += FF6_BYTES_PER_PIXEL) std::fill_n(&image[i], FF6_ALPHA_OFFSET, 0);
+        return;
+    }
     for (size_t i = 0; i < image.size(); i += FF6_BYTES_PER_PIXEL) {
         for (size_t c = 0; c < FF6_ALPHA_OFFSET; ++c) image[i + c] = static_cast<uint8_t>(image[i + c] * (level + 1) / FF6_BRIGHTNESS_LEVELS);
     }
@@ -1650,7 +1644,8 @@ void Game::startColosseumBattle() {
     colosseumBout_.wager = colosseumItem_;
     colosseumBout_.prize = colosseumMatch_.prize;
     colosseumBackup_ = state_.characters[static_cast<size_t>(colosseumFighter_)];
-    launchBattle(colosseumMatch_.shadow ? FF6_COLOSSEUM_SHADOW_BATTLE : FF6_COLOSSEUM_BATTLE, FF6_COLOSSEUM_BACKGROUND);
+    // EventCmd_af: neither the sound effect nor the mosaic
+    launchBattle(colosseumMatch_.shadow ? FF6_COLOSSEUM_SHADOW_BATTLE : FF6_COLOSSEUM_BATTLE, FF6_COLOSSEUM_BACKGROUND, false, BattleEntry::Cut);
 }
 
 // Event commands 0x4C and 0x4D: the battle of an event group (the first one, or the second in one case of four) takes the
@@ -1661,11 +1656,13 @@ void Game::startBattle(int group, int flags) {
     beginBattle(battleData_.eventBattle(group, random.byte() >= FF6_EVENT_BATTLE_SECOND_LIMIT ? 1 : 0), flags);
 }
 
-// `flags` are the second byte of the event command: the low bits choose the background, or the map's with all of them set.
+// `flags` are the second byte of the event command: the low bits choose the background, or the map's with all of them set;
+// the high bits turn off the sound effect and the mosaic of BattleMosaic.
 void Game::beginBattle(int battle, int flags) {
     int background = flags & FF6_BATTLE_BG_DEFAULT;
     if (background == FF6_BATTLE_BG_DEFAULT) background = map_.prop[FF6_MAP_PROP_FLAGS] & FF6_MAP_BG_MASK;
-    launchBattle(battle, background);
+    if (!(flags & FF6_BATTLE_FLAG_NO_SFX)) sound_.command(FF6_SOUND_GAME_SFX, FF6_BATTLE_SFX, FF6_SFX_PAN_CENTER);
+    launchBattle(battle, background, false, (flags & FF6_BATTLE_FLAG_NO_BLUR) ? BattleEntry::Cut : BattleEntry::Mosaic);
 }
 
 void Game::startBattleNumber(int battle, int background) {
@@ -1673,7 +1670,7 @@ void Game::startBattleNumber(int battle, int background) {
     launchBattle(battle, background >= 0 ? background : map_.prop[FF6_MAP_PROP_FLAGS] & FF6_MAP_BG_MASK);
 }
 
-void Game::launchBattle(int battle, int background, bool veldt) {
+void Game::launchBattle(int battle, int background, bool veldt, BattleEntry entry) {
     std::vector<int> characters;
     if (colosseumBout_.monster >= 0) {
         characters.push_back(colosseumFighter_);
@@ -1695,7 +1692,9 @@ void Game::launchBattle(int battle, int background, bool veldt) {
     if (battle == FF6_COND_BATTLE_FROM && bits_.battle(FF6_COND_BATTLE_FLAG)) battle = FF6_COND_BATTLE_TO;  // the one conditional battle of the game
     lastBattle_ = battle;
     bits_.setBattle(FF6_BATTLE_FLAG_DEFEATED, false);
-    battleScreen_.start(battleData_, rules_, state_, characters, battle, battleSeed_, config_.battleSpeed(),
+    battleScreen_.setMessageSpeed(config_.messageSpeed());
+    battleScreen_.setGameRandom(true);  // InitBattle: the index starts at the low byte of the time of the game, times four
+    battleScreen_.start(battleData_, rules_, state_, characters, battle, (frame_ & FF6_RNG_INDEX_MASK) << FF6_RNG_SEED_SHIFT, config_.battleSpeed(),
                         (config_.battle & FF6_CONFIG_WAIT) != 0, background, veldt, colosseumBout_);
     {  // the characters of the story that fight in the graphics that they wear on the field
         std::array<int, FF6_CHAR_COUNT> gfx;
@@ -1732,7 +1731,77 @@ void Game::launchBattle(int battle, int background, bool veldt) {
     }
     battleOpen_ = true;
     menuPhase_ = MenuPhase::FadingOut;
-    startFade(false, FF6_BRIGHTNESS_STEP);
+    battleEntry_ = entry;
+    battleEntryFrame_ = 0;
+    battleExitFrame_ = 0;
+    if (entry == BattleEntry::Fade) startFade(false, FF6_BRIGHTNESS_STEP);
+}
+
+// The way into the battle, a step each frame; false once the battle has the screen to itself. The field is frozen while
+// the mosaic runs (BattleMosaic only waits for the frames), and the time of the battle starts after its fade in.
+bool Game::tickBattleEntry() {
+    switch (battleEntry_) {
+        case BattleEntry::None: return false;
+        case BattleEntry::Mosaic:
+            if (++battleEntryFrame_ < FF6_BATTLE_MOSAIC_FRAMES) return true;
+            break;
+        case BattleEntry::Fade:
+            updateBrightness();
+            if (fading()) return true;
+            break;
+        case BattleEntry::Cut: break;
+        case BattleEntry::Loading:
+            if (++battleEntryFrame_ < FF6_BATTLE_LOAD_FRAMES) return true;
+            menuPhase_ = MenuPhase::Open;  // the battle is drawn, from a black screen
+            battleEntry_ = BattleEntry::FadeIn;
+            battleEntryFrame_ = 0;
+            brightness_ = 0;
+            fade_ = FF6_BRIGHTNESS_STEP;
+            return true;
+        case BattleEntry::FadeIn:
+            updateBrightness();
+            if (++battleEntryFrame_ >= FF6_BATTLE_FADE_FRAMES) battleEntry_ = BattleEntry::None;
+            return true;
+    }
+    battleEntry_ = BattleEntry::Loading;  // the screen is cut to black
+    battleEntryFrame_ = 0;
+    brightness_ = 0;
+    fade_ = 0;
+    return true;
+}
+
+// BattleMosaic: the size of the blocks of the mosaic of the field, 1 when there is none.
+int Game::battleMosaicSize() const {
+    if (!battleOpen_ || battleEntry_ != BattleEntry::Mosaic) return 1;
+    const int mask = battleEntryFrame_ < FF6_BATTLE_MOSAIC_HALF ? FF6_BATTLE_MOSAIC_FIRST_MASK : FF6_BATTLE_MOSAIC_LAST_MASK;
+    return (battleEntryFrame_ & mask) + 1;
+}
+
+// UpdateFadeIn: the color math of the field takes a fixed gray from the layers, nothing on the lines that are uncovered and
+// one more level every two lines away from them. Line 0 stays black. The backdrop, which the game leaves out, is taken too.
+void Game::applyBattleFadeIn(std::vector<uint8_t>& image) const {
+    if (battleEntry_ != BattleEntry::FadeIn) return;
+    const int done = battleEntryFrame_;  // the updates of the table before the last one
+    const int top = FF6_BATTLE_FADE_LINE - 2 * done, bottom = FF6_BATTLE_FADE_LINE + 2 * done;
+    for (int y = 0; y < FF6_BATTLE_FADE_END && y < FF6_SCREEN_HEIGHT; ++y) {
+        int level = 0;
+        if (y == 0) {
+            level = FF6_BATTLE_FADE_LEVEL_MAX;
+        } else if (y < top) {
+            level = (top - y) / 2;
+        } else if (y >= bottom) {
+            level = (y - bottom) / 2;
+        }
+        level = std::min(level, FF6_BATTLE_FADE_LEVEL_MAX);
+        if (level == 0) continue;
+        uint8_t* row = &image[static_cast<size_t>(y) * FF6_SCREEN_WIDTH * FF6_BYTES_PER_PIXEL];
+        for (int i = 0; i < FF6_SCREEN_WIDTH * FF6_BYTES_PER_PIXEL; i += FF6_BYTES_PER_PIXEL) {
+            for (int c = 0; c < FF6_COLOR_CHANNELS; ++c) {
+                const int value = std::max((row[i + c] >> (8 - FF6_COLOR_BITS)) - level, 0);
+                row[i + c] = static_cast<uint8_t>((value << (8 - FF6_COLOR_BITS)) | (value >> (2 * FF6_COLOR_BITS - 8)));
+            }
+        }
+    }
 }
 
 // CheckBattleSub, once the party has arrived on a tile: the random battle is an event, like in the game.
@@ -1832,8 +1901,14 @@ void Game::endBattle() {
 }
 
 void Game::tickMenu(const InputState& input) {
+    if (battleOpen_ && tickBattleEntry()) return;
     updateBrightness();
     if (fading()) return;
+    // TerminateBattle: the screen stays off while the game loads the map again.
+    if (menuPhase_ == MenuPhase::Leaving && battleOpen_ && battleExitFrame_ < FF6_BATTLE_EXIT_BLACK_FRAMES) {
+        ++battleExitFrame_;
+        return;
+    }
     if (menuPhase_ == MenuPhase::FadingOut) {
         if (!shopOpen_ && !battleOpen_ && !loadMenuOpen_ && !colosseumOpen_ && !nameOpen_ && !finalOrderOpen_ && !partyOpen_) menu_.open(menuStatus(), config_);
         menuPhase_ = MenuPhase::Open;
@@ -2194,6 +2269,7 @@ void Game::draw() {
             menu_.draw();
         }
         screenPixels_ = menuScreen_.pixels();
+        if (battleOpen_) applyBattleFadeIn(screenPixels_);
         renderer_.beginFrame();
         applyBrightness(screenPixels_);
         renderer_.updateTexture(screen_, screenPixels_.data());
@@ -2217,6 +2293,20 @@ void Game::draw() {
     for (int layer = 0; layer < FF6_LAYER_COUNT; ++layer) {
         auto& pixels = layerPixels_[static_cast<size_t>(layer)];
         renderBg(map_, layer, scroll_.x(layer), scroll_.y(layer) + stage_.shakeOffset(layer), pixels[0].data(), pixels[1].data());
+    }
+    // $2106 of the events and of BattleMosaic: the four layers of bg, not the sprites. A block takes the pixel at its corner,
+    // with its priority.
+    const int block = std::max(stage_.mosaicSize(), battleMosaicSize());
+    if (block > 1) {
+        for (auto& layer : layerPixels_) {
+            for (int y = 0; y < FF6_SCREEN_HEIGHT; ++y) {
+                for (int x = 0; x < FF6_SCREEN_WIDTH; ++x) {
+                    const size_t from = (static_cast<size_t>(y / block * block) * FF6_SCREEN_WIDTH + static_cast<size_t>(x / block * block)) * FF6_BYTES_PER_PIXEL;
+                    const size_t to = (static_cast<size_t>(y) * FF6_SCREEN_WIDTH + static_cast<size_t>(x)) * FF6_BYTES_PER_PIXEL;
+                    for (auto& pixels : layer) std::copy_n(&pixels[from], FF6_BYTES_PER_PIXEL, &pixels[to]);
+                }
+            }
+        }
     }
     drawSprites(false);
     drawSprites(true);

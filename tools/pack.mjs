@@ -33,7 +33,7 @@ import { buildWorldData } from './world/world.mjs';
 
 export const COMMON_MAGIC = 'FF6COMMN';
 export const MAP_MAGIC = 'FF6MAP01';
-export const PACK_VERSION = 41;
+export const PACK_VERSION = 43;
 export const FIRST_FIELD_MAP = 3;  // maps 0-2 are the world maps
 
 class Writer {

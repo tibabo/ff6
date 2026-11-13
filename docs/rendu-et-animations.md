@@ -43,6 +43,23 @@ ROM ──tools/battle/attack_anim.mjs──> output/pack/attackanim.ff6data
 | Bio Blaster, Flash | attaques 125 et 126 |
 | Coup d'arme | table à part (`weapon(n)`, un script par main) : 0 pour les poings, numéro de l'objet + 1 pour une arme, octet 26 des propriétés + 1 pour un monstre (0xFF donne les poings) |
 
+## 1 bis. L'entrée en combat
+
+`Game::tickBattleEntry` suit le jeu, étape par étape :
+
+1. **Mosaïque du champ** (`BattleMosaic`, `src/field/battle.asm`) : 32 images de compteur ; la taille du registre `$2106`
+   vaut `f & 7` sur les 16 premières (deux rampes, blocs de 1 à 8 pixels) puis `f & 15` (blocs de 1 à 16). Elle ne touche
+   que les quatre fonds (`ora #$0f`) : `Game::draw` la fait sur les couches avant la composition, les sprites restent nets
+   (la mosaïque des événements, commande `0x62`, passe par le même chemin). Le champ est figé. Le bit 7 du second octet des
+   commandes `0x4C`/`0x4D` la supprime, le bit 6 le son `0xC1` (`EventBattle`).
+2. **Noir** : l'écran est éteint (luminosité 0 du combat = écran forcé au noir) pendant `FF6_BATTLE_LOAD_FRAMES` (104)
+   images, le temps de chargement mesuré sur l'enregistrement.
+3. **Fondu entrant** (`UpdateFadeIn`, `btlgfx/init_2.asm`) : la luminosité monte d'un cran par image (15 images) et la
+   table HDMA de `$2131`/`$2132` retranche une couleur grise aux couches du champ : rien sur les lignes découvertes, un cran
+   de plus toutes les deux lignes au-delà (au plus 31), la ligne 0 noire. La zone découverte part de la ligne 76 et gagne
+   deux lignes vers le haut et vers le bas à chaque image : 38 images jusqu'à la ligne 0 et la ligne 152
+   (`Game::applyBattleFadeIn`, qui retranche aussi au fond, que le jeu laisse). Le temps du combat ne part qu'après.
+
 ## 2. Composition de l'écran de combat
 
 `BattleScreen::draw` peint, dans cet ordre (le champ fait 256×152 pixels, les
@@ -77,6 +94,15 @@ d'initialisation :
 | OBJ (sprites) | monstres, personnages, et les cadres de la couche 0 |
 | BG1 | la couche 1 de l'animation (script de bg1) |
 | BG3 | la couche 2 de l'animation (script de bg3) |
+
+## 2 bis. Fenêtres, menus et déroulé
+
+- **Fenêtres** (`MenuScreen::windowPx`) : cadres au pixel, palette des fenêtres de la configuration éclaircie de 8 par canal ; en bas (BG2), un niveau retranché toutes les 3 lignes depuis la ligne 151 ; la fenêtre du haut (BG1), un niveau toutes les 2 lignes depuis la ligne 8. Monstres x=8–103, personnages x=104–247, commandes x=16–95, lignes de texte à 164 + 12k ; nom d'attaque dans une boîte centrée x=56–199, autres messages x=8–247 dans la grande police des dialogues (`MenuScreen::largeText`).
+- **Texte** : palettes `BattleFontPal` (ED/62C0) au lieu de celles des menus (`setBg3Palette`) ; jauge en palette 5 pendant le remplissage, 2 quand elle est pleine.
+- **Curseurs** : main d'un monstre à son bord droit − 8, à mi-hauteur, retournée ; d'un personnage 16 pixels à sa gauche ; flèche (tuile 0x2E de la planche des statuts) au-dessus du personnage dont le menu est ouvert.
+- **Personnages** : le sprite commence 8 lignes au-dessus de la position (`CharSpriteData`, `FF6_CHAR_SPRITE_DY`).
+- **Déroulé** (`BattleScreen::update`) : `tickTime` (jauges tous les deux tics, délai des commandes de `CmdDelayTbl`, arrêt du mode Wait dans les listes), `runActions` (une action à la fois, la suivante quand la précédente est montrée, `beginAction`/`endAction`), messages, puis menus. Un monstre clignote avant d'agir (`monsterFlash_`), son coup part 63 images après ; le nom d'une attaque reste seul la durée de la vitesse des messages (32 images pour l'attaque spéciale d'un monstre, en grande police), l'animation part 56 images après ; un personnage qu'elle a emmené revient en 32 images (`stepBack_`), les chiffres 19 images après.
+- **Hasard** : `BattleRandom` tire dans `RNGTbl` (C0/FD00) quand le combat vient du jeu (`setGameRandom`).
 
 ## 3. L'interpréteur de scripts
 

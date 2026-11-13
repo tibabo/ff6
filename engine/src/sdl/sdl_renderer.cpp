@@ -1,3 +1,4 @@
+#include <cmath>
 #include "sdl/sdl_renderer.hpp"
 
 #include <algorithm>
@@ -138,8 +139,28 @@ TextureId SdlRenderer::createTexture(int width, int height, const uint8_t* rgba,
 
 SdlRenderer::TextureEntry& SdlRenderer::entry(TextureId id) { return textures_.at(static_cast<size_t>(id)); }
 
+void SdlRenderer::setWideAspect(bool wide) {
+    wideAspect_ = wide && !offscreen_;
+    SDL_RenderSetLogicalSize(renderer_.get(), FF6_SCREEN_WIDTH * (wideAspect_ ? FF6_WIDE_PIXEL_X : 1), FF6_SCREEN_HEIGHT * (wideAspect_ ? FF6_WIDE_PIXEL_Y : 1));
+}
+
+void SdlRenderer::setAresColors(bool ares) {
+    aresColors_ = ares;
+    for (int i = 0; i < 256; ++i) curve_[static_cast<size_t>(i)] = static_cast<uint8_t>(std::lround(255.0 * std::pow(i / 255.0, FF6_ARES_GAMMA)));
+}
+
 void SdlRenderer::updateTexture(TextureId texture, const uint8_t* rgba) {
     const TextureEntry& target = entry(texture);
+    if (aresColors_ && !offscreen_) {
+        int width = 0, height = 0;
+        SDL_QueryTexture(target.texture.get(), nullptr, nullptr, &width, &height);
+        const size_t bytes = static_cast<size_t>(width) * static_cast<size_t>(height) * FF6_BYTES_PER_PIXEL;
+        curved_.assign(rgba, rgba + bytes);
+        for (size_t i = 0; i < bytes; i += FF6_BYTES_PER_PIXEL) {
+            for (size_t c = 0; c < FF6_ALPHA_OFFSET; ++c) curved_[i + c] = curve_[curved_[i + c]];
+        }
+        rgba = curved_.data();
+    }
     if (SDL_UpdateTexture(target.texture.get(), nullptr, rgba, target.width * FF6_BYTES_PER_PIXEL) != 0) {
         throw std::runtime_error(SDL_GetError());
     }
@@ -160,7 +181,8 @@ void SdlRenderer::beginFrame() {
 
 void SdlRenderer::draw(TextureId texture, const Rect& source, const Rect& destination) {
     const SDL_Rect from{source.x, source.y, source.w, source.h};
-    const SDL_Rect to{destination.x, destination.y, destination.w, destination.h};
+    const int sx = wideAspect_ ? FF6_WIDE_PIXEL_X : 1, sy = wideAspect_ ? FF6_WIDE_PIXEL_Y : 1;
+    const SDL_Rect to{destination.x * sx, destination.y * sy, destination.w * sx, destination.h * sy};
     SDL_RenderCopy(renderer_.get(), entry(texture).texture.get(), &from, &to);
 }
 

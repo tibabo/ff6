@@ -100,7 +100,19 @@ void BattleScreen::start(const BattleData& data, const GameRules& rules, PartySt
     rules_ = &rules;
     party_ = &party;
     formation_ = data.formation(battle);
-    battle_.emplace(data, rules, party, characters, battle, seed, battleSpeed, colosseum);
+    battle_.emplace(data, rules, party, characters, battle, seed, battleSpeed, colosseum, gameRandom_);
+    battle_->setQueuedTurns(true);
+    introFrame_ = 0;
+    waiting_.clear();
+    actions_.clear();
+    acting_ = -1;
+    actionEnd_ = 0;
+    commanded_.fill(false);
+    wasReady_.fill(false);
+    readyTimer_.fill(0);
+    menuQueue_.clear();
+    menuDelay_ = 0;
+    xMagicFirst_ = nullptr;
     scrollX_ = scrollY_ = animation_ = 0;
     for (AnimShift& kept : keptShift_) kept = AnimShift();
     persistSlot_ = -1;
@@ -121,9 +133,14 @@ void BattleScreen::start(const BattleData& data, const GameRules& rules, PartySt
     list_.clear();
     group_ = false;
     castLead_ = 0;
+    nameTimer_ = 0;
+    stepBack_ = afterAnim_ = 0;
+    stepFrom_.fill({0, 0});
     poseTimer_.fill(0);
     stepTimer_.fill(0);
     blinkTimer_.fill(0);
+    monsterFlash_.fill(0);
+    blowLead_ = 0;
     fadeTimer_.fill(0);
     escapeTimer_.fill(0);
     dying_.fill(false);
@@ -133,6 +150,8 @@ void BattleScreen::start(const BattleData& data, const GameRules& rules, PartySt
     flashTimer_ = 0;
     messages_.clear();
     current_.clear();
+    victory_.clear();
+    currentKeyWait_ = currentFixed_ = false;
     messageTimer_ = 0;
     popupTarget_ = popupDamage_ = -1;
     pendingPopup_ = PendingPopup();
@@ -689,19 +708,33 @@ void BattleScreen::trigger(const Message& message) {
         return element ? kColors[bit] : kWhite;
     };
     switch (message.effect) {
-        case Message::Effect::Cast:
+        case Message::Effect::Cast: {
             lastElement_ = message.element;
+            if (message.actor >= FF6_BATTLE_PARTY_SLOTS) monsterFlash_[static_cast<size_t>(message.actor)] = FF6_MONSTER_FLASH_FRAMES;  // it acts
+            // The name of the attack stays alone in its window for the time of the message speed, then the animation comes.
+            nameTimer_ = message.text.empty() ? 0 : message.largeName ? FF6_MONSTER_SPECIAL_NAME_FRAMES : FF6_BATTLE_MSG_SPEED_BASE + FF6_BATTLE_MSG_SPEED_STEP * messageSpeed_;
+            const int nameLead = nameTimer_ > 0 ? nameTimer_ + FF6_BATTLE_CAST_NAME_GAP : 0;
             if (message.actor < FF6_BATTLE_PARTY_SLOTS && !magitekMode()) {
                 const int frames = FF6_BATTLE_CAST_LEAD_FRAMES + FF6_BATTLE_POSE_FRAMES * 2;
-                pose(message.actor, FF6_CHAR_POSE_CAST, frames, frames);
+                pose(message.actor, FF6_CHAR_POSE_CAST, nameLead + frames, nameLead + frames);
                 castPending_ = message;
-                castLead_ = FF6_BATTLE_CAST_LEAD_FRAMES;
+                castLead_ = nameLead + FF6_BATTLE_CAST_LEAD_FRAMES;
+            } else if (nameLead > 0) {
+                castPending_ = message;
+                castLead_ = nameLead;
             } else {
                 startAnimation(message);
             }
             break;
+        }
         case Message::Effect::Strike:
             animated_ = false;
+            if (message.actor >= FF6_BATTLE_PARTY_SLOTS && player_ && anim_) {  // the monster flashes, then its blow comes (FightCmdAnim)
+                monsterFlash_[static_cast<size_t>(message.actor)] = FF6_MONSTER_FLASH_FRAMES;
+                blowPending_ = message;
+                blowLead_ = FF6_MONSTER_BLOW_LEAD;
+                break;
+            }
             if (message.actor < FF6_BATTLE_PARTY_SLOTS) pose(message.actor, FF6_CHAR_POSE_ATTACK, FF6_BATTLE_POSE_FRAMES / 2, FF6_BATTLE_POSE_FRAMES / 2);
             startBlow(message);
             hurt(message.subject);
@@ -943,8 +976,22 @@ void BattleScreen::tickEffects() {
             break;
         default: break;
     }
+    if (stepBack_ > 0) --stepBack_;
+    if (afterAnim_ > 0) --afterAnim_;
     if (player_ && !player_->done()) {
+        for (int slot = 0; slot < FF6_BATTLE_PARTY_SLOTS; ++slot) {  // where the characters stand, for their way back
+            const AnimShift moved = player_->shift(false, slot);
+            stepFrom_[static_cast<size_t>(slot)] = {moved.x, moved.y};
+        }
         player_->tick();
+        if (player_->done() && !sceneActive_) {
+            bool away = false;
+            for (const std::pair<int, int>& from : stepFrom_) away = away || from.first != 0 || from.second != 0;
+            if (away) {
+                stepBack_ = FF6_BATTLE_STEP_BACK_FRAMES;
+                afterAnim_ = FF6_BATTLE_STEP_BACK_FRAMES + FF6_BATTLE_AFTER_STEP_FRAMES;  // the numbers come after it
+            }
+        }
         if (persistSlot_ >= 0) persistLast_ = player_->shift(true, persistSlot_ - FF6_BATTLE_PARTY_SLOTS);
         for (const int sfx : player_->takeSounds()) sound_.command(FF6_SOUND_GAME_SFX, static_cast<uint8_t>(sfx), FF6_SFX_PAN_CENTER);
         for (const std::array<int, 3>& command : player_->takeSoundCommands()) {
@@ -972,6 +1019,12 @@ void BattleScreen::tickEffects() {
         esperLeaving_ = !staying;
         if (!staying && esperShown_ <= 0) esperGfx_ = -1;
     }
+    if (nameTimer_ > 0) --nameTimer_;
+    if (blowLead_ > 0 && --blowLead_ == 0) {
+        startBlow(blowPending_);
+        static constexpr int kWhiteColor[3] = {255, 255, 255};
+        if (!animated_) addFx(Fx::Kind::Slash, blowPending_.subject, FF6_BATTLE_SLASH_FRAMES, kWhiteColor);
+    }
     if (castLead_ > 0 && --castLead_ == 0) {
         startAnimation(castPending_);
         if (!animating() && messageTimer_ > 0) messageTimer_ = FF6_BATTLE_MESSAGE_FRAMES;
@@ -982,6 +1035,7 @@ void BattleScreen::tickEffects() {
         if (poseTimer_[i] > 0) --poseTimer_[i];
         if (stepTimer_[i] > 0) --stepTimer_[i];
         if (blinkTimer_[i] > 0) --blinkTimer_[i];
+        if (monsterFlash_[i] > 0) --monsterFlash_[i];
         if (fadeTimer_[i] > 0 && --fadeTimer_[i] == 0) dying_[i] = false;
         if (escapeTimer_[i] > 0) --escapeTimer_[i];
     }
@@ -1069,10 +1123,19 @@ void BattleScreen::collectEvents() {
                 } else if (event.attack >= FF6_ATTACK_FIRST_BLITZ && event.attack < FF6_ATTACK_FIRST_BLITZ + FF6_TECH_ATTACKS) {
                     name = screen_.data().blitzName(event.attack - FF6_ATTACK_FIRST_BLITZ);
                 }
+                // MONSTER_SPECIAL: the special attack of a monster has the name of its own table, in the large font.
+                const Combatant& caster = battle_->combatants()[static_cast<size_t>(std::max(event.attacker, 0))];
+                const bool special = event.attack == FF6_AI_ATTACK_SPECIAL && event.attacker >= FF6_BATTLE_PARTY_SLOTS && caster.charIndex < 0 &&
+                                     data_->monsterSpecialNames.size() >= static_cast<size_t>(caster.id + 1) * FF6_MONSTER_NAME_BYTES;
+                if (special) {
+                    const auto first = data_->monsterSpecialNames.begin() + static_cast<std::ptrdiff_t>(caster.id) * FF6_MONSTER_NAME_BYTES;
+                    name.assign(first, first + FF6_MONSTER_NAME_BYTES);
+                }
                 name.erase(std::find(name.begin(), name.end(), FF6_BATTLE_NAME_PAD_CODE), name.end());
                 const int element = rules_->attack(event.attack)[FF6_ATTACK_ELEMENT];
                 if (name.empty()) break;
                 queueWith(name, -1, -1, static_cast<int>(Message::Effect::Cast), event.attacker, -1, element, false);
+                messages_.back().largeName = special;
                 // The animation plays on the combatants that the attack goes on to reach.
                 messages_.back().attack = event.attack;
                 reached(index);
@@ -1176,7 +1239,7 @@ void BattleScreen::collectEvents() {
                 break;
             }
             case BattleEvent::Kind::DanceFailed: queue(join({nameOf(event.attacker), text(" stumbles")})); break;
-            case BattleEvent::Kind::LearnedDance: queue(text("Learned a dance")); break;
+            case BattleEvent::Kind::LearnedDance: victory_.push_back(text("Learned a dance")); break;
             case BattleEvent::Kind::Background: background_ = event.damage; scrollX_ = scrollY_ = 0; break;
             case BattleEvent::Kind::Slot: {
                 static constexpr const char* kResults[8] = {"Joker Doom!", "Joker Doom!", "Dragon", "Bar", "Airship", "Chocobo", "Diamond", "Rabbit"};
@@ -1193,16 +1256,15 @@ void BattleScreen::collectEvents() {
                             text("/"), text(std::to_string(scanned.maxHp)), text("  MP "), text(std::to_string(scanned.mp))}));
                 break;
             }
-            case BattleEvent::Kind::GainLevel:
-                queue(join({nameOf(event.attacker), text(" is now level "), text(std::to_string(event.damage))}));
-                break;
+            // WinBattle: what the victory brings is told after the experience, once the battle is over (see finish).
+            case BattleEvent::Kind::GainLevel: victory_.push_back(join({nameOf(event.attacker), text(" gained a level")})); break;
             case BattleEvent::Kind::MagicPoints:
-                queue(join({text("Got "), text(std::to_string(event.damage)), text(" Magic Points")}));
+                victory_.insert(victory_.begin(), join({text("Got "), text(std::to_string(event.damage)), text(" Magic Point(s)")}));
                 break;
             case BattleEvent::Kind::LearnedSpell: {
                 Codes name = screen_.data().spellName(event.attack);
                 name.erase(std::find(name.begin(), name.end(), FF6_BATTLE_NAME_PAD_CODE), name.end());
-                queue(join({nameOf(event.attacker), text(" learned "), name}));
+                victory_.push_back(join({nameOf(event.attacker), text(" learned "), name}));
                 break;
             }
             case BattleEvent::Kind::Reflected: queue(join({nameOf(event.target), text(" reflects")})); break;
@@ -1296,9 +1358,15 @@ void BattleScreen::advanceMessage(bool skip) {
         flushPersist();
     }
     revealPopup();
+    if (currentKeyWait_) {  // the message stays until a button is pressed
+        if (!skip) return;
+    } else if (currentFixed_) {
+        skip = false;
+    }
     if (messageTimer_ > 0 && !skip && --messageTimer_ > 0) return;
     messageTimer_ = 0;
     current_.clear();
+    currentKeyWait_ = currentFixed_ = false;
     popupTarget_ = popupDamage_ = -1;
     pendingPopup_ = PendingPopup();
     while (!messages_.empty() && messages_.front().instant) {
@@ -1310,6 +1378,10 @@ void BattleScreen::advanceMessage(bool skip) {
         return;
     }
     current_ = messages_.front().text;
+    currentName_ = messages_.front().effect == Message::Effect::Cast;
+    currentLarge_ = messages_.front().largeName;
+    currentKeyWait_ = messages_.front().keyWait;
+    currentFixed_ = messages_.front().fixed;
     trigger(messages_.front());
     pendingPopup_ = {messages_.front().target, messages_.front().damage, messages_.front().hpAfter, messages_.front().wait,
                      messages_.front().effect == Message::Effect::Heal};
@@ -1319,8 +1391,43 @@ void BattleScreen::advanceMessage(bool skip) {
     revealPopup();
 }
 
+// WinBattle: after a pause, the experience (until a button is pressed: its text ends with the code 0x07), then the magic
+// points, the levels and what was learned, the items and the gil, each one for the time of the message speed (MsgSpeedTbl),
+// with the window closed in between; the battle ends a few frames after the last one.
 void BattleScreen::finish() {
-    if (battle_->outcome() != BattleOutcome::Fled) {
+    if (battle_->outcome() == BattleOutcome::Won && !finishing_) {
+        finishing_ = true;
+        const auto pause = [&](int frames) {
+            Message gap;
+            gap.wait = frames;
+            gap.fixed = true;
+            messages_.push_back(gap);
+        };
+        const auto say = [&](const Codes& words, bool keyWait) {
+            if (!messages_.empty() && messages_.back().text.empty() == false) pause(FF6_BATTLE_WIN_GAP_FRAMES);
+            Message shown{words};
+            shown.wait = FF6_BATTLE_MSG_SPEED_BASE + FF6_BATTLE_MSG_SPEED_STEP * messageSpeed_;
+            shown.fixed = true;
+            shown.keyWait = keyWait;
+            messages_.push_back(shown);
+        };
+        pause(FF6_BATTLE_WIN_DELAY);
+        const BattleReward& reward = battle_->reward();
+        if (reward.exp > 0) say(join({text("Got "), text(std::to_string(reward.exp)), text(" Exp. point(s)")}), true);
+        for (const Codes& line : victory_) say(line, false);
+        for (const int item : reward.items) {
+            const uint8_t* name = screen_.data().itemNames.data() + static_cast<size_t>(item) * FF6_ITEM_NAME_BYTES;
+            Codes words = Codes(name, name + FF6_ITEM_NAME_BYTES);
+            words.erase(std::find(words.begin(), words.end(), FF6_BATTLE_NAME_PAD_CODE), words.end());
+            say(join({text("Got "), words}), false);
+        }
+        if (reward.gil > 0) say(join({text("Got "), text(std::to_string(reward.gil)), text(" GP")}), false);
+        pause(FF6_BATTLE_WIN_END_FRAMES);
+        return;
+    }
+    if (battle_->outcome() == BattleOutcome::Won) {
+        mode_ = BattleMode::Done;
+    } else if (battle_->outcome() != BattleOutcome::Fled) {
         mode_ = BattleMode::Result;
     } else if (!finishing_) {
         finishing_ = true;
@@ -1330,10 +1437,16 @@ void BattleScreen::finish() {
     }
 }
 
+// One frame of the battle, as the game runs it (BattleLoop and UpdateBattleTime):
+// - the time: every other frame the gauges fill and the actions that wait count their delay (CmdDelayTbl); with the wait mode,
+//   the time stops while the list of a command (and the target of an entry of it) is open;
+// - the action queue: one action at a time, once the one before has been shown; the gauge of its combatant stays full until then;
+// - the menus: a character whose gauge is full gets its menu in turn, also while the actions are shown.
 void BattleScreen::update(const InputState& input) {
     if (!battle_ || mode_ == BattleMode::Done) return;
+    ++introFrame_;
     tickEffects();
-    if (messages_.empty() && messageTimer_ == 0 && pendingPopup_.target < 0 && !animating()) {  // nothing is left to show
+    if (!presenting() && actions_.empty()) {  // nothing is left to show
         heldHp_.fill(-1);
         queuedHp_.fill(-1);
     }
@@ -1341,8 +1454,23 @@ void BattleScreen::update(const InputState& input) {
         if (heldHp_[i] < 0) prevHp_[i] = battle_->combatants()[i].hp;
     }
     const int direction = repeat_.update(input.direction);
-    if (!messages_.empty() || messageTimer_ > 0) {
-        advanceMessage(input.confirm);
+    if (mode_ == BattleMode::Result) {  // a lost battle: the screen of the end waits for the button
+        if (input.confirm) {
+            sound_.command(FF6_SFX_MENU_SELECT, 0, 0);
+            mode_ = BattleMode::Done;
+        }
+        return;
+    }
+    const bool menuOpen = mode_ != BattleMode::Fighting;
+    if (battle_->outcome() == BattleOutcome::Fighting) {
+        if (!presenting()) battle_->stepRandom();  // the main loop turns while no action is shown
+        tickTime();
+        runActions();
+    }
+    if (!messages_.empty() || messageTimer_ > 0) advanceMessage(input.confirm && !menuOpen);
+    if (battle_->outcome() != BattleOutcome::Fighting) {
+        if (menuOpen && mode_ != BattleMode::Done) mode_ = BattleMode::Fighting;
+        if (!presenting()) finish();
         return;
     }
     switch (mode_) {
@@ -1354,41 +1482,121 @@ void BattleScreen::update(const InputState& input) {
         case BattleMode::Target: updateTarget(input, direction); break;
         case BattleMode::Slot: updateSlot(input); break;
         case BattleMode::Result:
-            if (input.confirm) {
-                sound_.command(FF6_SFX_MENU_SELECT, 0, 0);
-                mode_ = BattleMode::Done;
-            }
-            break;
         case BattleMode::Done: break;
     }
 }
 
+bool BattleScreen::presenting() const {
+    return !messages_.empty() || messageTimer_ > 0 || pendingPopup_.target >= 0 || animating();
+}
+
+// UpdateBattleTime: stopped in the wait mode while a list is open, else a tick every FF6_BATTLE_TICK_FRAMES frames.
+void BattleScreen::tickTime() {
+    if (introFrame_ < FF6_BATTLE_ATB_DELAY) return;  // the time starts a few frames after the fade in
+    const bool inList = mode_ == BattleMode::Magic || mode_ == BattleMode::Item || mode_ == BattleMode::Tech || mode_ == BattleMode::Slot ||
+                        (mode_ == BattleMode::Target && targetFromList_);
+    if (wait_ && inList) return;
+    if (++frames_ % FF6_BATTLE_TICK_FRAMES != 0) return;
+    battle_->tick();
+    collectEvents();
+    for (int turn = battle_->takePendingTurn(); turn >= 0; turn = battle_->takePendingTurn()) {  // a monster, or one that acts alone
+        Queued queued;
+        queued.actor = turn;
+        queued.run = [this, turn] { battle_->runTurn(turn); };
+        waiting_.push_back(std::move(queued));
+    }
+    // _c21193: the delay of an action grows by half of the gauge constant of its combatant at each tick.
+    for (size_t k = 0; k < waiting_.size();) {
+        Queued& queued = waiting_[k];
+        queued.counter += battle_->combatants()[static_cast<size_t>(queued.actor)].atbConstant / 2;
+        if ((queued.counter >> FF6_BATTLE_DELAY_SHIFT) >= queued.delay) {
+            actions_.push_back(std::move(queued));
+            waiting_.erase(waiting_.begin() + static_cast<std::ptrdiff_t>(k));
+        } else {
+            ++k;
+        }
+    }
+    for (int slot = 0; slot < FF6_BATTLE_PARTY_SLOTS; ++slot) {
+        const bool ready = battle_->combatants()[static_cast<size_t>(slot)].ready;
+        if (ready && !wasReady_[static_cast<size_t>(slot)]) readyTimer_[static_cast<size_t>(slot)] = FF6_BATTLE_READY_FRAMES;
+        wasReady_[static_cast<size_t>(slot)] = ready;
+    }
+}
+
+// ExecAction: the next action of the queue, once the one before has been shown; then the gauge of its combatant empties.
+void BattleScreen::runActions() {
+    if (presenting()) return;
+    if (acting_ >= 0 && actionEnd_ < FF6_BATTLE_ACTION_END_FRAMES) {  // the end of the action (EndAction) takes a few frames
+        ++actionEnd_;
+        return;
+    }
+    actionEnd_ = 0;
+    if (acting_ >= 0) {
+        battle_->endAction(acting_);
+        if (acting_ < FF6_BATTLE_PARTY_SLOTS) commanded_[static_cast<size_t>(acting_)] = false;
+        acting_ = -1;
+    }
+    while (!actions_.empty()) {
+        Queued queued = std::move(actions_.front());
+        actions_.pop_front();
+        const Combatant& c = battle_->combatants()[static_cast<size_t>(queued.actor)];
+        if (!c.alive()) {  // it fell while it waited
+            if (queued.actor < FF6_BATTLE_PARTY_SLOTS) commanded_[static_cast<size_t>(queued.actor)] = false;
+            continue;
+        }
+        acting_ = queued.actor;
+        battle_->beginAction(acting_);
+        queued.run();
+        collectEvents();
+        break;
+    }
+}
+
+// A command chosen in the menu waits for its delay (CmdDelayTbl), then for its turn in the queue of the actions.
+void BattleScreen::queueCommand(int command, std::function<void()> run) {
+    static constexpr int kDelay[FF6_CMD_COUNT] = FF6_CMD_DELAY_TABLE;
+    Queued queued;
+    queued.actor = active_;
+    queued.run = std::move(run);
+    queued.delay = command >= 0 && command < FF6_CMD_COUNT ? kDelay[command] : 0;
+    waiting_.push_back(std::move(queued));
+    commanded_[static_cast<size_t>(active_)] = true;
+    mode_ = BattleMode::Fighting;
+}
+
+// The menus: the next character whose gauge has been full for a while, in the order they filled, gets its own.
 void BattleScreen::updateFighting(const InputState& input) {
-    if (battle_->outcome() != BattleOutcome::Fighting) return finish();
     if (running_ && input.cancel) {  // the buttons are let go
         running_ = false;
         battle_->setRunning(false);
     }
-    if (++frames_ % FF6_BATTLE_TICK_FRAMES == 0) {
-        battle_->tick();
-        collectEvents();
+    for (int slot = 0; slot < FF6_BATTLE_PARTY_SLOTS; ++slot) {
+        int& timer = readyTimer_[static_cast<size_t>(slot)];
+        if (timer > 0 && --timer == 0) menuQueue_.push_back(slot);
     }
-    if (!messages_.empty() || battle_->outcome() != BattleOutcome::Fighting || running_) return;
-    const int ready = battle_->readyCharacter();
-    if (ready >= 0) {
-        active_ = ready;
-        openCommands();
+    if (running_) return;
+    if (menuDelay_ > 0) {
+        if (--menuDelay_ == 0) openCommands();
+        return;
+    }
+    while (!menuQueue_.empty()) {
+        const int slot = menuQueue_.front();
+        const Combatant& c = battle_->combatants()[static_cast<size_t>(slot)];
+        if (!c.ready || !c.alive() || commanded_[static_cast<size_t>(slot)]) {
+            menuQueue_.pop_front();
+            continue;
+        }
+        menuQueue_.pop_front();
+        active_ = slot;
+        menuDelay_ = FF6_BATTLE_MENU_OPEN_FRAMES;  // the window of the commands comes a few frames after the gauge turns yellow
+        return;
     }
 }
 
-// With the active mode the gauges go on while a command is chosen; the menu closes if its character cannot act any more.
+// The menu closes if its character cannot act any more.
 bool BattleScreen::keepsMenu() {
-    if (!wait_ && ++frames_ % FF6_BATTLE_TICK_FRAMES == 0) {
-        battle_->tick();
-        collectEvents();
-    }
     const Combatant& character = battle_->combatants()[static_cast<size_t>(active_)];
-    if (battle_->outcome() == BattleOutcome::Fighting && character.alive() && character.ready) return true;
+    if (battle_->outcome() == BattleOutcome::Fighting && character.alive() && character.ready && !commanded_[static_cast<size_t>(active_)]) return true;
     mode_ = BattleMode::Fighting;
     return false;
 }
@@ -1415,8 +1623,13 @@ void BattleScreen::openCommands() {
             id = id == FF6_CMD_FIGHT ? FF6_CMD_MAGITEK : id == FF6_CMD_MAGIC ? id : FF6_CMD_COUNT;
             if (magicOnly) id = id == FF6_CMD_MAGIC ? FF6_CMD_COUNT : id == FF6_CMD_MAGITEK ? FF6_CMD_MAGIC : id;
         }
-        if (id >= FF6_CMD_COUNT || !kCommandNames[id][0] || id == FF6_CMD_DEFEND || id == FF6_CMD_ROW) continue;
         Entry entry;
+        if (id >= FF6_CMD_COUNT || !kCommandNames[id][0] || id == FF6_CMD_DEFEND || id == FF6_CMD_ROW) {  // a gap, where the command was
+            entry.value = -1;
+            entry.enabled = false;
+            commands_.push_back(entry);
+            continue;
+        }
         entry.name = text(kCommandNames[id]);
         entry.value = id;
         entry.enabled = id == FF6_CMD_FIGHT || id == FF6_CMD_ITEM || id == FF6_CMD_DEFEND || id == FF6_CMD_STEAL ||
@@ -1447,6 +1660,7 @@ void BattleScreen::openCommands() {
     run.value = FF6_BATTLE_COMMAND_RUN;
     run_ = {run};
     page_ = mainCommand_ = command_ = 0;
+    while (command_ < static_cast<int>(commands_.size()) - 1 && commands_[static_cast<size_t>(command_)].value < 0) ++command_;
     mode_ = BattleMode::Command;
 }
 
@@ -1507,8 +1721,13 @@ void BattleScreen::updateCommand(const InputState& input, int direction) {
     }
     const std::vector<Entry>& shown = shownCommands();
     const int count = static_cast<int>(shown.size());
-    if (direction == Up || direction == Down) {
-        command_ = (command_ + (direction == Down ? 1 : count - 1)) % count;
+    if (direction == Up || direction == Down) {  // the gaps are skipped
+        int next = command_;
+        for (int step = 0; step < count; ++step) {
+            next = (next + (direction == Down ? 1 : count - 1)) % count;
+            if (shown[static_cast<size_t>(next)].value >= 0) break;
+        }
+        command_ = next;
         sound_.command(FF6_SFX_MENU_MOVE, 0, 0);
     }
     if (!input.confirm) return;
@@ -1516,14 +1735,17 @@ void BattleScreen::updateCommand(const InputState& input, int direction) {
     if (!entry.enabled) return;
     sound_.command(FF6_SFX_MENU_SELECT, 0, 0);
     controlList_ = rageList_ = danceList_ = false;
+    chosenCommand_ = entry.value;
+    columns_ = 1;
+    listOpening_ = FF6_BATTLE_LIST_OPEN_FRAMES;  // the window of a list rises (_c15729)
     switch (entry.value) {
         case FF6_CMD_RAGE: openRage(); break;
         case FF6_CMD_DANCE: openDance(); break;
-        case FF6_CMD_LEAP:
-            battle_->leap(active_);
-            collectEvents();
-            mode_ = BattleMode::Fighting;
+        case FF6_CMD_LEAP: {
+            const int user = active_;
+            queueCommand(entry.value, [this, user] { battle_->leap(user); });
             break;
+        }
         case FF6_CMD_SLOT:
             for (int reel = 0; reel < 3; ++reel) {
                 reels_[static_cast<size_t>(reel)] = (frames_ + reel * 2) % FF6_SLOT_ICONS;
@@ -1578,38 +1800,40 @@ void BattleScreen::updateCommand(const InputState& input, int direction) {
             beginTarget(which, 0, aimed);
             break;
         }
-        case FF6_CMD_MIMIC:
-            battle_->mimic(active_);
-            collectEvents();
-            mode_ = BattleMode::Fighting;
+        case FF6_CMD_MIMIC: {
+            const int user = active_;
+            queueCommand(entry.value, [this, user] { battle_->mimic(user); });
             break;
+        }
         case FF6_CMD_MORPH:
         case FF6_CMD_REVERT:
-        case FF6_CMD_RUNIC:
-            if (entry.value == FF6_CMD_MORPH) battle_->morph(active_);
-            else if (entry.value == FF6_CMD_REVERT) battle_->revert(active_);
-            else battle_->runic(active_);
-            collectEvents();
-            mode_ = BattleMode::Fighting;
+        case FF6_CMD_RUNIC: {
+            const int user = active_, command = entry.value;
+            queueCommand(command, [this, user, command] {
+                if (command == FF6_CMD_MORPH) battle_->morph(user);
+                else if (command == FF6_CMD_REVERT) battle_->revert(user);
+                else battle_->runic(user);
+            });
             break;
+        }
         case FF6_CMD_STEAL: {
             Attack steal;
             steal.target = FF6_TARGET_MANUAL | FF6_TARGET_ONE_SIDE | FF6_TARGET_ENEMY;
             beginTarget(Pending::Steal, 0, steal);
             break;
         }
-        case FF6_CMD_ROW:
-            battle_->changeRow(active_);
-            collectEvents();
-            mode_ = BattleMode::Fighting;
+        case FF6_CMD_ROW: {
+            const int user = active_;
+            queueCommand(entry.value, [this, user] { battle_->changeRow(user); });
             break;
+        }
         case FF6_CMD_ITEM: openList(BattleMode::Item); break;
         case FF6_CMD_TOOLS: openList(BattleMode::Item, true); break;
-        case FF6_CMD_DEFEND:
-            battle_->defend(active_);
-            collectEvents();
-            mode_ = BattleMode::Fighting;
+        case FF6_CMD_DEFEND: {
+            const int user = active_;
+            queueCommand(entry.value, [this, user] { battle_->defend(user); });
             break;
+        }
         default:
             if (!battle_->canRun()) {  // a monster holds the party back
                 queue(text("Can't escape!"));
@@ -1624,8 +1848,21 @@ void BattleScreen::updateCommand(const InputState& input, int direction) {
 
 void BattleScreen::updateList(const InputState& input, int direction) {
     if (!keepsMenu()) return;
+    if (listOpening_ > 0) {  // the window rises over the others; the hand comes once it is in place
+        --listOpening_;
+        return;
+    }
     const int count = static_cast<int>(list_.size());
-    if (count > 0 && (direction == Up || direction == Down)) {
+    if (count > 0 && columns_ > 1 && direction != FF6_NO_DIRECTION) {  // a grid: the places that are empty are passed over
+        const int step = direction == Down ? columns_ : direction == Up ? -columns_ : direction == Right ? 1 : -1;
+        int next = listCursor_;
+        for (int tries = 0; tries < count; ++tries) {
+            next = ((next + step) % count + count) % count;
+            if (list_[static_cast<size_t>(next)].value >= 0) break;
+        }
+        if (next != listCursor_) sound_.command(FF6_SFX_MENU_MOVE, 0, 0);
+        listCursor_ = next;
+    } else if (count > 0 && (direction == Up || direction == Down)) {
         listCursor_ = (listCursor_ + (direction == Down ? 1 : count - 1)) % count;
         listTop_ = std::clamp(listTop_, std::max(listCursor_ - FF6_BATTLE_LIST_ROWS + 1, 0), listCursor_);
         sound_.command(FF6_SFX_MENU_MOVE, 0, 0);
@@ -1640,10 +1877,12 @@ void BattleScreen::updateList(const InputState& input, int direction) {
     sound_.command(FF6_SFX_MENU_SELECT, 0, 0);
     const int value = list_[static_cast<size_t>(listCursor_)].value;
     if (rageList_ || danceList_) {  // no target: the character goes on alone
-        if (rageList_) battle_->rage(active_, value);
-        else battle_->dance(active_, value);
-        collectEvents();
-        mode_ = BattleMode::Fighting;
+        const int user = active_;
+        const bool rage = rageList_;
+        queueCommand(rage ? FF6_CMD_RAGE : FF6_CMD_DANCE, [this, user, rage, value] {
+            if (rage) battle_->rage(user, value);
+            else battle_->dance(user, value);
+        });
         return;
     }
     if (controlList_) {  // an attack of the monster, at the party unless it heals its own side
@@ -1804,9 +2043,9 @@ void BattleScreen::updateSlot(const InputState& input) {
     if (!input.confirm) return;
     sound_.command(FF6_SFX_MENU_SELECT, 0, 0);
     if (++slotStopped_ < 3) return;
-    battle_->slot(active_, reels_);
-    collectEvents();
-    mode_ = BattleMode::Fighting;
+    const int user = active_;
+    const std::array<int, 3> reels = reels_;
+    queueCommand(FF6_CMD_SLOT, [this, user, reels] { battle_->slot(user, reels); });
 }
 
 void BattleScreen::drawSlot() {
@@ -1818,12 +2057,28 @@ void BattleScreen::drawSlot() {
     }
 }
 
+// DrawMagitekListText: two to a line, at their places; Terra has the eight, the others only some (TerraMagitekAttackTbl and
+// DefaultMagitekAttackTbl), the rest of the places stay empty. No cost is shown.
 void BattleScreen::openMagitek() {
     list_.clear();
     const Combatant& c = battle_->combatants()[static_cast<size_t>(active_)];
-    for (int i = 0; i < FF6_MAGITEK_ATTACKS; ++i) addAttack(c, FF6_ATTACK_FIRST_MAGITEK + i);
+    const int gfx = characterGfx_[static_cast<size_t>(c.id)] >= 0 ? characterGfx_[static_cast<size_t>(c.id)] : characterSprite(c.id);
+    static constexpr int kDefault[FF6_MAGITEK_ATTACKS] = FF6_MAGITEK_DEFAULT_LIST;
+    for (int i = 0; i < FF6_MAGITEK_ATTACKS; ++i) {
+        const int attack = gfx == FF6_CHAR_GFX_TERRA_MAGITEK ? i : kDefault[i];
+        if (attack < 0) {
+            Entry gap;
+            gap.value = -1;
+            gap.enabled = false;
+            list_.push_back(gap);
+            continue;
+        }
+        addAttack(c, FF6_ATTACK_FIRST_MAGITEK + attack);
+        list_.back().amount = -1;
+    }
     listMode_ = BattleMode::Tech;
     listCursor_ = listTop_ = 0;
+    columns_ = FF6_BATTLE_MAGITEK_COLUMNS;
     mode_ = BattleMode::Tech;
 }
 
@@ -1846,6 +2101,7 @@ void BattleScreen::openTechs(bool blitz) {
 // What an attack can be aimed at: a cursor on one combatant, or on a side, or on everybody; the targets that need no
 // choice are taken at once.
 void BattleScreen::beginTarget(Pending pending, int value, const Attack& attack) {
+    targetFromList_ = mode_ == BattleMode::Magic || mode_ == BattleMode::Item || mode_ == BattleMode::Tech;
     pending_ = pending;
     pendingValue_ = value;
     pendingAttack_ = attack;
@@ -1862,6 +2118,18 @@ void BattleScreen::beginTarget(Pending pending, int value, const Attack& attack)
     }
     target_ = startsOnMonsters_ ? FF6_BATTLE_COMBATANTS - 1 : FF6_BATTLE_PARTY_SLOTS - 1;
     moveTarget(1);
+    if (startsOnMonsters_ && gfx_) {  // _c17922: the monster furthest to the right (to the left when the screen is turned round)
+        const bool back = battle_->battleType() == FF6_BATTLE_TYPE_BACK;
+        int best = -1, bestX = 0;
+        for (int i = FF6_BATTLE_PARTY_SLOTS; i < FF6_BATTLE_COMBATANTS; ++i) {
+            if (!targetable(i)) continue;
+            const size_t slot = static_cast<size_t>(i - FF6_BATTLE_PARTY_SLOTS);
+            const int width = monsterImage(slot).width;
+            const int x = back ? -monsterX(slot, width) : monsterX(slot, width) + width;
+            if (best < 0 || x > bestX) best = i, bestX = x;
+        }
+        if (best >= 0) target_ = best;
+    }
     if (!targetable(target_)) switchSide();
 }
 
@@ -1912,39 +2180,57 @@ void BattleScreen::switchSide() {
 void BattleScreen::confirmTarget() {
     const std::vector<int> targets = selection();
     if (targets.empty()) return;
-    switch (pending_) {
-        case Pending::Fight: battle_->fight(active_, targets.front()); break;
-        case Pending::Spell: battle_->cast(active_, pendingValue_, targets, xMagic_ == 1); break;
-        case Pending::Item: battle_->useItem(active_, pendingValue_, targets); break;
-        case Pending::Steal: battle_->steal(active_, targets.front()); break;
-        case Pending::Throw: battle_->throwWeapon(active_, pendingValue_, targets.front()); break;
-        case Pending::Jump: battle_->jump(active_, targets.front()); break;
-        case Pending::Sketch: battle_->sketch(active_, targets.front()); break;
-        case Pending::Capture: battle_->capture(active_, targets.front()); break;
-        case Pending::Possess: battle_->possess(active_, targets.front()); break;
-        case Pending::GpRain: battle_->gpRain(active_, targets); break;
-        case Pending::Control:
-            if (battle_->control(active_, targets.front())) {  // it obeys: the attack that it is given is next
-                collectEvents();
-                openControl(targets.front());
-                return;
-            }
-            break;
-        case Pending::ControlAttack: {
-            uint16_t mask = 0;
-            for (const int target : targets) mask = static_cast<uint16_t>(mask | (1u << target));
-            battle_->controlAttack(active_, pendingValue_, mask);
-            break;
+    if (pending_ == Pending::Control) {  // whether the monster obeys is known at once: the attack that it is given is next
+        if (battle_->control(active_, targets.front())) {
+            collectEvents();
+            openControl(targets.front());
+            return;
         }
+        collectEvents();
+        mode_ = BattleMode::Fighting;
+        return;
     }
-    collectEvents();
-    if (xMagic_ == 1) {  // the second spell of X Magic
+    const int user = active_, value = pendingValue_;
+    const bool keepTurn = xMagic_ == 1;
+    const Pending pending = pending_;
+    const int command = chosenCommand_;
+    const auto run = [this, user, value, keepTurn, pending, targets] {
+        switch (pending) {
+            case Pending::Fight: battle_->fight(user, targets.front()); break;
+            case Pending::Spell: battle_->cast(user, value, targets, keepTurn); break;
+            case Pending::Item: battle_->useItem(user, value, targets); break;
+            case Pending::Steal: battle_->steal(user, targets.front()); break;
+            case Pending::Throw: battle_->throwWeapon(user, value, targets.front()); break;
+            case Pending::Jump: battle_->jump(user, targets.front()); break;
+            case Pending::Sketch: battle_->sketch(user, targets.front()); break;
+            case Pending::Capture: battle_->capture(user, targets.front()); break;
+            case Pending::Possess: battle_->possess(user, targets.front()); break;
+            case Pending::GpRain: battle_->gpRain(user, targets); break;
+            case Pending::Control: break;
+            case Pending::ControlAttack: {
+                uint16_t mask = 0;
+                for (const int target : targets) mask = static_cast<uint16_t>(mask | (1u << target));
+                battle_->controlAttack(user, value, mask);
+                break;
+            }
+        }
+    };
+    if (xMagic_ == 1) {  // the second spell of X Magic: both are cast as one action
+        xMagicFirst_ = run;
         xMagic_ = 2;
         openList(BattleMode::Magic);
         return;
     }
-    xMagic_ = 0;
-    mode_ = BattleMode::Fighting;
+    if (xMagic_ == 2) {
+        const std::function<void()> first = xMagicFirst_;
+        xMagic_ = 0;
+        queueCommand(FF6_CMD_X_MAGIC, [first, run] {
+            first();
+            run();
+        });
+        return;
+    }
+    queueCommand(command, run);
 }
 
 void BattleScreen::updateTarget(const InputState& input, int direction) {
@@ -2119,6 +2405,10 @@ void BattleScreen::drawField() {
     const auto shiftOf = [&](bool monster, int slot) {
         AnimShift shift = scripted ? player_->shift(monster, slot) : AnimShift();
         if (!monster && !scripted) shift.hidden = keptHidden_[slot];  // a scene took the character off the field
+        if (!monster && !scripted && stepBack_ > 0) {  // STEP_BACK: it walks back from where the animation left it
+            shift.x = stepFrom_[static_cast<size_t>(slot)].first * stepBack_ / FF6_BATTLE_STEP_BACK_FRAMES;
+            shift.y = stepFrom_[static_cast<size_t>(slot)].second * stepBack_ / FF6_BATTLE_STEP_BACK_FRAMES;
+        }
         return shift;
     };
     const auto tintOf = [&](int group) { return scripted ? player_->tint(group) : AnimTint(); };
@@ -2211,6 +2501,8 @@ void BattleScreen::drawField() {
         frontDraw = scripted && shift.priority == FF6_ANIM_PRIORITY_FRONT;
         const bool blinkOff = blinkTimer_[slot] > 0 && (blinkTimer_[slot] / FF6_BATTLE_BLINK_PERIOD) % 2 == 0;
         bool shown = monster.alive() && !(monster.status & FF6_ST_HIDE) && !blinkOff;
+        const bool entering = battle_->battleType() == FF6_BATTLE_TYPE_NORMAL && monster.placeX < 0 && introFrame_ < FF6_BATTLE_ENTRY_START + FF6_BATTLE_ENTRY_FRAMES;
+        if (entering && introFrame_ < FF6_BATTLE_ENTRY_START) shown = false;  // the monsters come once the fade in is over
         if (dying_[slot]) shown = true;
         if (!shown || shift.hidden) continue;
         const BattleImage& stock = monsterImage(i);
@@ -2221,6 +2513,10 @@ void BattleScreen::drawField() {
         } else if (i == 0 && eventPalette_ >= 0 && anim_) {  // the first monster sparkles (the frozen esper of the first battle)
             swapped = gfx_->monsterWith(formation_.monsters[i], anim_->eventPaletteWords(eventPalette_));
         }
+        const int flash = monsterFlash_[slot];  // before it acts: four frames black and white, four of its colors, twice
+        if (flash > 0 && ((FF6_MONSTER_FLASH_FRAMES - flash) / FF6_MONSTER_FLASH_STEP) % 2 == 0 && monster.charIndex < 0) {
+            swapped = gfx_->monsterFlash(formation_.monsters[i]);
+        }
         const BattleImage& image = swapped.rgba.empty() || swapped.width != stock.width || swapped.height != stock.height ? stock : swapped;
         const BattleImage flipped = mirrored(i, image.width) != shift.flipX ? turned(image) : BattleImage();
         const BattleImage& sideways = mirrored(i, image.width) != shift.flipX ? flipped : image;
@@ -2228,7 +2524,11 @@ void BattleScreen::drawField() {
         const BattleImage& whole = shift.flipY ? overturned : sideways;
         const int monsterTop = this->monsterTop(i);
         static constexpr int kTremble[8] = FF6_KEFKA_TREMBLE;
-        const int tremble = scripted && i == 0 && player_->attack() == FF6_KEFKA_DEATH_ANIM ? kTremble[animation_ & 7] : 0;
+        int tremble = scripted && i == 0 && player_->attack() == FF6_KEFKA_DEATH_ANIM ? kTremble[animation_ & 7] : 0;
+        if (entering) {  // they slide in from the left side of the screen
+            const int left = FF6_BATTLE_ENTRY_START + FF6_BATTLE_ENTRY_FRAMES - introFrame_;
+            tremble -= (monsterX(i, image.width) + image.width - FF6_BATTLE_ENTRY_EDGE) * left / FF6_BATTLE_ENTRY_FRAMES;
+        }
         if (dying_[slot] && fadeTimer_[slot] > 0 && monster.gfx < 0) {
             // A monster that falls turns to purple, in a palette that loses a step of each color at every frame, and its sprite is added
             // to the field (MonsterDeathAnim): it fades out while the field shows through.
@@ -2315,9 +2615,9 @@ void BattleScreen::drawField() {
         const std::vector<uint8_t> lit = characterTint.active ? colored(faced.rgba, characterTint) : std::vector<uint8_t>();
         const bool behindBg1 = behindLimit > 0 && characterTop(i) + FF6_CHAR_HEIGHT < behindLimit;
         const BattleImage& shadow = gfx_->statusSprite(FF6_STATUS_SPRITE_SHADOW, 0);  // under the feet, behind the character
-        if (!shadow.rgba.empty() && !armored) place(x, characterTop(i) + FF6_CHAR_HEIGHT + shift.y, shadow.width, shadow.height, shadow.rgba.data(), behindBg1);
+        if (!shadow.rgba.empty() && !armored) place(x, characterTop(i) + FF6_CHAR_SPRITE_DY + FF6_CHAR_HEIGHT + shift.y, shadow.width, shadow.height, shadow.rgba.data(), behindBg1);
         const std::vector<uint8_t>& drawnPixels = characterTint.active ? lit : faced.rgba;
-        const int drawnTop = characterTop(i) + shift.y + shift.vy - lift;
+        const int drawnTop = characterTop(i) + FF6_CHAR_SPRITE_DY + shift.y + shift.vy - lift;  // CharSpriteData: the sprite starts 8 lines above PosY
         if (scripted && player_->echo().on && player_->echo().slot == i) {  // the echoes come first, behind the character
             if ((animation_ & player_->echo().mask) == 0) {
                 for (size_t k = echoHistory_.size() - 1; k > 0; --k) echoHistory_[k] = echoHistory_[k - 1];
@@ -2398,14 +2698,31 @@ void BattleScreen::drawPopup() {
     }
 }
 
-void BattleScreen::drawMonsters() {
-    screen_.window(0, FF6_BATTLE_MONSTERS_Y, FF6_BATTLE_MONSTERS_W, FF6_BATTLE_WINDOW_ROWS);
-    int row = 0;
+// UpdateMonsterGfxBuf and DrawMonsterNames: each name once, in the order of the places, four at most.
+std::vector<int> BattleScreen::monsterNames() const {
+    std::vector<int> firsts;
     for (int i = FF6_BATTLE_PARTY_SLOTS; i < FF6_BATTLE_COMBATANTS; ++i) {
         if (!monsterListed(i)) continue;
-        putPx(FF6_BATTLE_NAME_X, monsterRowPx(row), nameOf(i), FF6_MENU_BG3_DEFAULT);
-        ++row;
+        bool known = false;
+        for (const int first : firsts) known = known || nameOf(first) == nameOf(i);
+        if (!known && static_cast<int>(firsts.size()) < FF6_BATTLE_MONSTER_NAMES) firsts.push_back(i);
     }
+    return firsts;
+}
+
+void BattleScreen::drawMonsters() {
+    screen_.windowPx(FF6_BATTLE_MONSTER_WINDOW_X, FF6_BATTLE_WINDOW_TOP, FF6_BATTLE_MONSTER_WINDOW_W, FF6_BATTLE_WINDOW_HEIGHT, FF6_BATTLE_GRADIENT_START, FF6_BATTLE_GRADIENT_LINES);
+    const std::vector<int> names = monsterNames();
+    for (size_t row = 0; row < names.size(); ++row) {
+        putAt(FF6_BATTLE_MONSTER_NAME_PX, FF6_BATTLE_TEXT_TOP + static_cast<int>(row) * FF6_BATTLE_TEXT_PITCH, nameOf(names[row]), FF6_MENU_BG3_DEFAULT);
+    }
+}
+
+// Text at a pixel of the screen.
+void BattleScreen::putAt(int xPx, int yPx, const Codes& codes, int color) {
+    screen_.setOriginX(xPx % FF6_MENU_TILE_SIZE);
+    putPx(xPx / FF6_MENU_TILE_SIZE, yPx, codes, color);
+    screen_.setOriginX(0);
 }
 
 void BattleScreen::putPx(int x, int yPx, const Codes& codes, int color) {
@@ -2414,61 +2731,69 @@ void BattleScreen::putPx(int x, int yPx, const Codes& codes, int color) {
     screen_.setTextOffset(0);
 }
 
-int BattleScreen::monsterRowPx(int row) const {
-    int alive = 0;
-    for (int i = FF6_BATTLE_PARTY_SLOTS; i < FF6_BATTLE_COMBATANTS; ++i) alive += monsterListed(i);
-    const int pitch = alive > FF6_BATTLE_MONSTER_ROWS ? FF6_BATTLE_MONSTER_ROW_PX : FF6_BATTLE_ROW_PX;
-    return FF6_BATTLE_ROWS_TOP_PX + row * pitch;
-}
+int BattleScreen::monsterRowPx(int row) const { return FF6_BATTLE_TEXT_TOP + row * FF6_BATTLE_TEXT_PITCH; }
 
 void BattleScreen::drawParty() {
-    screen_.window(FF6_BATTLE_PARTY_X, FF6_BATTLE_MONSTERS_Y, FF6_BATTLE_PARTY_W, FF6_BATTLE_WINDOW_ROWS);
+    screen_.windowPx(FF6_BATTLE_PARTY_WINDOW_X, FF6_BATTLE_WINDOW_TOP, FF6_BATTLE_PARTY_WINDOW_W, FF6_BATTLE_WINDOW_HEIGHT, FF6_BATTLE_GRADIENT_START, FF6_BATTLE_GRADIENT_LINES);
     for (int i = 0; i < FF6_BATTLE_PARTY_SLOTS; ++i) {
         const Combatant& c = battle_->combatants()[static_cast<size_t>(i)];
         if (!c.present || c.offstage) continue;
-        const int y = FF6_BATTLE_ROWS_TOP_PX + i * FF6_BATTLE_ROW_PX;
-        // The name tells the state: gray when down, yellow when ready, teal with a status.
-        int color = FF6_MENU_BG3_DEFAULT;
-        if (shownHp(i) == 0 || c.escaped) {
-            color = FF6_MENU_BG3_GRAY;
-        } else if (c.ready) {
-            color = FF6_MENU_BG3_YELLOW;
-        } else if (c.status & ~(FF6_ST_DEAD | FF6_ST_NEAR_FATAL)) {
-            color = FF6_MENU_BG3_TEAL;
-        }
-        putPx(FF6_BATTLE_CHAR_NAME_X, y, battle_->hideNames() ? Codes() : text(characterName(c.id)), color);
-        putPx(FF6_BATTLE_HP_X, y, text(number(shownHp(i), 4)), FF6_MENU_BG3_DEFAULT);
-        // The gauge: a frame with cells that fill four steps each.
-        const int total = FF6_BATTLE_GAUGE_CELLS * FF6_BATTLE_GAUGE_STEPS;
-        const int steps = std::min(c.gauge * total / FF6_ATB_FULL, total);
+        const int y = FF6_BATTLE_TEXT_TOP + i * FF6_BATTLE_TEXT_PITCH;
+        // _c14780: the names are white, but for the one of the character whose menu is open, in yellow.
+        const bool menuOpen = mode_ != BattleMode::Fighting && mode_ != BattleMode::Result && mode_ != BattleMode::Done;
+        const int color = menuOpen && i == active_ ? FF6_MENU_BG3_YELLOW : FF6_MENU_BG3_DEFAULT;
+        putAt(FF6_BATTLE_CHAR_NAME_PX, y, battle_->hideNames() ? Codes() : text(characterName(c.id)), color);
+        putAt(FF6_BATTLE_HP_PX, y, text(number(shownHp(i), 4)), FF6_MENU_BG3_DEFAULT);
+        // DrawGaugeText: the high byte of the gauge, a pixel for every eight of it and one more, in four cells between the ends.
+        int value = std::min(c.gauge >> FF6_BATTLE_GAUGE_SHIFT, FF6_BATTLE_GAUGE_VALUE_FULL);
+        if (readyTimer_[static_cast<size_t>(i)] > 0) value = FF6_BATTLE_GAUGE_VALUE_FULL - 1;  // white for a while before it turns yellow
+        if (i == acting_) value = FF6_BATTLE_GAUGE_VALUE_FULL;  // it stays full until the action is over
+        const int pixels = (value >> FF6_BATTLE_GAUGE_STEP_SHIFT) + 1;
         Codes bar = {FF6_MENU_CODE_GAUGE_LEFT};
-        for (int cell = 0; cell < FF6_BATTLE_GAUGE_CELLS; ++cell) {
-            const int filled = steps - cell * FF6_BATTLE_GAUGE_STEPS;
-            bar.push_back(filled >= FF6_BATTLE_GAUGE_STEPS ? FF6_MENU_CODE_GAUGE_FULL
-                          : filled > 0 ? static_cast<uint8_t>(FF6_MENU_CODE_GAUGE_EMPTY + 2 * filled)
-                                       : FF6_MENU_CODE_GAUGE_EMPTY);
+        for (int cell = 0; cell < FF6_BATTLE_GAUGE_TILES; ++cell) {
+            bar.push_back(static_cast<uint8_t>(FF6_MENU_CODE_GAUGE_EMPTY + std::clamp(pixels - cell * FF6_BATTLE_GAUGE_TILE_STEPS, 0, FF6_BATTLE_GAUGE_TILE_STEPS)));
         }
         bar.push_back(FF6_MENU_CODE_GAUGE_RIGHT);
-        putPx(FF6_BATTLE_GAUGE_X, y, bar, FF6_MENU_BG3_DEFAULT);
+        putAt(FF6_BATTLE_GAUGE_PX, y, bar, value == FF6_BATTLE_GAUGE_VALUE_FULL ? FF6_BATTLE_GAUGE_FULL : FF6_BATTLE_GAUGE_FILLING);
     }
 }
 
 // The commands, or the spells or the items, in a window that takes the place of the ones at the bottom.
 void BattleScreen::drawLists() {
-    const bool listShown = mode_ == BattleMode::Magic || mode_ == BattleMode::Item || mode_ == BattleMode::Tech;
-    if (mode_ == BattleMode::Command) {
+    // The list stays while its target is chosen.
+    const bool listShown = mode_ == BattleMode::Magic || mode_ == BattleMode::Item || mode_ == BattleMode::Tech || (mode_ == BattleMode::Target && targetFromList_);
+    const bool rising = listShown && columns_ > 1 && listOpening_ > 0;  // the commands stay under the window that rises
+    if (mode_ == BattleMode::Command || rising) {
         const std::vector<Entry>& entries = shownCommands();
         const int count = static_cast<int>(entries.size());
-        const int shown = std::min(count, FF6_BATTLE_LIST_ROWS);
+        const int shown = std::min(count, FF6_BATTLE_TEXT_ROWS);
         const int top = std::clamp(command_ - shown + 1, 0, count - shown);
-        screen_.window(FF6_BATTLE_COMMAND_X, FF6_BATTLE_COMMAND_Y, FF6_BATTLE_COMMAND_W, FF6_BATTLE_WINDOW_ROWS);
+        screen_.windowPx(FF6_BATTLE_CMD_WINDOW_X, FF6_BATTLE_WINDOW_TOP, FF6_BATTLE_CMD_WINDOW_W, FF6_BATTLE_WINDOW_HEIGHT, FF6_BATTLE_GRADIENT_START, FF6_BATTLE_GRADIENT_LINES);
         for (int row = 0; row < shown; ++row) {
             const Entry& entry = entries[static_cast<size_t>(top + row)];
-            putPx(FF6_BATTLE_COMMAND_X + FF6_BATTLE_LIST_TEXT_X, FF6_BATTLE_ROWS_TOP_PX + row * FF6_BATTLE_ROW_PX, entry.name,
+            putAt(FF6_BATTLE_COMMAND_TEXT_PX, FF6_BATTLE_TEXT_TOP + row * FF6_BATTLE_TEXT_PITCH, entry.name,
                   entry.enabled ? FF6_MENU_BG3_DEFAULT : FF6_MENU_BG3_GRAY);
         }
-        screen_.hand(FF6_BATTLE_COMMAND_HAND_X, FF6_BATTLE_ROWS_TOP_PX + (command_ - top) * FF6_BATTLE_ROW_PX + FF6_ITEM_CURSOR_DY);
-    } else if (listShown) {
+        if (!rising) screen_.hand(FF6_BATTLE_COMMAND_HAND_PX, FF6_BATTLE_TEXT_TOP + (command_ - top) * FF6_BATTLE_TEXT_PITCH + FF6_ITEM_CURSOR_DY);
+    }
+    if (listShown && columns_ > 1) {
+        // The window rises from the bottom, with its text; its lines are cut where the windows end.
+        const int travel = FF6_BATTLE_LIST_WINDOW_BOTTOM - FF6_BATTLE_LIST_WINDOW_TOP;
+        const int top = FF6_BATTLE_LIST_WINDOW_TOP + travel * listOpening_ / FF6_BATTLE_LIST_OPEN_FRAMES;
+        screen_.windowPx(FF6_BATTLE_LIST_WINDOW_X, top, FF6_BATTLE_LIST_WINDOW_W, FF6_BATTLE_LIST_WINDOW_BOTTOM - FF6_BATTLE_LIST_WINDOW_TOP,
+                         FF6_BATTLE_GRADIENT_START, FF6_BATTLE_GRADIENT_LINES);
+        static constexpr int kColumns[FF6_BATTLE_MAGITEK_COLUMNS] = FF6_BATTLE_LIST_COLUMN_PX;
+        for (size_t index = 0; index < list_.size(); ++index) {
+            const Entry& entry = list_[index];
+            const int y = top + (FF6_BATTLE_LIST_TEXT_TOP - FF6_BATTLE_LIST_WINDOW_TOP) + static_cast<int>(index) / columns_ * FF6_BATTLE_TEXT_PITCH;
+            if (entry.value < 0 || y + FF6_MENU_TILE_SIZE > FF6_BATTLE_LIST_WINDOW_BOTTOM) continue;
+            putAt(kColumns[index % columns_], y, entry.name, entry.enabled ? FF6_MENU_BG3_DEFAULT : FF6_MENU_BG3_GRAY);
+        }
+        if (listOpening_ == 0 && mode_ != BattleMode::Target) {
+            screen_.hand(kColumns[listCursor_ % columns_] - FF6_BATTLE_LIST_HAND_DX,
+                         FF6_BATTLE_LIST_TEXT_TOP + listCursor_ / columns_ * FF6_BATTLE_TEXT_PITCH + FF6_ITEM_CURSOR_DY);
+        }
+    } else if (listShown && mode_ != BattleMode::Command) {
         const int width = mode_ == BattleMode::Item ? FF6_BATTLE_ITEM_W : FF6_BATTLE_LIST_W;
         screen_.window(FF6_BATTLE_LIST_X, FF6_BATTLE_LIST_Y, width, FF6_BATTLE_WINDOW_ROWS);
         for (int row = 0; row < FF6_BATTLE_LIST_ROWS; ++row) {
@@ -2480,21 +2805,25 @@ void BattleScreen::drawLists() {
             putPx(FF6_BATTLE_LIST_TEXT_X, y, entry.name, color);
             if (entry.amount >= 0) putPx(FF6_BATTLE_LIST_X + width - 2, y, text(number(entry.amount, 2)), color);
         }
-        screen_.hand(FF6_BATTLE_HAND_X, FF6_BATTLE_ROWS_TOP_PX + (listCursor_ - listTop_) * FF6_BATTLE_ROW_PX + FF6_ITEM_CURSOR_DY);
+        if (mode_ != BattleMode::Target) screen_.hand(FF6_BATTLE_HAND_X, FF6_BATTLE_ROWS_TOP_PX + (listCursor_ - listTop_) * FF6_BATTLE_ROW_PX + FF6_ITEM_CURSOR_DY);
     }
 }
 
-// The hands over the combatants that the cursor of the target covers.
+// UpdateTargetCursors: the hands on the combatants that the cursor covers; on a monster at its right side, turned to the left,
+// half way down; on a character at its left.
 void BattleScreen::drawHands() {
     if (mode_ != BattleMode::Target) return;
     for (const int target : selection()) {
         if (target < FF6_BATTLE_PARTY_SLOTS) {
-            screen_.hand(FF6_BATTLE_PARTY_HAND_X, FF6_BATTLE_ROWS_TOP_PX + target * FF6_BATTLE_ROW_PX + FF6_ITEM_CURSOR_DY);
+            screen_.hand(characterX(target) - FF6_BATTLE_CHAR_HAND_DX, characterTop(target) + FF6_BATTLE_CHAR_HAND_DY);
             continue;
         }
-        int row = 0;
-        for (int i = FF6_BATTLE_PARTY_SLOTS; i < target; ++i) row += monsterListed(i);
-        screen_.hand(FF6_BATTLE_HAND_X, monsterRowPx(row) + FF6_ITEM_CURSOR_DY);
+        if (!gfx_) continue;
+        const size_t slot = static_cast<size_t>(target - FF6_BATTLE_PARTY_SLOTS);
+        const BattleImage& image = monsterImage(slot);
+        const bool flip = !mirrored(slot, image.width);
+        const int x = flip ? monsterX(slot, image.width) + image.width - FF6_BATTLE_MONSTER_HAND_DX : monsterX(slot, image.width) - FF6_BATTLE_CHAR_HAND_DX + FF6_BATTLE_MONSTER_HAND_DX;
+        screen_.hand(x, monsterTop(slot) + image.height / 2, flip);
     }
 }
 
@@ -2517,6 +2846,11 @@ void BattleScreen::drawResult() {
 }
 
 void BattleScreen::draw() {
+    struct FontPalette {  // the text of the battle has its own palettes (BattleFontPal), until the drawing is over
+        MenuScreen& screen;
+        ~FontPalette() { screen.setBg3Palette(nullptr); }
+    } fontPalette{screen_};
+    screen_.setBg3Palette(gfx_ ? gfx_->fontPal.data() : nullptr);
     screen_.clear();
     screen_.setTextOffset(0);
     screen_.setClip(0, FF6_SCREEN_HEIGHT);
@@ -2528,9 +2862,26 @@ void BattleScreen::draw() {
     }
     drawField();
     // The mode of the game is changed by an HDMA table: mode 7 is only for the lines of the field, and the windows are below.
-    if (!current_.empty() && !mode7Shown()) {
-        screen_.window(FF6_BATTLE_MESSAGE_X, FF6_BATTLE_MESSAGE_Y, FF6_BATTLE_MESSAGE_W, 2);
-        put(FF6_BATTLE_MESSAGE_X + 1, FF6_BATTLE_MESSAGE_Y + 1, current_, FF6_MENU_BG3_DEFAULT);
+    // The window on top (bg1, InitMsgWindowHDMA): the name of an attack in a box in the middle, the other messages across.
+    if (!current_.empty() && !mode7Shown() && (!currentName_ || nameTimer_ > 0)) {
+        const int x = currentName_ ? FF6_BATTLE_NAME_BOX_X : FF6_BATTLE_MESSAGE_BOX_X;
+        const int w = currentName_ ? FF6_BATTLE_NAME_BOX_W : FF6_BATTLE_MESSAGE_BOX_W;
+        screen_.windowPx(x, FF6_BATTLE_MESSAGE_BOX_Y, w, FF6_BATTLE_MESSAGE_BOX_H, FF6_BATTLE_MESSAGE_GRADIENT_START, FF6_BATTLE_MESSAGE_GRADIENT_LINES);
+        const int length = static_cast<int>(current_.size()) * FF6_MENU_TILE_SIZE;
+        if (currentName_ && currentLarge_) {  // the name of the special attack of a monster, in the middle (_c19887)
+            screen_.largeText(x + w / 2, FF6_BATTLE_MESSAGE_LARGE_Y, current_, true);
+        } else if (currentName_) {  // the small font of the menus
+            putAt(x + (w - length) / 2, FF6_BATTLE_MESSAGE_TEXT_Y, current_, FF6_MENU_BG3_DEFAULT);
+        } else {  // DrawLargeText: the font of the dialogues
+            screen_.largeText(FF6_BATTLE_MESSAGE_LARGE_X, FF6_BATTLE_MESSAGE_LARGE_Y, current_);
+        }
+    }
+    // DrawCursorSprites: the arrow over the character whose menu is open (higher in a magitek armor).
+    const bool menuOpen = mode_ != BattleMode::Fighting && mode_ != BattleMode::Result && mode_ != BattleMode::Done && active_ >= 0;
+    if (menuOpen && gfx_) {
+        const BattleImage arrow = gfx_->statusSprite(FF6_BATTLE_ARROW_TILE, screen_.data().cursorPalette.data());
+        const int y = characterTop(active_) + FF6_BATTLE_ARROW_DY + (magitekMode() ? FF6_BATTLE_ARROW_MAGITEK_DY : 0);
+        screen_.image(characterX(active_), y, arrow.width, arrow.height, arrow.rgba.data());
     }
     drawMonsters();  // the window of the commands is drawn over it
     drawParty();

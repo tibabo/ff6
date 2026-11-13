@@ -11,15 +11,21 @@
 
 namespace ff6 {
 
-// The random numbers of a battle: xorshift, so that a test can repeat a battle.
+// The random numbers of a battle. With the table of the game (RNGTbl, Rand and RandA), each number is the next byte of the table
+// from an index that the seed starts; without it, xorshift, so that a test can repeat a battle.
 class BattleRandom {
 public:
-    explicit BattleRandom(uint32_t seed) : state_(seed ? seed : 1) {}
+    explicit BattleRandom(uint32_t seed, const std::vector<uint8_t>* table = nullptr)
+        : state_(seed ? seed : 1), table_(table && table->size() >= FF6_RNG_BYTES ? table : nullptr), index_(static_cast<uint8_t>(seed)) {}
     int below(int limit);  // 0 to limit - 1
-    int byte() { return below(256); }
+    int byte() { return table_ ? (*table_)[++index_] : below(256); }
+    // BattleLoop: the index goes one further at each turn of the main loop of the battle.
+    void step() { ++index_; }
 
 private:
     uint32_t state_;
+    const std::vector<uint8_t>* table_;
+    uint8_t index_;
 };
 
 // The formulas, apart from the battle so that they can be tested.
@@ -93,6 +99,8 @@ struct Combatant {
     int aiId = -1, charIndex = -1, gfx = -1, placeX = -1, placeY = -1;
     bool offstage = false;
     bool retort = false;  // Cyan's stance: he answers the blows of the monsters
+    bool turnPending = false;  // its gauge is full and its turn waits in the queue of the actions
+    bool acting = false;  // its action is being shown
     bool desperationUsed = false, lowHpDone = false;  // once in a battle: a desperation attack, the spells of the relics at low hp
     int rageMonster = -1, danceIndex = -1;  // the monster that Gau became, the dance that Mog dances
     int seizeTarget = -1, seizeAttacker = -1, charmTarget = -1, charmAttacker = -1;  // who it holds, who holds it; who it charmed, who charmed it
@@ -172,13 +180,27 @@ public:
     using Colosseum = ColosseumBout;
     // `party` has the characters (numbers in the party) that fight, at most FF6_BATTLE_PARTY_SLOTS. The state of the
     // party is changed by the battle: hp, and at the end experience, gil and items.
+    // `gameRandom`: the random numbers come from the table of the game, the seed being the index of the first one.
     Battle(const BattleData& data, const GameRules& rules, PartyState& party, const std::vector<int>& characters,
-        int battle, uint32_t seed, int battleSpeed = FF6_BATTLE_SPEED_DEFAULT, const Colosseum& colosseum = Colosseum());
+        int battle, uint32_t seed, int battleSpeed = FF6_BATTLE_SPEED_DEFAULT, const Colosseum& colosseum = Colosseum(), bool gameRandom = false);
+    void stepRandom() { random_.step(); }
 
     // One tick of the gauges (every FF6_BATTLE_TICK_FRAMES frames); the monsters act when theirs is full.
     void tick();
     // The first character that waits for a command, or -1.
     int readyCharacter() const;
+    // With queued turns, a combatant that acts by itself waits with a full gauge until the screen runs its turn (the action
+    // queue of the game), instead of acting in the tick.
+    void setQueuedTurns(bool queued) { queuedTurns_ = queued; }
+    int takePendingTurn();  // the next one whose gauge filled, -1 for none
+    void runTurn(int index);
+    // While the action of a combatant is shown its gauge does not move; it empties once the action is over (ExecAction).
+    void beginAction(int index) { combatants_[static_cast<size_t>(index)].acting = true; }
+    void endAction(int index) {
+        Combatant& c = combatants_[static_cast<size_t>(index)];
+        c.acting = false;
+        if (!c.ready && !c.turnPending) c.gauge = 0;
+    }
     // The command Fight of a character at a monster (a combatant index): each hand that has a weapon strikes.
     void fight(int attacker, int target);
     // The party runs while the buttons are held: a character that waits for a command leaves at its next turn of the
@@ -393,6 +415,8 @@ private:
     int turns_ = 0;  // the turns that combatants have taken (w7e3a3e)
     bool started_ = false, countering_ = false, holdEnd_ = false, recruitedGau_ = false, gauJoined_ = true;
     bool aiRunning_ = false;  // a script is running: the hits it causes do not start another one
+    bool queuedTurns_ = false;
+    std::vector<int> pendingTurns_;
 };
 
 }  // namespace ff6

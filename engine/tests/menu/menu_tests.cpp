@@ -680,7 +680,7 @@ void testMenu() {
         ff6::setCharacterName(0, "Teri");
         CHECK(ff6::characterName(0) == "Teri");
         ff6::setCharacterName(0, "");
-        CHECK(ff6::characterName(0) == "Terra");
+        CHECK(ff6::characterName(0) == "TERRA");
     }
 
     {  // the order for the end: two chosen, one taken back, then Start puts the others after

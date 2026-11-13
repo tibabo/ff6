@@ -1,6 +1,6 @@
 # Bugs : premier combat de Narshe
 
-Écarts entre l'enregistrement du jeu sur Ares ([narshee-first-battle.mov](narshee-first-battle.mov)) et le moteur, sur le combat des deux gardes de Narshe (Terra, Wedge et Vicks en armures Magitek). Ce fichier est la liste des écarts ; une case cochée est corrigée (section « Attaques et effets » : B24 et B26 à B31).
+Écarts entre l'enregistrement du jeu sur Ares ([narshee-first-battle.mov](narshee-first-battle.mov)) et le moteur, sur le combat des deux gardes de Narshe (Terra, Wedge et Vicks en armures Magitek). Ce fichier est la liste des écarts ; une case cochée est corrigée. 
 
 Conventions :
 
@@ -11,10 +11,10 @@ Conventions :
 
 ## Décisions à prendre avant de corriger
 
-- [ ] **Mode d'attente** : l'enregistrement est-il en Active, ou le Wait du jeu ne fige-t-il que les sous-menus ? Voir B05.
-- [ ] **Rapport 8:7** : le moteur affiche en pixels carrés, Ares en 8:7. Voir B33.
-- [ ] **Courbe de couleurs** : demi-teintes plus sombres dans la vidéo (émulation de couleur d'Ares ?). Voir B34.
-- [ ] **Hasard** : jauges initiales, dégâts et cibles des gardes dépendent de la table de hasard du jeu (`RNGTbl`, C0/FD00) ; sans elle, 129 contre 127, 6/7 contre 6/8 et l'ordre des personnages prêts ne peuvent pas être identiques.
+- [x] **Mode d'attente** : suivre le code du jeu ; le Wait ne fige que les sous-menus (B05).
+- [x] **Rapport 8:7** : option, défaut carré (B33).
+- [x] **Courbe de couleurs** : option, désactivée par défaut (B34).
+- [x] **Hasard** : `RNGTbl` est portée (B03) ; l'index de départ dépend du temps de jeu, que le moteur ne compte pas comme la console.
 
 ## Chronologie de référence (jeu)
 
@@ -56,123 +56,114 @@ Toutes les valeurs sont des `t`.
 ## Déroulé du combat
 
 ### B01 — Transition d'entrée en combat (haute)
-- [ ] Jeu : mosaïque en dents de scie pendant 31 images (rampes de 0 à ≈ 14 px qui retombent à zéro à t1283 et t1291, la dernière monte jusqu'à ≈ 36 px), coupure nette au noir, noir de 104 images, fondu entrant de 36 images. Total 171 images.
-- Moteur : fondu sortant ≈ 15 images (f11161–f11175), fondu entrant ≈ 15 (f11176–f11190). ≈ 30 images, ni mosaïque ni noir.
-- Piste : `Game::launchBattle` ([game.cpp](engine/src/game.cpp#L1676)), `Game::startFade` ([game.cpp](engine/src/game.cpp#L533)) ; la mosaïque du champ existe pour les événements (`Game::applyStage`, [game.cpp](engine/src/game.cpp#L562)).
+- [x] Jeu : mosaïque en dents de scie pendant 31 images (rampes qui retombent à zéro à t1283 et t1291, puis une dernière plus grande), coupure nette au noir, noir de 104 images, fondu entrant de 36 images. Total 171 images.
+- Moteur (avant) : fondu sortant ≈ 15 images (f11161–f11175), fondu entrant ≈ 15 (f11176–f11190). ≈ 30 images, ni mosaïque ni noir.
+- Cause : le moteur faisait un fondu de menu. Le jeu appelle `BattleMosaic` (`src/field/battle.asm`) : 32 images, taille `f & 7` puis `f & 15` (blocs de 1 à 8 pixels deux fois, puis de 1 à 16), sur les fonds seulement, champ figé ; puis le combat se charge écran éteint et `UpdateFadeIn` (`src/btlgfx/init_2.asm`) l'éclaire en 15 images en découvrant le champ depuis la ligne 76 en 38 images (couleur fixe retranchée par HDMA).
+- Correctif : `Game::tickBattleEntry`, `battleMosaicSize`, `applyBattleFadeIn` ([game.cpp](engine/src/game.cpp)), mosaïque faite sur les couches de fond (les sprites restent nets, comme dans la vidéo), écran noir à luminosité 0 du combat, son `0xC1` et drapeaux « sans mosaïque » / « sans son » des commandes 0x4C/0x4D (constantes `FF6_BATTLE_MOSAIC_*`, `FF6_BATTLE_LOAD_FRAMES`, `FF6_BATTLE_FADE_*`). Moteur : mosaïque f11161–11191 (31 images, même grille de blocs que la vidéo), noir f11192–11296, fondu f11297–11333.
+- Approché : les 104 images de noir sont le temps de chargement mesuré sur la console, pris constant pour tous les combats ; la musique du combat part toujours au lancement (le moment où le jeu la lance n'est pas vérifié, la vidéo n'a pas de son).
+- Reste : le temps du combat repart à la fin du fondu (f11334), le jeu 7 images plus tard (B03) ; les gardes sont déjà là (B02).
 
 ### B02 — Entrée des gardes (haute)
-- [ ] Jeu : aucun monstre pendant le fondu ; le garde du bas apparaît à x=0–8 à t1469 et les deux sont en place à t1476 (22 images après la fin du fondu, 7 images d'entrée).
-- Moteur : présents dès la première image du combat.
-- Piste : le moteur sait déjà faire entrer un monstre (`BattleEvent::Kind::Entry` dans [battle.hpp](engine/src/battle/battle.hpp)) ; à brancher sur ce combat.
+- [x] Jeu : aucun monstre pendant le fondu ; ils entrent par la gauche 22 images après sa fin, en 7 images.
+- Correctif : `introFrame_`, `FF6_BATTLE_ENTRY_*` (combat normal, monstres sans place imposée).
+- Approché : mesuré, pas porté du script d'entrée du jeu (`EntryGfxScript`, `MONSTER_ENTRY_EXIT`), qui dépend du type d'entrée de la formation.
 
 ### B03 — Départ et valeurs initiales de l'ATB (basse)
-- [ ] Jeu : jauges initiales 19, 25, 26 sur 34 px (56, 74, 76 %), immobiles jusqu'à t1453, elles repartent à t1454 (+ 7 après le fondu) à ≈ 0,085 px/image (34 px en ≈ 400 images).
-- Moteur : 79, 83, 63 %, départ à f11192 (+ 2 après le fondu), vitesse équivalente (Terra ≈ 412 images pour remplir, Vicks ≈ 390).
-- Les valeurs initiales sont tirées au hasard : voir « Décisions ».
+- [x] Jeu : les jauges repartent 7 images après la fin du fondu ; leurs valeurs initiales viennent de la table de hasard.
+- Correctif : `FF6_BATTLE_ATB_DELAY` ; la table du jeu (`RNGTbl`, C0/FD00) est portée dans `BattleRandom` (`Rand`, `RandA` : l'octet suivant de la table, multiplié et divisé par 256 pour un tirage borné), l'index part de l'octet bas du temps de jeu × 4 (`InitBattle`) et avance d'un cran à chaque tour de la boucle principale libre (`BattleLoop`).
+- Approché : le moteur prend son compteur d'images pour le temps de jeu ; l'index de départ n'est donc pas celui de la console, et les tirages (jauges, dégâts, attaques des gardes) restent différents de la vidéo.
 
 ### B04 — Délai entre jauge pleine et ouverture du menu (moyenne)
-- [ ] Jeu : jauge pleine (blanche), puis jaune 10 à 19 images plus tard, puis menu. Vicks : pleine ≈ t1542, jaune t1557, menu t1565 (+ 23). Wedge : pleine ≈ 1557, jaune 1576. Terra : pleine 1623, jaune 1632.
-- Moteur : le menu s'ouvre à l'image où la jauge atteint 100 % (Wedge à f11260).
+- [x] Jeu : jauge pleine (blanche), jaune ≈ 15 images plus tard, menu 8 images après.
+- Correctif : `readyTimer_` (`FF6_BATTLE_READY_FRAMES`), `menuDelay_` (`FF6_BATTLE_MENU_OPEN_FRAMES`) ; les menus s'ouvrent dans l'ordre où les jauges se sont remplies (`menuQueue_`).
+- Approché : mesuré (9 à 19 images dans la vidéo), le mécanisme du jeu n'est pas porté.
 
-### B05 — Mode d'attente (haute, à trancher)
-- [ ] Jeu : le menu principal ne fige pas le temps. Un garde frappe Vicks à t1740, 175 images après l'ouverture de son menu (t1565) ; le garde du haut commence à attaquer à t1866 pendant que le curseur de cible de Vicks est affiché.
-- Moteur : le défaut est Wait ([constants.hpp](engine/src/constants.hpp#L721)) et `BattleScreen::keepsMenu()` ([battle_screen.cpp](engine/src/battle/battle_screen.cpp#L1355)) n'avance aucune jauge tant qu'un menu (commandes, liste, cible) est ouvert : aucune attaque de garde en 1800 images avec un menu laissé ouvert. En mode Active, les gardes attaquent à f11410 (+ 220 après le fondu) puis f11584.
-- Piste : `UpdateBattleTime` du jeu (`src/battle/atb.asm`) saute la mise à jour quand « temps arrêté par le programme de combat » ET mode Wait ; reste à voir qui arrête le temps dans `src/btlgfx/`.
+### B05 — Mode d'attente (haute)
+- [x] Jeu (`UpdateBattleTime`) : en mode Wait, le temps ne s'arrête que si le programme de combat l'a arrêté (`w7e2f41`) : A sur une commande qui ouvre une liste l'arrête, il repart au retour aux commandes, au ciblage de Fight et à la fermeture du menu. Les actions déjà en file continuent.
+- Correctif : `BattleScreen::tickTime` (temps arrêté dans les listes et le ciblage d'une entrée de liste) ; le défaut reste Wait.
 
 ### B06 — Délai entre la validation et l'exécution (haute)
-- [ ] Jeu : 122 images entre la validation de la cible et l'encadré du nom pour Vicks (t1883 → 2005) ; 132 pour Wedge (t2261 → 2393, l'action de Vicks se termine à t2333).
-- Moteur : 1 image.
-- Piste : `CalcCmdDelay` et `CmdDelayTbl` (`src/battle/action_1.asm`) : Magitek = 16 ; le compteur avance de moitié moins vite que la jauge (`src/battle/atb.asm`), soit ≈ 50 images. Reste ≈ 70 images à expliquer (file d'actions, fin du ciblage, séquence de début d'animation).
+- [x] Jeu : une commande attend son délai (`CmdDelayTbl`, 16 pour Magitek : le compteur gagne la moitié de la constante ATB à chaque tic, ≈ 50 images), puis son tour dans la file des actions, exécutées une à une.
+- Correctif : `queueCommand`, `waiting_`, `actions_`, `runActions`, `FF6_CMD_DELAY_TABLE` ; côté `Battle`, `setQueuedTurns` met en file les tours des monstres et de ceux qui agissent seuls (`runTurn`), `beginAction`/`endAction` gardent la jauge pleine jusqu'à la fin de l'action.
 
 ### B07 — File des menus (haute)
-- [ ] Jeu : le menu du personnage suivant s'ouvre dès la validation du précédent (Wedge à t1883, Terra à t2261), pendant que les actions précédentes attendent ou s'exécutent.
-- Moteur : le menu suivant s'ouvre après la fin de l'action et de ses messages (Terra à f11750 après l'action de Wedge, f11560–f11749).
-- Piste : `BattleScreen::updateFighting` ([battle_screen.cpp](engine/src/battle/battle_screen.cpp#L1336)) ne consulte `readyCharacter()` que si `messages_` est vide.
+- [x] Jeu : le menu du personnage suivant s'ouvre dès la validation du précédent, pendant que les actions attendent ou se jouent.
+- Correctif : les menus sont indépendants des messages et des animations (`update`).
 
 ### B08 — Découpage d'une action Magitek (haute)
-
-| Étape | Jeu (Vicks, 0 = validation, t1883) | Moteur (Wedge, 0 = validation, f11601) |
-|---|---|---|
-| Nom de l'attaque | + 122 à + 185 (63 images) | + 1 à + 189 (188 images) |
-| Pause | 58 images sans mouvement | aucune |
-| L'armure sort de la pile | + 243 | pendant l'affichage du nom |
-| Rayon | + 288 à + 318 | + 64 à + 91 |
-| Boules de feu | + 321 à + 342 (3) | + 93 à + 100 (1) |
-| Retour de l'armure | + 347 à + 379 | non mesuré |
-| Chiffre des dégâts | + 399 (38 images) | ≈ + 109 à + 148 (dans le texte « Guard loses 127 HP ») |
-| Dissolution du monstre | + 406 à + 418 | ≈ + 155 à + 180 |
-| Jauge remise à zéro | + 450 | fin de l'action ≈ + 190 |
-
-- [ ] Durée totale : 450 images (Vicks) et 479 (Wedge) contre ≈ 190 dans le moteur.
+- [x] Jeu (0 = début de l'encadré du nom) : nom 63 images, armure qui sort à + 121, rayon à + 166, boules de feu à + 199, retour de l'armure, chiffre à + 277, dissolution à + 284, jauge vidée à + 328.
+- Correctif : le nom reste seul la durée de la vitesse des messages (`nameTimer_`), l'animation part `FF6_BATTLE_CAST_NAME_GAP` images après ; le personnage qu'une animation a emmené revient en `FF6_BATTLE_STEP_BACK_FRAMES` (`stepBack_`), les chiffres attendent encore `FF6_BATTLE_AFTER_STEP_FRAMES` ; la jauge se vide `FF6_BATTLE_ACTION_END_FRAMES` après. Moteur : nom + 0 à + 64, rayon + 166, boules de feu + 198, chiffre ≈ + 277, dissolution 6 images après.
+- Approché : les écarts sont mesurés, pas portés du script graphique du jeu.
 
 ### B09 — Attaque d'un garde (haute)
-- [ ] Jeu : le garde clignote en silhouette noire à contour blanc (2 × 4 images, t1642 et t1650), trait blanc horizontal de 5 images sur la pile à t1705–1709 (+ 63), chiffre à t1737 (+ 95), PV mis à jour à t1740 (+ 98) ; 2e garde : clignotement t1866 et t1874, PV à t1961 (+ 95).
-- Moteur : coup sans texte (B28) de 72 images (f11411–f11483) : trait horizontal (B29) à f11420–f11429 (+ 10), chiffre à f11443 (+ 33), pas de clignotement du garde qui attaque ; PV déjà changés à f11410 dans l'état interne. Restent les délais (+ 63 et + 95 dans le jeu) et le clignotement.
-- Voir aussi B28, B29, B30.
+- [x] Jeu : avant d'agir, le monstre clignote en noir à contour blanc, 4 images sur 8 deux fois (`FlashActiveMonster`, `LoadActiveMonsterFlashPal`) ; son coup part à + 63, le chiffre à + 95. Son attaque spéciale montre le nom de sa table (`MonsterSpecialName`, CF/D0D0 : « Critical » pour le garde) en grande police pendant 32 images.
+- Correctif : `BattleGfx::monsterFlash`, `monsterFlash_`, `blowLead_` (`FF6_MONSTER_BLOW_LEAD`) ; noms des attaques spéciales ajoutés au pack (`battle.ff6data`, version 43), `largeName`.
 
 ### B10 — Sortie du combat (moyenne)
-- [ ] Jeu : après « Got 96 GP » (t3319), 9 images, fondu sortant de 15 images, noir de 52 images, fondu entrant du champ de 12 images ≈ 80 images.
-- Moteur : fondu sortant ≈ 16 images (f11820–f11836), fondu entrant ≈ 14 (f11838–f11852), sans noir : ≈ 32 images.
-- Piste : `Game::endBattle` ([game.cpp](engine/src/game.cpp#L1762)).
+- [x] Jeu (`TerminateBattle`) : 9 images après le dernier message, luminosité −1 par image (15 images), écran éteint pendant que la carte se recharge (52 images mesurées), puis le fondu entrant du champ (15 images ; les premiers paliers paraissent noirs dans Ares).
+- Correctif : `FF6_BATTLE_WIN_END_FRAMES`, `battleExitFrame_` (`FF6_BATTLE_EXIT_BLACK_FRAMES`).
 
 ## Fenêtres et menus
 
+Les positions de cette section sont en pixels du jeu, mesurées sur la vidéo recalée (voir « Reproduire la comparaison ») ; celles de la première version de ce fichier venaient d'une extraction qui étirait l'image d'environ 7 % et sont fausses.
+
 ### B11 — Dégradé des fenêtres (moyenne)
-- [ ] Jeu : fond en dégradé vertical, (93,94,189) en haut → (0,0,35) en bas ; bordure : blanc pur (254,252,253) puis (188,188,188) puis (95,102,101) ; ombre en bas (77,77,77) puis (27,27,27).
-- Moteur : aplat (49,49,140) ; bordure (206,231,231) puis (132,132,132) puis (41,49,49).
-- Le dégradé du jeu vient d'une table HDMA de couleur ; voir la note « gradient window fill (HDMA) » du menu.
+- [x] Jeu : fond et cadre assombris ligne à ligne ; moteur (avant) : aplat (49,49,140).
+- Cause : `LoadMenuGfx` éclaircit chaque canal des couleurs des fenêtres de 8 (`_c1417e`), puis la table HDMA de la mathématique des couleurs (`w7e8993`) retranche à BG2 un niveau toutes les 3 lignes à partir de la ligne 151 ; la fenêtre du haut est sur BG1, un niveau toutes les 2 lignes à partir de la ligne 8 (`InitMsgWindowHDMA`). Le texte (BG3) n'est pas touché.
+- Correctif : `MenuScreen::windowPx` (fenêtre au pixel, avec le dégradé), constantes `FF6_BATTLE_WINDOW_BRIGHTEN`, `FF6_BATTLE_GRADIENT_*`, `FF6_BATTLE_MESSAGE_GRADIENT_*`.
 
 ### B12 — Position et hauteur des fenêtres du bas (moyenne)
-- [ ] Jeu : bord haut à y=157, jusqu'à y=223 (67 lignes), plus deux languettes (x=0–8 et x=93–101). Fenêtre de commandes x=9–92, fenêtre des personnages x=102–255.
-- Moteur : y=152 à 215 (64 lignes) puis 8 lignes noires jusqu'à 223 ; commandes x=8–95, personnages x=104–255.
-- Piste : `FF6_BATTLE_MONSTERS_Y` 19 et `FF6_BATTLE_WINDOW_ROWS` 6 ([constants.hpp](engine/src/constants.hpp#L1110)).
+- [x] Jeu : fenêtres de y=152 à 215 ; monstres x=8–103, personnages x=104–247, commandes x=16–95 (la fenêtre des monstres dépasse de chaque côté) ; lignes de texte à y=164 + 12k ; noms des personnages à x=112, PV (4 chiffres) à x=168.
+- Moteur (avant) : fenêtres de 0 à 103 et de 104 à 255, PV à x=160.
+- Correctif : `FF6_BATTLE_*_WINDOW_*`, `FF6_BATTLE_TEXT_*`, `FF6_BATTLE_HP_PX` ; `drawMonsters`, `drawParty`, `drawLists`.
 
 ### B13 — Fenêtre du haut (moyenne)
-- [ ] Jeu : deux formes. Nom d'une attaque : encadré centré x=51–204, y=4–37, texte centré. Messages de fin : pleine largeur x=0–255, y=4–38, texte à gauche.
-- Moteur : un seul encadré x=8–247, y=8–39, texte à gauche (`FF6_BATTLE_MESSAGE_*`, [constants.hpp](engine/src/constants.hpp#L1107)).
+- [x] Jeu : lignes 8 à 39 ; nom d'une attaque dans une boîte centrée x=56–199, texte centré au pixel ; autres messages x=8–247, texte à x=16 ; texte à y=19.
+- Correctif : `currentName_` (un message `Cast`), `FF6_BATTLE_NAME_BOX_*`, `FF6_BATTLE_MESSAGE_BOX_*`, `FF6_BATTLE_MESSAGE_TEXT_*`.
 
 ### B14 — Noms des personnages (moyenne)
-- [ ] Jeu : « ????? » (Terra n'a pas encore de nom), « WEDGE », « VICKS », en majuscules.
-- Moteur : « Terra », « Wedge », « Vicks ».
-- Piste : `text(characterName(c.id))` dans `BattleScreen::drawParty` ([battle_screen.cpp](engine/src/battle/battle_screen.cpp#L2388)).
+- [x] Jeu : « ????? » (Terra n'a pas encore de nom), « WEDGE », « VICKS », en majuscules.
+- Cause : `GameRules::actorName` ne gardait que les lettres (« ????? » devenait vide) et mettait les noms en minuscules ; `characterName` aussi.
+- Correctif : les noms de la ROM tels quels (`FF6_MENU_CODE_QUESTION`), noms par défaut en capitales comme la version US.
 
 ### B15 — Couleur des noms (moyenne)
-- [ ] Jeu : blanc ; jaune seulement pour le personnage dont le menu est ouvert ; pas de couleur pour le statut Magitek.
-- Moteur : jaune pour tous les prêts, cyan pour un statut (Magitek compris).
-- Piste : le test de couleur dans `drawParty` ([battle_screen.cpp](engine/src/battle/battle_screen.cpp#L2388)).
+- [x] Jeu : blanc ; jaune seulement pour le personnage dont le menu est ouvert (`_c14780`) ; pas d'autre couleur.
+- Correctif : `drawParty`.
 
 ### B16 — Jauges ATB (moyenne)
-- [ ] Jeu : remplissage de 34 px (x=213–245), lignes centrales y=174, 187, 200 (pas de 13), jaune quand la jauge est pleine ; remplissage fin ou épais selon le cas (par exemple Vicks au départ et après son action), à examiner.
-- Moteur : ≈ 40 px (x=200–241), lignes y=168, 180, 192 (pas de 12), blanc quand pleine.
-- Piste : `FF6_BATTLE_GAUGE_*` et la boucle de jauge de `drawParty`.
+- [x] Jeu (`DrawGaugeText`) : bout gauche à x=200, quatre cases de 8 pixels (208–239), bout droit à 240 ; `(valeur >> 3) + 1` pixels de l'octet haut de la jauge ; palette 5 (gris, blanc) pendant le remplissage, palette 2 (bleu, jaune) quand elle est pleine, celles de `BattleFontPal` (ED/62C0).
+- Moteur (avant) : cinq cases de quatre pas, palette des menus.
+- Correctif : `drawParty` ; `BattleFontPal` est ajoutée au pack (`battlegfx.ff6data`, version 42) et `MenuScreen::setBg3Palette` la fait servir au texte des combats.
+- Reste : la jauge pleine passe au jaune trop tôt, voir B04.
 
 ### B17 — Liste des monstres (moyenne)
-- [ ] Jeu : « Guard » une seule fois (les noms identiques sont regroupés).
-- Moteur : une ligne par monstre, « Guard » deux fois (`BattleScreen::drawMonsters`, [battle_screen.cpp](engine/src/battle/battle_screen.cpp#L2365)).
+- [x] Jeu : chaque nom une fois, dans l'ordre des places, quatre au plus (`UpdateMonsterGfxBuf`) ; nom à x=16.
+- Correctif : `BattleScreen::monsterNames`.
 
 ### B18 — Commandes à emplacements fixes (moyenne)
-- [ ] Jeu : quatre emplacements. Terra : MagiTek / vide / Magic / Item. Wedge et Vicks : MagiTek / vide / vide / Item (pas de ≈ 12,7 px, Item à 3 lignes sous MagiTek).
-- Moteur : liste compacte, les commandes absentes sont supprimées (`BattleScreen::openCommands`, [battle_screen.cpp](engine/src/battle/battle_screen.cpp#L1367)).
+- [x] Jeu : les quatre emplacements gardent leur place, une commande absente laisse un vide que le curseur saute ; texte à x=32, main à x=16.
+- Correctif : `openCommands`, `updateCommand`.
 
 ### B19 — Liste Magi Tek (moyenne)
-- [ ] Jeu : fenêtre pleine largeur sur deux colonnes à places fixes : Fire Beam | Bolt Beam / Ice Beam / Heal Force (les attaques inconnues laissent un vide), sans coût.
-- Moteur : colonne étroite avec les 8 attaques et un coût « 0 », Bio Blast à la place de Heal Force (`BattleScreen::openMagitek`, [battle_screen.cpp](engine/src/battle/battle_screen.cpp#L1791) ; largeur `FF6_BATTLE_LIST_W` 14).
+- [x] Jeu (`DrawMagitekListText`) : deux attaques par ligne, à places fixes ; Terra a les huit (`TerraMagitekAttackTbl`), les autres Fire Beam, Bolt Beam, Ice Beam, Heal Force (`DefaultMagitekAttackTbl`) ; sans coût ; fenêtre x=8–247 à partir de y=156, texte à x=32 et 136, lignes à 168 + 12k.
+- Correctif : `openMagitek`, `columns_`, `FF6_MAGITEK_DEFAULT_LIST`, `FF6_BATTLE_LIST_*`.
 
 ### B20 — Ouverture des listes (basse)
-- [ ] Jeu : le texte défile sur ≈ 8 images (t1759–1766) pendant que la fenêtre pleine largeur monte sur celle des personnages.
-- Moteur : changement immédiat.
+- [x] Jeu : la fenêtre de la liste monte du bas en ≈ 8 images (t1756–1764) par-dessus les fenêtres, la main paraît ensuite (t1769).
+- Correctif : `listOpening_` (`FF6_BATTLE_LIST_OPEN_FRAMES`), la fenêtre des commandes reste dessous pendant la montée.
+- Approché : la montée est linéaire et le texte monte avec la fenêtre ; dans le jeu le texte (BG3) défile à part.
 
 ### B21 — Ciblage (moyenne)
-- [ ] Jeu : la main est posée sur le sprite du monstre (t1800 : à côté du garde du haut) et la liste reste affichée ; le curseur démarre sur le garde du haut.
-- Moteur : la main est dans la fenêtre des noms (`drawHands`, [battle_screen.cpp](engine/src/battle/battle_screen.cpp#L2452)) et le curseur démarre sur le garde du bas (premier monstre de la formation).
+- [x] Jeu : la liste reste affichée ; la main d'un monstre est à son bord droit moins 8, à mi-hauteur, tournée vers la gauche ; celle d'un personnage 16 pixels à sa gauche, 8 sous son haut (`UpdateTargetCursors`) ; le curseur part du monstre le plus à droite (`_c17922`), le garde du haut.
+- Correctif : `drawHands`, `beginTarget`, `targetFromList_`, `MenuScreen::hand(x, y, flip)`.
 
 ### B22 — Pointeur ▼ (basse)
-- [ ] Jeu : un petit ▼ blanc au-dessus de l'armure du personnage dont le menu est ouvert (par exemple (225, 89) pour Vicks).
-- Moteur : non vu.
+- [x] Jeu : flèche au-dessus du personnage dont le menu est ouvert (`DrawCursorSprites`), sprite de la tuile 0x2E de la planche des statuts dans les couleurs de la main, 24 lignes au-dessus de son centre, 12 de plus sur une armure (`_c134a5`).
+- Correctif : `BattleGfx::statusSprite`, `FF6_BATTLE_ARROW_*`.
 
 ### B23 — Position de la pile d'armures (basse)
-- [ ] Jeu : cheveux de Terra x=203–214, y=58–67 ; pile x=199–236, y=61–134.
-- Moteur : cheveux x=197–208, y=65–72 ; pile x=193–230, y=68–138 : 6 px trop à gauche, 7 px trop bas en haut de pile et 4 px en bas. Les gardes sont à ± 5 px.
+- [x] Jeu : le sprite d'un personnage commence 8 lignes au-dessus de sa position (`CharSpriteData`) ; le moteur le dessinait à sa position, 8 pixels trop bas. L'écart horizontal de la première version venait de l'extraction de la vidéo.
+- Correctif : `FF6_CHAR_SPRITE_DY` (dessin du personnage, de son armure et de son ombre).
 
 ## Attaques et effets
 
@@ -185,9 +176,7 @@ Toutes les valeurs sont des `t`.
 - Reste : la longueur visible dépend de la cible (le moteur vise le garde du bas, l'armure va plus loin : 87 px au lieu de 115), voir B21.
 
 ### B25 — Fire Beam : gant blanc-cyan (reclassé dans B07 et B21)
-- [ ] Jeu : petite forme blanc-cyan en forme de main à x≈ 88–103, juste devant le canon, de t2169 à t2220.
-- Ce n'est pas un effet de l'attaque : c'est la main de ciblage de Wedge. Sa liste Magi Tek est ouverte (t2140), la main est sur « Fire Beam » (t2160), puis passe sur le garde du haut quand il choisit la cible (t2169) pendant que l'animation de Vicks se joue ; elle disparaît à la validation (t2221). Elle n'existe pas pendant l'action de Wedge (aucun menu ouvert). Rien à ajouter aux animations : voir B07 (file des menus) et B21 (main sur le sprite).
-- Moteur : absente, faute de ces deux comportements.
+- [x] C'est la main de ciblage de Wedge pendant l'action de Vicks : réglé par B07 (menus pendant les actions) et B21 (main sur le sprite).
 
 ### B26 — Fire Beam : boules de feu (moyenne)
 - [x] Jeu : trois boules successives, chacune de ≈ 28 px qui se contracte à ≈ 8 px en ≈ 8 images : t2204 (x=62–89), t2212 (x=54–80), t2221 (x=50–67).
@@ -226,18 +215,16 @@ Toutes les valeurs sont des `t`.
 ## Fin de combat
 
 ### B32 — Messages de victoire (haute)
-- [ ] Jeu : quatre encadrés pleine largeur l'un après l'autre : « Got 32 Exp. point(s) » (203 images), « VICKS gained a level » (70), « WEDGE gained a level » (41), « Got 96 GP » (65) ; environ 190 images entre le chiffre du dernier garde et le premier encadré.
-- Moteur : fenêtre « Victory! Exp: 32 Gil: 96 » qui attend A (`BattleScreen::drawResult`, [battle_screen.cpp](engine/src/battle/battle_screen.cpp#L2465)) et message « Vicks is now level 2 ». Les valeurs 32 et 96 sont les mêmes.
+- [x] Jeu (`WinBattle`) : « Got 32 Exp. point(s) » jusqu'à l'appui d'une touche (code 0x07 du texte), puis « VICKS gained a level », « WEDGE gained a level » (de la dernière place à la première), « Got 96 GP », chacun la durée de la vitesse des messages (`MsgSpeedTbl` : 64 images au réglage par défaut), dans la grande police des dialogues, fenêtre fermée ≈ 19 images entre deux ; le premier ≈ 143 images après la fin de la dernière action.
+- Correctif : `BattleScreen::finish`, `victory_`, `Message::fixed` et `keyWait`, `MenuScreen::largeText`, `setMessageSpeed` ; la fenêtre « Victory! » n'existe plus.
 
 ## Affichage
 
-### B33 — Pixels non carrés (basse, à trancher)
-- [ ] Jeu : Ares affiche en 8:7 (zone de jeu 1304 × 998, rapport 1,31).
-- Moteur : pixels carrés (rapport 1,14) à cause de `SDL_RenderSetLogicalSize(256, 224)` ([sdl_renderer.cpp](engine/src/sdl/sdl_renderer.cpp#L119)).
+### B33 — Pixels non carrés (basse)
+- [x] Option : `--aspect 8:7` ou F9 affiche les pixels 8:7 comme Ares ; le défaut reste carré, les captures aussi (`SdlRenderer::setWideAspect`).
 
-### B34 — Courbe de couleurs (basse, à trancher)
-- [ ] Jeu : demi-teintes plus sombres de 10 à 20 %, noir et blanc identiques : fond (33,33,54), (40,48,72), (54,70,101) contre (41,41,66), (49,57,82), (66,82,115) ; cheveux de Terra (118,162,119) contre (132,173,132). C'est probablement l'émulation de couleur d'Ares, pas une donnée du jeu.
-- Moteur : `(c << 3) | (c >> 2)` brut.
+### B34 — Courbe de couleurs (basse)
+- [x] Option : `--ares-colors 1` ou F8 applique une courbe gamma de 1,15 ajustée sur les couleurs de la vidéo (noir et blanc inchangés) ; désactivée par défaut, sans effet sur les captures (`SdlRenderer::setAresColors`).
 
 ## Conforme
 
@@ -255,7 +242,7 @@ Fenêtres de dialogue du champ : même écart de style (dégradé), largeur x=0�
 
 ## Reproduire la comparaison
 
-- **Vidéo** : `ffmpeg` avec `crop=1304:998:160:150`, puis `scale=256:224:flags=neighbor` ; `t` = arrondi de pts × 60.
+- **Vidéo** : Ares masque le débordement : la zone de 1304 × 998 pixels de la fenêtre montre les colonnes 8 à 247 et les lignes 4 à 214 du jeu. `ffmpeg` avec `crop=1304:998:160:150,scale=240:211:flags=neighbor,pad=256:224:8:4` donne des images aux coordonnées du jeu (calées sur le fond, la fenêtre du haut et celles du bas) ; `t` = arrondi de pts × 60. La première extraction (`scale=256:224`) étirait l'image d'environ 7 % : les positions mesurées avec elle sont fausses, les durées restent bonnes.
 - **Moteur** : programme sans fenêtre qui lie `libff6_game.a`, `libff6_core.a` et `libff6_audio.a` avec une nouvelle partie et les touches ci-dessous (image → touche). Ces outils sont dans .scratch/, hors dépôt.
 
 | f | Touche |
@@ -266,4 +253,4 @@ Fenêtres de dialogue du champ : même écart de style (dégradé), largeur x=0�
 | 10823–11010 | Haut maintenu (la marche vers le nord après le pas scripté de f10799) |
 | 11132 | A (ferme le dialogue des gardes) |
 
-- Le combat s'affiche pleinement à f11190. Pour le mode Active, mettre à zéro le bit `FF6_CONFIG_WAIT` de `config_.battle`.
+- Le combat s'affiche pleinement à f11334 (fondu de f11297 à f11333 ; f11190 avant B01). Pour le mode Active, mettre à zéro le bit `FF6_CONFIG_WAIT` de `config_.battle`.

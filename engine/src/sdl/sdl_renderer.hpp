@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <SDL.h>
 
 #include <memory>
@@ -24,6 +25,12 @@ public:
 
     void toggleFullscreen();
     void toggleIntegerScale();
+    // The pixels 8:7 wide, as the console shows them on a television (and Ares); the captures stay square.
+    void setWideAspect(bool wide);
+    void toggleWideAspect() { setWideAspect(!wideAspect_); }
+    // The darker half tones of Ares (a gamma on each channel); black and white stay.
+    void setAresColors(bool ares);
+    void toggleAresColors() { setAresColors(!aresColors_); }
     // Writes the last frame as a BMP file. Offscreen renderers only.
     void saveFrame(const std::string& path);
 
@@ -47,6 +54,9 @@ private:
     SDL_RendererInfo info_{};
     bool offscreen_;
     std::vector<TextureEntry> textures_;
+    bool wideAspect_ = false, aresColors_ = false;
+    std::array<uint8_t, 256> curve_{};
+    std::vector<uint8_t> curved_;
 };
 
 }  // namespace ff6

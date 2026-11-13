@@ -1,6 +1,7 @@
 #pragma once
 
 #include <deque>
+#include <functional>
 #include <array>
 #include <initializer_list>
 #include <optional>
@@ -37,6 +38,10 @@ public:
     void setCharacterGfx(const std::array<int, FF6_CHAR_COUNT>& gfx) { characterGfx_ = gfx; }
     // The graphics to draw the battle with; without them it is text only.
     void setGfx(const BattleGfx* gfx) { gfx_ = gfx; }
+    // The battle message speed of the config (0 to 5): how long the messages that wait for nothing stay.
+    void setMessageSpeed(int speed) { messageSpeed_ = speed; }
+    // Whether the battles draw their random numbers from the table of the game (the seed is then the index of the first one).
+    void setGameRandom(bool game) { gameRandom_ = game; }
     // The animations of the attacks: spells and techniques play as the game scripts them; without them, by hand.
     void setAttackAnim(const AttackAnim* anim) {
         anim_ = anim;
@@ -44,7 +49,7 @@ public:
         if (anim) player_.emplace(*anim);
     }
     // Whether an animation of an attack is playing: the messages wait for it.
-    bool animating() const { return castLead_ > 0 || (player_ && !player_->done()) || esperGfx_ >= 0; }
+    bool animating() const { return castLead_ > 0 || blowLead_ > 0 || (player_ && !player_->done()) || esperGfx_ >= 0 || afterAnim_ > 0; }
     // Plays the animation of an attack from the first monster to the characters, for looking at it.
     void playAnimation(int attack);
     // Plays a battle event (F7) of the scenes of the game, for captures.
@@ -95,6 +100,23 @@ private:
     void advanceMessage(bool skip);
     void finish();
     bool keepsMenu();
+    bool presenting() const;  // a message, a number or an animation is being shown
+    void tickTime();
+    void runActions();
+    void queueCommand(int command, std::function<void()> run);
+    struct Queued {  // an action that waits for its delay, then for its turn
+        int actor = -1;
+        std::function<void()> run;
+        int delay = 0, counter = 0;
+    };
+    std::vector<Queued> waiting_;  // the advance wait of the game
+    std::deque<Queued> actions_;  // the action queue
+    int acting_ = -1;  // the combatant whose action is being shown
+    int actionEnd_ = 0;  // frames since its action was shown
+    std::array<bool, FF6_BATTLE_PARTY_SLOTS> commanded_{}, wasReady_{};  // a command was chosen and waits; the gauge was full
+    std::array<int, FF6_BATTLE_PARTY_SLOTS> readyTimer_{};  // frames before a full gauge turns yellow and the menu can come
+    std::deque<int> menuQueue_;  // the characters whose menus come next
+    int menuDelay_ = 0;  // frames before the window of the commands opens
     void updateFighting(const InputState& input);
     void updateCommand(const InputState& input, int direction);
     void updateList(const InputState& input, int direction);
@@ -128,6 +150,8 @@ private:
     void drawLists();
     void drawHands();
     void put(int x, int y, const Codes& codes, int color);
+    void putAt(int xPx, int yPx, const Codes& codes, int color);
+    std::vector<int> monsterNames() const;  // the first monster of each name that the window shows
     // A line of text at a pixel row, which need not be a multiple of a tile.
     void putPx(int x, int yPx, const Codes& codes, int color);
     // The line of a monster in the window at the bottom: the first rows of the names are taller than the last.
@@ -153,6 +177,8 @@ private:
     bool animated_ = false;  // the spell that is shown has its animation, which takes the place of the drawn effects
     bool throwList_ = false;  // the list of items is the one of Throw
     int xMagic_ = 0;  // 1 while the first spell of X Magic is chosen, 2 for the second
+    std::function<void()> xMagicFirst_;
+    int chosenCommand_ = 0;  // the command of the menu whose target or entry is being chosen  // the first spell of X Magic, cast with the second
     bool controlList_ = false;  // the list is the attacks of the monster that is controlled
     bool rageList_ = false, danceList_ = false;  // the list is the rages that Gau knows, or the dances that Mog knows
     std::array<int, 3> reels_{}, reelSpeed_{};  // the icons that the slot shows, and how fast each one turns
@@ -186,6 +212,9 @@ private:
         bool instant = false;  // it has no text and takes no time: the next message comes at once
         bool moves = false;  // the characters stay where the animation leaves them, in the pose that it gives them (as after a scene)
         int wait = -1;  // how many frames it stays once its number shows, -1 for the usual time
+        bool fixed = false;  // the button does not cut it short
+        bool keyWait = false;  // it stays until the button is pressed
+        bool largeName = false;  // the name of the special attack of a monster, in the large font
     };
     void trigger(const Message& message);
     void startAnimation(const Message& message);
@@ -246,6 +275,18 @@ private:
     void drawFx();
     std::deque<Message> messages_;
     Codes current_;
+    bool currentName_ = false, currentLarge_ = false;
+    int nameTimer_ = 0;
+    std::array<int, FF6_BATTLE_COMBATANTS> monsterFlash_{};  // frames left of the flash of a monster before it acts
+    int blowLead_ = 0;  // frames before the blow of a monster starts
+    Message blowPending_;
+    std::array<std::pair<int, int>, FF6_BATTLE_PARTY_SLOTS> stepFrom_{};  // where the animation left the characters
+    int stepBack_ = 0, afterAnim_ = 0;  // frames of their way back, and before the numbers  // frames left of the window of the name of the attack
+    bool currentKeyWait_ = false, currentFixed_ = false;  // of the message that is shown
+    std::vector<Codes> victory_;  // the levels and what was learned, told after the experience
+    int messageSpeed_ = FF6_BATTLE_MSG_SPEED_DEFAULT;
+    bool gameRandom_ = false;
+    int introFrame_ = 0;  // frames since the battle was shown  // the message is the name of an attack, in the box in the middle
     std::array<int, FF6_CHAR_COUNT> characterGfx_ = [] {
         std::array<int, FF6_CHAR_COUNT> none;
         none.fill(-1);
@@ -279,6 +320,9 @@ private:
     int page_ = 0, mainCommand_ = 0;  // -1 Row and Defend, 0 the commands, 1 Run
     const std::vector<Entry>& shownCommands() const { return page_ < 0 ? rowDefend_ : page_ > 0 ? run_ : commands_; }
     int listCursor_ = 0, listTop_ = 0;
+    int columns_ = 1;  // the entries of the list on each line (the magitek attacks are two to a line)
+    int listOpening_ = 0;
+    bool targetFromList_ = false;  // the target is chosen for an entry of the list, which stays on the screen  // frames left of the rise of the window of the list
     BattleMode listMode_ = BattleMode::Magic;
     Pending pending_ = Pending::Fight;
     int pendingValue_ = 0;

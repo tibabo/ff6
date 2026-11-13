@@ -145,7 +145,8 @@ void playGame(ff6::Game& game, ff6::SdlRenderer& renderer, const std::string& sa
     Uint64 previous = SDL_GetPerformanceCounter();
     double accumulator = 0;
     std::printf("Arrows/WASD or controller to move, Enter/Space/A to talk (or to end the title screen),\n"
-                "F5 to save to %s, F11 or Alt+Enter for fullscreen, F10 for integer scaling, Escape to quit.\n",
+                "F5 to save to %s, F11 or Alt+Enter for fullscreen, F10 for integer scaling, F9 for 8:7 pixels,\n"
+                "F8 for the colors of Ares, Escape to quit.\n",
                 savePath.c_str());
     bool running = true;
     while (running) {
@@ -160,6 +161,8 @@ void playGame(ff6::Game& game, ff6::SdlRenderer& renderer, const std::string& sa
                     renderer.toggleFullscreen();
                 }
                 if (key == SDLK_F10) renderer.toggleIntegerScale();
+                if (key == SDLK_F9) renderer.toggleWideAspect();
+                if (key == SDLK_F8) renderer.toggleAresColors();
                 if (key == SDLK_F5 && !game.cutsceneOpen() && !game.loadMenuOpen()) {
                     try {
                         ff6::writeSave(savePath, game.saveState());
@@ -218,6 +221,7 @@ struct Start {
     bool stock = false;  // weapons, tools and every Lore, to try the commands that need them
     bool newGame = false;  // begin like the console: the title screen, the story, the opening
     std::string cutscene;  // "title" or "opening": only that scene, for a capture
+    bool wideAspect = false, aresColors = false;  // --aspect 8:7, --ares-colors 1
 };
 
 std::unique_ptr<ff6::Game> makeGame(ff6::CommonData common, const std::string& packDir, const Start& start,
@@ -357,6 +361,8 @@ int run(const std::string& packDir, const Start& start, const std::string& saveP
     ff6::CommonData common = ff6::loadCommonData(packDir);
     SdlRuntime sdl;
     ff6::SdlRenderer renderer(capture != nullptr);
+    renderer.setWideAspect(start.wideAspect);
+    renderer.setAresColors(start.aresColors);
     if (capture && !start.cutscene.empty()) {
         captureCutscene(packDir, start.cutscene, *capture, renderer);
         return 0;
@@ -463,7 +469,7 @@ void writeAnimSheet(const std::string& packDir, int attack, int layer, const std
 }  // namespace
 
 int main(int argc, char** argv) {
-    const char* usage = "Usage: %s <data-pack-dir> [--map n] [--party terra,locke,...] [--battle n [--bg n]] [--play attack] [--status bits] [--scene n] [--stock 1] [--anim attack [--layer 0|1|2]] [--load save.json] [--save save.json] [--music song] [--new-game 1] [--cutscene title|opening|ruin|floating|falcon|end|all|endingN [--capture out.bmp --wait frames]] [--capture out.bmp [--at x,y] [--wait frames] [--moves URDL...] [--talk frames] [--keys ABURDL.] [--after frames]]\n";
+    const char* usage = "Usage: %s <data-pack-dir> [--map n] [--party terra,locke,...] [--battle n [--bg n]] [--play attack] [--status bits] [--scene n] [--stock 1] [--anim attack [--layer 0|1|2]] [--load save.json] [--save save.json] [--music song] [--new-game 1] [--aspect 8:7] [--ares-colors 1] [--cutscene title|opening|ruin|floating|falcon|end|all|endingN [--capture out.bmp --wait frames]] [--capture out.bmp [--at x,y] [--wait frames] [--moves URDL...] [--talk frames] [--keys ABURDL.] [--after frames]]\n";
     if (argc < 2) {
         std::fprintf(stderr, usage, argc > 0 ? argv[0] : "ff6");
         return 2;
@@ -479,6 +485,7 @@ int main(int argc, char** argv) {
         bool stock = false;
         bool mapGiven = false;
         bool forceNewGame = false;
+        bool wideAspect = false, aresColors = false;
         std::string cutscene;
         std::string loadPath;
         std::string savePath = FF6_SAVE_DEFAULT_FILE;
@@ -492,6 +499,12 @@ int main(int argc, char** argv) {
                 mapGiven = true;
             } else if (option == "--cutscene") {
                 cutscene = argv[i + 1];
+            } else if (option == "--aspect") {
+                const std::string value = argv[i + 1];
+                if (value != "8:7" && value != "1:1") throw std::runtime_error("--aspect takes 8:7 or 1:1");
+                wideAspect = value == "8:7";
+            } else if (option == "--ares-colors") {
+                aresColors = std::stoi(argv[i + 1]) != 0;
             } else if (option == "--new-game") {
                 forceNewGame = std::stoi(argv[i + 1]) != 0;
             } else if (option == "--music") {
@@ -581,6 +594,8 @@ int main(int argc, char** argv) {
         start.stock = stock;
         start.party = party;
         start.cutscene = cutscene;
+        start.wideAspect = wideAspect;
+        start.aresColors = aresColors;
         // Without a map, a party, a battle or a save to start from, the game begins like the console does.
         start.newGame = forceNewGame || (capture.path.empty() && !mapGiven && party.empty() && battle < 0 && loadPath.empty() && !stock && playAnimation < 0);
         if (!loadPath.empty()) start.save = std::make_unique<ff6::SaveState>(ff6::readSave(loadPath));

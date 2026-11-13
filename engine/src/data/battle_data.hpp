@@ -32,6 +32,7 @@ struct BattleData {
     std::vector<uint8_t> aiPtrs;  // for each monster, where its script starts in aiScript: a word
     std::vector<uint8_t> aiScript;  // FF6_AI_SCRIPT_BYTES of commands
     std::vector<uint8_t> genjuAttackNames, attackNames;  // of 10 codes each
+    std::vector<uint8_t> monsterSpecialNames;  // MonsterSpecialName: the special attack of each monster, 10 codes of the large font
     std::vector<uint8_t> sketch, control;  // of each monster, FF6_SKETCH_BYTES and FF6_CONTROL_BYTES attacks
     std::vector<uint8_t> magicPoints;  // FF6_MAGIC_POINT_BYTES: what each battle gives to learn spells
     std::vector<uint8_t> monsterRage;  // of the first FF6_RAGE_MONSTERS monsters, the two attacks of their rage

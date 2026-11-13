@@ -28,7 +28,7 @@ std::string characterName(int id) {
     if (!customCharacterName(id).empty()) return customCharacterName(id);
     static const char* const kNames[] = FF6_CHARACTER_NAMES;
     std::string name = id >= 0 && id < FF6_CHAR_COUNT ? kNames[id] : "";
-    if (!name.empty()) name[0] = static_cast<char>(name[0] - 'a' + 'A');
+    for (char& letter : name) letter = static_cast<char>(letter - 'a' + 'A');  // the names of the US version are in capitals
     return name;
 }
 
@@ -81,6 +81,79 @@ void MenuScreen::window(int x, int y, int w, int h) {
                y * FF6_MENU_TILE_SIZE, w + 2, h + 2);
 }
 
+void MenuScreen::windowPx(int x, int y, int w, int h, int gradientLine, int gradientLines) {
+    const std::vector<uint8_t>& tiles = windowTiles_.empty() ? common_.windowTiles : windowTiles_;
+    if (tiles.empty() || w < 2 * FF6_WINDOW_TILE_SIZE || h < 2 * FF6_WINDOW_TILE_SIZE) return;
+    const int cols = (w + FF6_WINDOW_TILE_SIZE - 1) / FF6_WINDOW_TILE_SIZE, rows = (h + FF6_WINDOW_TILE_SIZE - 1) / FF6_WINDOW_TILE_SIZE;
+    const auto put = [&](int col, int row) {
+        const uint8_t* tile = &tiles[static_cast<size_t>(windowTile(col, row, cols, rows)) * FF6_WINDOW_TILE_BYTES];
+        const int left = col == cols - 1 ? x + w - FF6_WINDOW_TILE_SIZE : x + col * FF6_WINDOW_TILE_SIZE;
+        const int top = row == rows - 1 ? y + h - FF6_WINDOW_TILE_SIZE : y + row * FF6_WINDOW_TILE_SIZE;
+        for (int ty = 0; ty < FF6_WINDOW_TILE_SIZE; ++ty) {
+            const int screenY = top + ty;
+            const int level = gradientLine < 0 || screenY < gradientLine ? 0
+                : std::min((std::min(screenY, FF6_BATTLE_GRADIENT_LAST) - gradientLine) / std::max(gradientLines, 1), FF6_COLOR_LEVEL_MAX);
+            for (int tx = 0; tx < FF6_WINDOW_TILE_SIZE; ++tx) {
+                const uint8_t* source = tile + (ty * FF6_WINDOW_TILE_SIZE + tx) * FF6_BYTES_PER_PIXEL;
+                if (gradientLine < 0) {
+                    blendPixel(pixels_, left + tx, screenY, source);
+                    continue;
+                }
+                uint8_t color[FF6_BYTES_PER_PIXEL];
+                for (int c = 0; c < FF6_COLOR_CHANNELS; ++c) {
+                    const int value = std::max(std::min((source[c] >> (8 - FF6_COLOR_BITS)) + FF6_BATTLE_WINDOW_BRIGHTEN, FF6_COLOR_LEVEL_MAX) - level, 0);
+                    color[c] = static_cast<uint8_t>((value << (8 - FF6_COLOR_BITS)) | (value >> (2 * FF6_COLOR_BITS - 8)));
+                }
+                color[FF6_ALPHA_OFFSET] = source[FF6_ALPHA_OFFSET];
+                blendPixel(pixels_, left + tx, screenY, color);
+            }
+        }
+    };
+    // The fill first, then the edges, then the corners: the last column and row overlap the ones before them.
+    for (int row = 1; row < rows - 1; ++row) {
+        for (int col = 1; col < cols - 1; ++col) put(col, row);
+    }
+    for (int col = 1; col < cols - 1; ++col) {
+        put(col, 0);
+        put(col, rows - 1);
+    }
+    for (int row = 1; row < rows - 1; ++row) {
+        put(0, row);
+        put(cols - 1, row);
+    }
+    put(0, 0);
+    put(cols - 1, 0);
+    put(0, rows - 1);
+    put(cols - 1, rows - 1);
+}
+
+void MenuScreen::largeText(int x, int y, const std::vector<uint8_t>& codes, bool centered) {
+    // The codes of the menus are those of the dialogues plus FF6_MENU_CODE_DIALOGUE_SHIFT; their space is the last code.
+    std::vector<int> glyphs;
+    for (const uint8_t code : codes) {
+        const int glyph = code == FF6_MENU_CODE_SPACE ? FF6_DLG_GLYPH_SPACE : code - FF6_MENU_CODE_DIALOGUE_SHIFT;
+        if (glyph >= FF6_FIRST_GLYPH_CODE && glyph < FF6_FIRST_GLYPH_CODE + FF6_GLYPH_COUNT) glyphs.push_back(glyph);
+    }
+    int width = 0;
+    for (const int glyph : glyphs) width += common_.fontWidths[static_cast<size_t>(glyph)];
+    const uint8_t shadow[FF6_BYTES_PER_PIXEL] = FF6_TEXT_SHADOW_RGBA;
+    const uint8_t ink[FF6_BYTES_PER_PIXEL] = FF6_TEXT_INK_RGBA;
+    for (const uint8_t* color : {shadow, ink}) {
+        const int offset = color == shadow ? FF6_TEXT_SHADOW_OFFSET : 0;
+        int pen = centered ? x - width / 2 : x;
+        for (const int glyph : glyphs) {
+            const size_t base = static_cast<size_t>(glyph - FF6_FIRST_GLYPH_CODE) * FF6_GLYPH_ROWS;
+            for (int row = 0; row < FF6_GLYPH_ROWS && base + static_cast<size_t>(row) < common_.fontRows.size(); ++row) {
+                const uint16_t bits = common_.fontRows[base + static_cast<size_t>(row)];
+                for (int col = 0; col < FF6_GLYPH_ROW_BITS; ++col) {
+                    if (bits & (FF6_GLYPH_LEFT_BIT >> col)) blendPixel(pixels_, pen + col + offset, y + row + offset, color);
+                }
+            }
+            pen += common_.fontWidths[static_cast<size_t>(glyph)];
+        }
+    }
+}
+
 void MenuScreen::applyConfig(const GameConfig& config) {
     windowTiles_ = buildWindowTiles(menu_, config);
     fontColor_ = config.fontColor;
@@ -108,7 +181,13 @@ void MenuScreen::codes(int x, int y, const std::vector<uint8_t>& codes, Layer la
     const size_t first = static_cast<size_t>(palette) *
                          (layer == Layer::Bg1 ? FF6_MENU_BG1_PALETTE_COLORS : FF6_MENU_BG3_PALETTE_COLORS);
     uint8_t colors[4][FF6_BYTES_PER_PIXEL];
-    for (size_t i = 0; i < 4; ++i) colorToRgba(paletteColor(first + i), colors[i]);
+    for (size_t i = 0; i < 4; ++i) {
+        uint16_t color = paletteColor(first + i);
+        if (layer == Layer::Bg3 && bg3Palette_ && first + i < FF6_BATTLE_FONT_PAL_COLORS) {  // the battle: its own palettes, and the color of the font
+            color = first + i == FF6_BATTLE_FONT_COLOR_ENTRY && fontColorSet_ ? fontColor_ : bg3Palette_[first + i];
+        }
+        colorToRgba(color, colors[i]);
+    }
     for (size_t at = 0; at < codes.size(); ++at) {
         const uint8_t* tile = &menu_.fontTiles[static_cast<size_t>(codes[at]) * FF6_MENU_FONT_TILE_BYTES];
         for (int row = 0; row < FF6_MENU_TILE_SIZE; ++row) {
@@ -257,7 +336,7 @@ void MenuScreen::plot(int x, int y, int red, int green, int blue) {
     pixel[2] = static_cast<uint8_t>(blue);
 }
 
-void MenuScreen::hand(int x, int y) {
+void MenuScreen::hand(int x, int y, bool flip) {
     uint8_t colors[FF6_MENU_CURSOR_PALETTE_COLORS][FF6_BYTES_PER_PIXEL];
     for (size_t i = 0; i < FF6_MENU_CURSOR_PALETTE_COLORS; ++i) colorToRgba(menu_.cursorPalette[i], colors[i]);
     for (int part = 0; part < 4; ++part) {
@@ -268,7 +347,8 @@ void MenuScreen::hand(int x, int y) {
                 const int value = ((tile[row * 2] >> shift) & 1) | (((tile[row * 2 + 1] >> shift) & 1) << 1) |
                                   (((tile[row * 2 + 16] >> shift) & 1) << 2) | (((tile[row * 2 + 17] >> shift) & 1) << 3);
                 if (value < FF6_MENU_CURSOR_FIRST_COLOR) continue;
-                blendPixel(pixels_, x + (part % 2) * FF6_MENU_TILE_SIZE + column, y + (part / 2) * FF6_MENU_TILE_SIZE + row,
+                const int px = (part % 2) * FF6_MENU_TILE_SIZE + column;
+                blendPixel(pixels_, x + (flip ? 2 * FF6_MENU_TILE_SIZE - 1 - px : px), y + (part / 2) * FF6_MENU_TILE_SIZE + row,
                            colors[value - FF6_MENU_CURSOR_FIRST_COLOR]);
             }
         }

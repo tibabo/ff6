@@ -143,7 +143,7 @@ node ff6.mjs build-pack --rom "Final Fantasy 6 [US].smc" --out output/pack
 cmake -S engine -B build/engine -DCMAKE_BUILD_TYPE=Release
 cmake --build build/engine --config Release
 FF6_PACK="$PWD/output/pack" ctest --test-dir build/engine -C Release
-./build/engine/ff6 output/pack [--map 20] [--party terra,locke] [--battle 0 [--bg 0]] [--music 22] [--load ff6-save.json] [--save ff6-save.json]
+./build/engine/ff6 output/pack [--map 20] [--party terra,locke] [--battle 0 [--bg 0]] [--music 22] [--load ff6-save.json] [--save ff6-save.json] [--aspect 8:7] [--ares-colors 1]
 ```
 
 `--battle n` (0 a 575) lance directement le combat n au-dessus de la carte,
@@ -153,6 +153,10 @@ l'animation de l'attaque n du premier monstre vers le groupe (par exemple 183,
 le Wave Cannon), pour la regarder avec `--capture ... --after images`.
 Le rendu des combats et des animations est decrit dans
 [docs/rendu-et-animations.md](docs/rendu-et-animations.md).
+`--aspect 8:7` (ou F9 en jeu) affiche des pixels 8:7 comme une television ou
+l'emulateur Ares ; `--ares-colors 1` (ou F8) assombrit les demi-teintes comme
+Ares (courbe gamma de 1,15). Les deux restent desactives par defaut et ne
+changent pas les captures.
 
 Sans option de depart (`--map`, `--party`, `--battle`, `--load`, `--stock`),
 le jeu commence comme sur la console : l'ecran de licence, le titre (l'orage
@@ -188,7 +192,7 @@ carte par fichier dans `maps/` ; il n'ecrase jamais un
 dossier existant. `--text` utilise un `dialogues.json` modifie. Un caractere
 absent de la police de la ROM, par exemple un accent, provoque une erreur
 explicite. Le pack contient des donnees du jeu : ne pas le distribuer. Le format
-est versionne (version 37 : cartes du monde, dirigeable, chocobo, Fosse du Serpent, train, et les tables du combat : esprits, rages, danses, points de magie, dialogues des monstres et des scenes, Metamorph, scenes a personnages scriptes, Colisee, graphismes bruts des sprites des PNJ speciaux, graphismes des cinematiques de la Ruine et du continent flottant, ecran de « THE END », textes et decors du generique) ; un ancien pack
+est versionne (version 43 : palette du texte des combats et noms des attaques speciales des monstres ; version 37 : cartes du monde, dirigeable, chocobo, Fosse du Serpent, train, et les tables du combat : esprits, rages, danses, points de magie, dialogues des monstres et des scenes, Metamorph, scenes a personnages scriptes, Colisee, graphismes bruts des sprites des PNJ speciaux, graphismes des cinematiques de la Ruine et du continent flottant, ecran de « THE END », textes et decors du generique) ; un ancien pack
 doit etre regenere.
 
 Controles :
@@ -343,9 +347,31 @@ Limites actuelles :
   magies et techniques de chaque niveau), appele a la fin d'un combat gagne.
 - Combats : les commandes d'evenement 0x4C et 0x4D lancent le combat de leur
   groupe (le premier, ou le second une fois sur quatre) ; l'evenement reprend
-  quand il est fini. L'ecran est du texte dans des fenetres (monstres par nom,
-  PV et jauge de chaque personnage, les commandes de l'acteur, la liste des
-  magies et des objets, cible, messages) :
+  quand il est fini. L'entree suit `BattleMosaic` du champ : son du combat (0xC1)
+  et mosaique des fonds (pas des sprites) pendant 31 images, deux rampes de 1 a 8
+  pixels puis une de 1 a 16, le champ fige ; les bits 7 et 6 du second octet de
+  la commande les suppriment (le Colisee, 0xAF, n'a ni l'un ni l'autre). L'ecran
+  est ensuite noir pendant 104 images (le chargement du combat mesure sur la
+  console), puis le combat s'eclaire en 15 images pendant que des bandes sombres
+  (couleur fixe retranchee, `UpdateFadeIn`) decouvrent le champ depuis la ligne 76
+  vers le haut et le bas en 38 images ; le temps du combat part ensuite. La carte
+  du monde et les cinematiques gardent un fondu sortant. Le combat suit la boucle du
+  jeu : les jauges avancent toutes les deux images (en mode Wait, le temps ne
+  s'arrete que dans une liste et le choix de la cible d'une de ses entrees) ; une
+  commande attend son delai (`CmdDelayTbl`), puis son tour dans la file des actions,
+  jouees une a une, et la jauge de son personnage reste pleine jusqu'a la fin de
+  l'action ; les monstres passent par la meme file ; les menus s'ouvrent dans l'ordre
+  ou les jauges se sont remplies, aussi pendant les actions. Les nombres au hasard
+  viennent de la table du jeu (`RNGTbl`). Avant d'agir, un monstre clignote en noir a
+  contour blanc ; le nom d'une attaque reste seul la duree de la vitesse des messages
+  avant l'animation, et un personnage qu'une animation a emmene revient en marchant.
+  A la victoire, l'experience (jusqu'a un appui), les niveaux et l'argent s'affichent
+  l'un apres l'autre dans la grande police, puis l'ecran s'eteint (15 images), reste
+  noir pendant le rechargement (52 images) et le champ revient. Les fenetres (degrade
+  du jeu, palette `BattleFontPal`) montrent les monstres (chaque nom une fois), les
+  noms, PV et jauges des personnages, les commandes a places fixes, les listes (Magi Tek
+  sur deux colonnes, qui montent du bas), la main sur la cible, la fleche au-dessus du
+  personnage dont le menu est ouvert, et les messages :
   le fond de combat de la carte, les monstres a la place que donne la formation
   et les personnages debout, a genoux ou a terre sont dessines avec leurs vraies
   images et palettes (`battlegfx.ff6data`), et les degats s'affichent au-dessus

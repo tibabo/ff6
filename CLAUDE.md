@@ -1,6 +1,8 @@
 # CLAUDE.md
 
-Moteur natif C++17 de Final Fantasy VI (`engine/`) et outils Node qui génèrent ses données (`tools/`). Chantier en cours : reproduire fidèlement le premier combat de Narshe enregistré dans `narshee-first-battle.mov`. Les écarts sont listés dans `bugs.md` (B01–B34, une case cochée = corrigé) : la section « Attaques et effets » est faite, restent « Déroulé », « Fenêtres et menus », « Fin de combat » et « Affichage ». Les décisions ouvertes (mode Wait ou Active, rapport 8:7, courbe de couleurs, table de hasard) sont en tête de `bugs.md`.
+Moteur natif C++17 de Final Fantasy VI (`engine/`) et outils Node qui génèrent ses données (`tools/`). Chantier en cours : reproduire fidèlement le premier combat de Narshe enregistré dans `narshee-first-battle.mov`. Les écarts sont listés dans `bugs.md` (B01–B34) : tous sont cochés ; les approximations (durées mesurées et non portées, index de départ du hasard) y sont notées.
+
+Skills du projet (`.claude/skills/`) : `ff6-comparer-video` (mesurer un écart avec l'enregistrement), `ff6-porter-desassemblage` (trouver la règle du jeu dans everything8215/ff6 et la ROM), `ff6-boucle-combat` (déroulé et minutage d'un combat dans le moteur).
 
 ## Règles
 
@@ -30,13 +32,14 @@ Prérequis : `python3` avec `numpy` et `Pillow`, `clang++`, `ffmpeg` (seulement 
 
 ### Vidéo (`.scratch/vid/`)
 
-- `game.rgb` : les 3211 images de la vidéo, brutes en RGB 256×224 (zone du jeu de la fenêtre Ares, recadrée `crop=1304:998:160:150` puis réduite au plus proche voisin ; Ares affiche en 8:7). `times.txt` : colonnes `n pts pts_time`. **tick = round(pts_time × 60)** : les `t…` de `bugs.md` sont des ticks, et l'indice d'image de la vidéo n'est pas le tick (des images ont été laissées tomber). Régénérer : `bash .scratch/vid/extract.sh`.
+- `game.rgb` : les 3211 images de la vidéo, brutes en RGB 256×224 **aux coordonnées du jeu** : Ares masque le débordement, la zone `crop=1304:998:160:150` montre les colonnes 8 à 247 et les lignes 4 à 214 ; elle est réduite au plus proche voisin en 240×211 et posée à (8, 4) (les bords sont noirs). Une ancienne extraction en 256×224 étirait l'image de 7 % : ses positions ne valent rien. `times.txt` : colonnes `n pts pts_time`. **tick = round(pts_time × 60)** : les `t…` de `bugs.md` sont des ticks, et l'indice d'image de la vidéo n'est pas le tick (des images ont été laissées tomber). Régénérer : `bash .scratch/vid/extract.sh`.
 - **`mix.py`**, l'outil principal : planche mixte vidéo / moteur, à ouvrir ensuite comme une image.
   `python3 .scratch/vid/mix.py SORTIE.png COLONNES ECHELLE spec...` avec `spec` = `v<indice>` | `T<tick>` | `e<fichier.rgb>@<indice>`, suivi au choix de `:x,y,w,h` (rognage).
   Exemple : `python3 .scratch/vid/mix.py .scratch/cmp.png 2 3 T2195:0,60,256,80 e.scratch/drv/essai.rgb@242:0,60,256,80`
 - Autres planches : `sheet.py` (vidéo ; temps `12.5s` ou indices), `esheet.py` (moteur : `NOM.rgb SORTIE.png COLS ECHELLE PREMIERE PAS indice...`).
 - Détecteurs dans le temps, sur la vidéo (indices d'images ; ils affichent le tick des changements) : `reg.py video FICHIER a b x0 y0 x1 y1 SEUIL` (la zone change), `number.py` / `numpos.py` (chiffres blancs, dissolution magenta), `red.py` / `redrows.py` (rayon rouge), `bright.py` / `handcount.py` (pixels très clairs : main du curseur), `blink.py` / `flash.py` (clignotements), `gaugefill.py` (jauges ATB), `entry.py`, `guards.py`, `hair.py`, `win.py`, `txt.py`, `topbox.py`, `scroll.py`, `stats.py` / `analyze.py` (luminosité et écart entre images).
   Sur le moteur : `reg.py moteur FICHIER ...` (FICHIER = `.scratch/vid/game.rgb` ou `.scratch/drv/NOM.rgb`), `enumpos.py`, `emag.py`, `tim.py`, `logsum.py`.
+- Mesures : `prof.py SPEC row|col N [a b]` (suites de couleurs le long d'une ligne ou d'une colonne), `boxes.py SPEC x0 y0 x1 y1 [seuil]` (boîtes des taches claires : texte, main), `ncc.py SPEC e<fichier>@<i> x0 y0 x1 y1 [r]` (décalage par corrélation des contours) ; SPEC = `T<tick>` | `v<indice>` | `e<fichier.rgb>@<indice>`.
 - Pixels : `pix.py` (indice vidéo, valeurs hexa d'une zone), `row.py`, `col.py`, `colors.py`, `gauge.py` (`v<i>` ou `e<fichier>@<i>`). Écarts : `shift.py` / `shift2.py` (décalage dx,dy qui rapproche vidéo et moteur), `cmp.py` (écart moyen d'une zone).
 
 ### Pilote du moteur (`.scratch/drv/`)
@@ -48,7 +51,7 @@ Prérequis : `python3` avec `numpy` et `Pillow`, `clang++`, `ffmpeg` (seulement 
 - Écrit `NOM.rgb` (images PREMIERE..DERNIERE, 256×224×3 brut, indice = image − PREMIERE), `NOM.log` (état du combat à chaque image), `NOM.sum` (résumé du journal par `logsum.py` : modes, messages, PV, personnages prêts) et `NOM.snd`.
 - `1` en 4e argument = mode Active (le défaut du moteur est Wait, qui fige l'ATB dans les menus ; la vidéo se joue en Active) ; `a-b:n` = appuyer sur A toutes les n images de a à b.
 - Variables d'environnement : `FF6_ACTIVE`, `FF6_AUTO` (les deux arguments ci-dessus), **`FF6_AUTO_MENU=1`** (n'appuie que dans les menus du combat ; sans elle, un A pendant une animation ou un message la coupe), `FF6_LOG` (chemin du journal), `FF6_BATTLE_SPEED` (vitesse brute de la config).
-- Route d'une nouvelle partie jusqu'au premier combat : copier `.scratch/drv/try14.txt` (`900 A`, `1000 A`, `10300 A`, `10694 A`, `10823-11010 U`, `11132 A`). Repères en Active (ils bougent avec les correctifs, voir `NOM.sum`) : combat lancé f11160, interface f11190, premier coup de garde f11410, première action Magi Tek f11540.
+- Route d'une nouvelle partie jusqu'au premier combat : copier `.scratch/drv/try14.txt` (`900 A`, `1000 A`, `10300 A`, `10694 A`, `10823-11010 U`, `11132 A`). Repères en Active (ils bougent avec les correctifs, voir `NOM.sum`) : combat lancé f11160, mosaïque f11161–11191, noir jusqu'à f11296, fondu du combat f11297–11333, temps du combat à f11341, gardes en place à f11362 ; le reste dépend du hasard et des appuis (voir `NOM.sum`). Le pilote (`FF6_AUTO_MENU`) n'appuie que si aucun message n'est affiché : il laisse traîner les menus pendant les actions. Les messages qui attendent une touche (l'expérience) demandent un appui explicite dans le script.
 - `dump.cpp` lit des membres privés de `Game` (`#define private public`) : s'ils sont renommés, il ne compile plus. Lancement direct : `.scratch/drv/dump PACK SCRIPT PREMIERE DERNIERE PAS SORTIE.rgb [sons.log|-] [map:N|battle:N]`.
 
 Cycle type pour vérifier un correctif :
@@ -77,4 +80,4 @@ python3 .scratch/vid/mix.py .scratch/cmp.png 2 3 T2195:0,60,256,80 e.scratch/drv
 ### Pièges
 
 - Les `.rgb` pèsent 172 Ko par image : ne jamais les afficher ; rediriger les sorties longues vers un fichier (`> .scratch/x.out 2>&1`) puis le lire. Un run du pilote (compilation + centaines d'images) peut dépasser 2 minutes.
-- Comparer les formes, les positions relatives et les durées, pas les couleurs exactes (Ares assombrit les demi-teintes). Les positions du moteur diffèrent encore de la vidéo (B21 cible par défaut, B23 pile d'armures), comme les délais (B06 à B09).
+- Comparer les formes, les positions et les durées, pas les couleurs exactes (Ares assombrit les demi-teintes) ; `ncc.py` (corrélation des contours) mesure un décalage sans souffrir des couleurs. Le pas vertical de la vidéo (4,73 lignes de la fenêtre par ligne du jeu) peut doubler ou sauter une ligne : ± 1 pixel.

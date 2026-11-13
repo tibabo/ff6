@@ -8,6 +8,7 @@
 namespace ff6 {
 
 int BattleRandom::below(int limit) {
+    if (table_) return limit > 0 ? ((*table_)[++index_] * limit) >> 8 : 0;  // RandA
     state_ ^= state_ << 13;
     state_ ^= state_ >> 17;
     state_ ^= state_ << 5;
@@ -122,8 +123,8 @@ void Battle::fillCharacter(Combatant& c, int index) {
 }
 
 Battle::Battle(const BattleData& data, const GameRules& rules, PartyState& party, const std::vector<int>& characters,
-    int battle, uint32_t seed, int battleSpeed, const Colosseum& colosseum)
-    : data_(data), rules_(rules), party_(party), random_(seed), battleSpeed_(battleSpeed), battleNumber_(battle), colosseum_(colosseum) {
+    int battle, uint32_t seed, int battleSpeed, const Colosseum& colosseum, bool gameRandom)
+    : data_(data), rules_(rules), party_(party), random_(seed, gameRandom ? &data.rngTable : nullptr), battleSpeed_(battleSpeed), battleNumber_(battle), colosseum_(colosseum) {
     std::vector<int> fighters(characters.begin(), characters.begin() + static_cast<std::ptrdiff_t>(std::min(characters.size(), static_cast<size_t>(FF6_BATTLE_PARTY_SLOTS))));
     const BattleFormation scene = data.formation(battle);
     applyCharAi(scene, fighters);
@@ -779,45 +780,62 @@ void Battle::tick() {
             party_.morphCounter = std::max(c.morph, 0) / FF6_MORPH_TICKS_PER_SUPPLY;
             if (c.morph <= 0) clearStatus(i, FF6_ST_MORPH);
         }
-        if (!c.alive() || c.ready || (c.status & FF6_ST_NO_GAUGE) || c.seizeAttacker >= 0 || i == zingerAttacker_) continue;
+        if (!c.alive() || c.ready || c.turnPending || c.acting || (c.status & FF6_ST_NO_GAUGE) || c.seizeAttacker >= 0 || i == zingerAttacker_) continue;
         c.gauge += c.atbConstant;
         if (c.gauge < FF6_ATB_FULL) continue;
         c.gauge = FF6_ATB_FULL;
         ++turns_;
-        if ((c.status & (FF6_ST_BERSERK | FF6_ST_CONFUSE)) || c.charmAttacker >= 0 || (colosseum_.monster >= 0 && !c.monster)) {
-            autoAct(i);
-            if (outcome_ != BattleOutcome::Fighting) return;
-            continue;
-        }
-        if (!c.monster && (c.status & FF6_ST_RAGE) && c.rageMonster >= 0) {  // a rage goes on alone
-            rageTurn(i);
-            checkEnd();
-            if (outcome_ != BattleOutcome::Fighting) return;
-            continue;
-        }
-        if (!c.monster && (c.status & FF6_ST_DANCE) && c.danceIndex >= 0) {  // so does a dance
-            c.gauge = 0;
-            danceAttack(i);
-            checkEnd();
-            if (outcome_ != BattleOutcome::Fighting) return;
-            continue;
-        }
-        if (!c.monster) {
-            if (c.aiStart >= 0) {  // a character of a scene acts by its script
-                monsterTurn(i);
-                checkEnd();
-                if (outcome_ != BattleOutcome::Fighting) return;
-                continue;
-            }
+        const bool chooses = !c.monster && c.aiStart < 0 && !(c.status & (FF6_ST_BERSERK | FF6_ST_CONFUSE)) && c.charmAttacker < 0 &&
+                             colosseum_.monster < 0 && !((c.status & FF6_ST_RAGE) && c.rageMonster >= 0) && !((c.status & FF6_ST_DANCE) && c.danceIndex >= 0);
+        if (chooses) {  // a character waits for its command
             c.ready = true;
             c.defending = false;
             c.runic = false;
             continue;
         }
-        monsterTurn(i);
-        checkEnd();
+        if (queuedTurns_) {  // the gauge stays full until the action queue reaches the turn (_c24e66)
+            c.turnPending = true;
+            pendingTurns_.push_back(i);
+            continue;
+        }
+        runTurn(i);
         if (outcome_ != BattleOutcome::Fighting) return;
     }
+}
+
+// The turn of a combatant that acts by itself: a monster, a character that is confused, berserk, charmed, raging, dancing, in
+// the colosseum, or of a scene.
+void Battle::runTurn(int i) {
+    Combatant& c = combatants_[static_cast<size_t>(i)];
+    c.turnPending = false;
+    if (outcome_ != BattleOutcome::Fighting || !c.alive()) {
+        c.gauge = 0;
+        return;
+    }
+    if ((c.status & (FF6_ST_BERSERK | FF6_ST_CONFUSE)) || c.charmAttacker >= 0 || (colosseum_.monster >= 0 && !c.monster)) {
+        autoAct(i);
+        return;
+    }
+    if (!c.monster && (c.status & FF6_ST_RAGE) && c.rageMonster >= 0) {  // a rage goes on alone
+        rageTurn(i);
+        checkEnd();
+        return;
+    }
+    if (!c.monster && (c.status & FF6_ST_DANCE) && c.danceIndex >= 0) {  // so does a dance
+        c.gauge = 0;
+        danceAttack(i);
+        checkEnd();
+        return;
+    }
+    monsterTurn(i);  // a monster, or a character of a scene that acts by its script
+    checkEnd();
+}
+
+int Battle::takePendingTurn() {
+    if (pendingTurns_.empty()) return -1;
+    const int i = pendingTurns_.front();
+    pendingTurns_.erase(pendingTurns_.begin());
+    return i;
 }
 
 void Battle::checkEnd() {
@@ -934,7 +952,8 @@ void Battle::win() {
         }
         characters.push_back(c.id);
     }
-    for (const int i : alive) {
+    for (auto it = alive.rbegin(); it != alive.rend(); ++it) {  // WinBattle goes from the last place to the first
+        const int i = *it;
         const Combatant& c = combatants_[static_cast<size_t>(i)];
         const int gained = addExperience(party_, rules_, c.id, (c.relic5 & FF6_RELIC5_DOUBLE_EXP) ? reward_.exp * 2 : reward_.exp);
         if (gained > 0) {

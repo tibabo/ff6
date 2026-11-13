@@ -127,7 +127,7 @@
 #define FF6_PACK_MAGIC_SIZE 8
 #define FF6_COMMON_MAGIC "FF6COMMN"
 #define FF6_MAP_MAGIC "FF6MAP01"
-#define FF6_PACK_VERSION 41
+#define FF6_PACK_VERSION 43
 #define FF6_COMMON_FILE "common.ff6data"
 #define FF6_MAP_DIR "maps"
 #define FF6_MAP_FILE_EXTENSION ".ff6map"
@@ -603,6 +603,7 @@
 #define FF6_MENU_CODE_UPPER_A 0x80  // the codes of the text are the tiles of the font
 #define FF6_MENU_CODE_LOWER_A 0x9A
 #define FF6_MENU_CODE_ZERO 0xB4
+#define FF6_MENU_CODE_QUESTION 0xBF  // "?", the name of a character before it is given one
 #define FF6_MENU_CODE_SPACE 0xFF
 #define FF6_MENU_CODE_DIALOGUE_SHIFT 0x60  // a code of the font of the dialogues plus this is the code of the menus
 #define FF6_MENU_CODE_2DOT 0xD3  // symbols of the font
@@ -1136,6 +1137,83 @@
 #define FF6_BATTLE_LIST_AMOUNT_X 19  // the cost of a spell, the quantity of an item
 #define FF6_BATTLE_PARTY_HAND_X 98
 #define FF6_BATTLE_COMMAND_RUN 0x100  // the entry that runs away, after the commands of the game
+// The windows at the bottom as the game shows them (measured on the console, which hides 8 columns at each side).
+#define FF6_BATTLE_WINDOW_TOP 152
+#define FF6_BATTLE_WINDOW_HEIGHT 64
+#define FF6_BATTLE_MONSTER_WINDOW_X 8
+#define FF6_BATTLE_MONSTER_WINDOW_W 96
+#define FF6_BATTLE_PARTY_WINDOW_X 104
+#define FF6_BATTLE_PARTY_WINDOW_W 144
+#define FF6_BATTLE_CMD_WINDOW_X 16  // over the window of the monsters, which shows at both sides of it
+#define FF6_BATTLE_CMD_WINDOW_W 80
+#define FF6_BATTLE_TEXT_TOP 164  // the first line of text in them, then one every 12 lines
+#define FF6_BATTLE_TEXT_PITCH 12
+#define FF6_BATTLE_TEXT_ROWS 4
+#define FF6_BATTLE_MONSTER_NAME_PX 16
+#define FF6_BATTLE_MONSTER_NAMES 4  // UpdateMonsterGfxBuf: the different names, at most
+#define FF6_BATTLE_CHAR_NAME_PX 112
+#define FF6_BATTLE_HP_PX 168
+#define FF6_BATTLE_GAUGE_PX 200  // the left end of the gauge, then its cells and the right end
+#define FF6_BATTLE_GAUGE_TILES 4  // DrawGaugeText: four cells of eight pixels between the two ends
+#define FF6_BATTLE_GAUGE_TILE_STEPS 8
+#define FF6_BATTLE_GAUGE_SHIFT 8  // wATBGaugeBuf is the high byte of the gauge
+#define FF6_BATTLE_GAUGE_VALUE_FULL 0xFF
+#define FF6_BATTLE_GAUGE_STEP_SHIFT 3  // a pixel of the gauge for every eight of its value, and one more
+#define FF6_BATTLE_GAUGE_FILLING 0x35  // the tile attributes of the gauge: palette 5 while it fills, 2 when full
+#define FF6_BATTLE_GAUGE_FULL 0x29
+#define FF6_BATTLE_COMMAND_SLOTS 4  // the commands keep their place; the ones that cannot be used leave a gap
+#define FF6_BATTLE_COMMAND_TEXT_PX 32
+#define FF6_BATTLE_COMMAND_HAND_PX 16
+#define FF6_BATTLE_MONSTER_HAND_DX 8  // the hand on a monster: its right side minus this, half way down
+#define FF6_BATTLE_CHAR_HAND_DX 16  // on a character: this far to its left, and this far below its top
+#define FF6_BATTLE_CHAR_HAND_DY 8
+#define FF6_BATTLE_ARROW_TILE 0x2E  // the arrow over the character whose menu is open: a sprite of the sheet of the statuses
+#define FF6_BATTLE_ARROW_DY (-16)  // from the top of the character (its center less 24)
+#define FF6_BATTLE_ARROW_MAGITEK_DY (-12)  // _c134a5: higher over an armor
+#define FF6_BATTLE_MSG_SPEED_BASE 0x20  // MsgSpeedTbl: 0x20 frames, and 0x10 more for each step of the message speed
+#define FF6_BATTLE_MSG_SPEED_STEP 0x10
+#define FF6_BATTLE_MSG_SPEED_DEFAULT 2
+#define FF6_BATTLE_WIN_DELAY 143  // measured: from the end of the last action to the first message of the victory
+#define FF6_BATTLE_WIN_GAP_FRAMES 19  // measured: the window closes and opens again between two messages
+#define FF6_BATTLE_WIN_END_FRAMES 9  // measured: after the last message, before the screen fades out
+#define FF6_CMD_DELAY_TABLE {16, 16, 32, 0, 0, 16, 16, 16, 16, 16, 16, 16, 32, 16, 16, 16, 16, 16, 16, 16, 16, 16, 224, 32, 16, 16, 32, 32, 16, 16, 0, 0}  // CmdDelayTbl
+#define FF6_BATTLE_DELAY_SHIFT 8  // the delay counts against the high byte of its counter
+#define FF6_BATTLE_READY_FRAMES 15  // measured: a full gauge stays white this long before it turns yellow
+#define FF6_BATTLE_MENU_OPEN_FRAMES 8  // measured: then the window of the commands opens
+#define FF6_MONSTER_SPECIAL_NAME_FRAMES 32  // MONSTER_SPECIAL: the name of the special attack of a monster stays this long
+#define FF6_MONSTER_FLASH_OUTLINE 0x7FFF  // the outline of a monster that flashes before it acts; the rest of it is black
+#define FF6_MONSTER_FLASH_FRAMES 16  // FlashActiveMonster: four frames flashed, four not, twice
+#define FF6_MONSTER_FLASH_STEP 4
+#define FF6_MONSTER_BLOW_LEAD 63  // measured: from the flash of a monster to the start of its blow
+#define FF6_BATTLE_ATB_DELAY 7  // measured: the time of the battle starts this many frames after its fade in
+#define FF6_BATTLE_ENTRY_START 22  // measured: then the monsters come in from the left, in a few frames
+#define FF6_BATTLE_ENTRY_FRAMES 7
+#define FF6_BATTLE_ENTRY_EDGE 8  // the first one shows this far into the screen
+#define FF6_BATTLE_ACTION_END_FRAMES 14  // measured: from the end of what an action shows to the empty gauge of its combatant
+#define FF6_BATTLE_CAST_NAME_GAP 56  // measured: from the end of the name of an attack to the start of its animation
+#define FF6_BATTLE_STEP_BACK_FRAMES 32  // measured: a character that an animation took away walks back
+#define FF6_BATTLE_AFTER_STEP_FRAMES 19  // measured: then the numbers come
+#define FF6_BATTLE_LIST_OPEN_FRAMES 8  // the window of a list rises from the bottom of the screen in this many frames
+#define FF6_BATTLE_LIST_WINDOW_X 8  // the window of the magitek attacks, across the screen
+#define FF6_BATTLE_LIST_WINDOW_W 240
+#define FF6_BATTLE_LIST_WINDOW_TOP 156
+#define FF6_BATTLE_LIST_WINDOW_BOTTOM 216  // where it starts to rise from, below the windows
+#define FF6_BATTLE_LIST_TEXT_TOP 168  // its lines, every 12 pixels
+#define FF6_BATTLE_MAGITEK_COLUMNS 2
+#define FF6_BATTLE_LIST_COLUMN_PX {32, 136}  // the text of the two columns; the hand 16 pixels left of it
+#define FF6_BATTLE_LIST_HAND_DX 16
+#define FF6_BATTLE_MESSAGE_BOX_Y 8  // the window on top: lines 8 to 39
+#define FF6_BATTLE_MESSAGE_BOX_H 32
+#define FF6_BATTLE_MESSAGE_BOX_X 8  // a message across the screen, its text from the left
+#define FF6_BATTLE_MESSAGE_BOX_W 240
+#define FF6_BATTLE_MESSAGE_TEXT_X 16
+#define FF6_BATTLE_MESSAGE_TEXT_Y 19
+#define FF6_BATTLE_MESSAGE_LARGE_X 12  // the large font of the other messages: where its glyphs start
+#define FF6_BATTLE_MESSAGE_LARGE_Y 19
+#define FF6_BATTLE_NAME_BOX_X 56  // the name of an attack, in the middle
+#define FF6_BATTLE_NAME_BOX_W 144
+#define FF6_BATTLE_MESSAGE_GRADIENT_START 8  // InitMsgWindowHDMA: a level every two lines from this one
+#define FF6_BATTLE_MESSAGE_GRADIENT_LINES 2
 #define FF6_BATTLE_RESULT_X 4
 #define FF6_BATTLE_GAME_OVER_X 11  // the text of the screen of a lost battle, in tiles
 #define FF6_BATTLE_GAME_OVER_Y 12
@@ -1215,6 +1293,24 @@
 #define FF6_BG_VFLIP 0x8000
 #define FF6_MAP_BG_MASK 0x7F  // of the property of a map: its battle background
 #define FF6_BATTLE_BG_DEFAULT 0x3F  // the flags of a battle that use the background of the map
+#define FF6_BATTLE_FLAG_NO_BLUR 0x80  // of the same flags: no mosaic before the battle
+#define FF6_BATTLE_FLAG_NO_SFX 0x40  // and no sound effect
+#define FF6_BATTLE_SFX 0xC1  // BATTLE_SFX, before a battle of the field or of the world
+
+// ---- Into a battle (BattleMosaic of the field, then the fade in of the battle) -----------
+#define FF6_BATTLE_MOSAIC_FRAMES 32  // the frame counter of BattleMosaic: the screen is cut to black when it gets there
+#define FF6_BATTLE_MOSAIC_HALF 16  // before it, the size grows from 0 to 7 twice; after, from 0 to 15 once
+#define FF6_BATTLE_MOSAIC_FIRST_MASK 0x07
+#define FF6_BATTLE_MOSAIC_LAST_MASK 0x0F
+#define FF6_WIDE_PIXEL_X 8  // the pixels of the console are 8:7 wide on a television
+#define FF6_WIDE_PIXEL_Y 7
+#define FF6_ARES_GAMMA 1.15  // fitted on the colors of the recording: Ares darkens the half tones
+#define FF6_BATTLE_EXIT_BLACK_FRAMES 52  // the black screen after a battle while the map is loaded again, measured on the recording
+#define FF6_BATTLE_LOAD_FRAMES 104  // the black screen while the game loads the battle, measured on the recording
+#define FF6_BATTLE_FADE_LINE 0x4C  // UpdateFadeIn: the field is uncovered from this line, two lines up and down a frame
+#define FF6_BATTLE_FADE_FRAMES (FF6_BATTLE_FADE_LINE / 2)  // until the top line; the battle time starts afterwards
+#define FF6_BATTLE_FADE_END (FF6_BATTLE_FADE_LINE * 2)  // the lines of the field that the bars cover
+#define FF6_BATTLE_FADE_LEVEL_MAX 31  // the fixed color taken from the layers grows by one every two lines, up to white
 
 // ---- Attack animations (attackanim.ff6data) ------------------------------------------------------
 #define FF6_ATTACK_ANIM_FILE "attackanim.ff6data"
@@ -1300,6 +1396,13 @@
 #define FF6_CHAR_GFX_COUNT 24
 #define FF6_STATUS_GFX_BYTES 0x1980  // the sprites of the statuses (16 x 8 tiles, the first 0x1000 bytes), and from 0x1800 the word Miss and the digits of the damage
 #define FF6_STATUS_PAL_BYTES 32
+#define FF6_BATTLE_FONT_PAL_COLORS 32  // BattleFontPal: the text of the battles, eight palettes of four colors
+#define FF6_BATTLE_FONT_COLOR_ENTRY 3  // the color of the font of the config replaces this one ($1d55)
+#define FF6_BATTLE_WINDOW_BRIGHTEN 8  // LoadMenuGfx: each channel of the colors of the windows, plus this
+#define FF6_BATTLE_GRADIENT_START 151  // the HDMA of the color math: from this line, the windows lose a level every three lines
+#define FF6_BATTLE_GRADIENT_LINES 3
+#define FF6_BATTLE_GRADIENT_LAST 222  // the last line of the table; the one after keeps its color
+#define FF6_COLOR_LEVEL_MAX 31  // of a channel of BGR555
 #define FF6_CHAR_GFX_IMP 15  // what a character is while it is an imp
 #define FF6_CHAR_GFX_ESPER_TERRA 18  // and while it is morphed
 #define FF6_STATUS_PETRIFY_COLORS {0x0842, 0x6b5a, 0x18c6, 0x4210, 0x294a, 0x6b5a, 0x4e73, 0x6318, 0x3def, 0x4e73, 0x294a}  // the colors 1 to 11
@@ -1378,6 +1481,7 @@
 #define FF6_BATTLE_SPARKLE_FRAMES 28
 #define FF6_BATTLE_ELEMENT_COLORS {{255, 80, 32}, {96, 200, 255}, {255, 255, 64}, {96, 255, 96}, {176, 255, 176}, {255, 255, 255}, {200, 144, 64}, {64, 96, 255}}
 #define FF6_NEAR_FATAL_DIVISOR 8  // a character with less than this fraction of its hp kneels
+#define FF6_CHAR_SPRITE_DY (-8)  // CharSpriteData: the top of the sprite of a character, from its position
 #define FF6_BATTLE_CHAR_Y {68, 86, 104, 122}  // of the characters of a battle, from the top
 #define FF6_BATTLE_CHAR_ANGLE 0x70  // how far right of the middle the line of the characters leans
 #define FF6_BATTLE_CHAR_APEX 0x68  // the point where the line starts is this far above the screen
@@ -1726,6 +1830,8 @@
 #define FF6_ESPER_FRAMES 90  // how long an esper stays at least
 #define FF6_ESPER_FADE_PERCENT 2  // how much of the picture comes or goes in a frame
 #define FF6_MAGITEK_ATTACKS 8
+#define FF6_MAGITEK_DEFAULT_LIST {0, 1, 2, -1, 4, -1, -1, -1}  // DefaultMagitekAttackTbl: the places of the others than Terra
+#define FF6_CHAR_GFX_TERRA_MAGITEK 0  // the graphics of Terra: she has the eight (TerraMagitekAttackTbl)
 #define FF6_MORPH_TICKS 600  // how long Terra stays morphed
 #define FF6_BUM_RUSH_BIT 0x80
 #define FF6_ESPER_FIRST_ID 0x36  // the events give espers 0x36 to 0x50
@@ -1780,6 +1886,8 @@
 #define FF6_BATTLE_RANDOM_FLAG 0x8000  // of a battle number: one of the next four battles
 #define FF6_BATTLE_RANDOM_SPAN 4
 #define FF6_BATTLE_SEED_STEP 0x9E3779B9u
+#define FF6_RNG_INDEX_MASK 0x3F  // InitBattle: the low byte of the time of the game, shifted by two, is the first index of RNGTbl
+#define FF6_RNG_SEED_SHIFT 2
 #define FF6_HP_CHANGE_SET_MAX 0x7F  // of the second byte of the commands that change hp: set to the maximum
 #define FF6_HP_CHANGE_SUBTRACT 0x80
 
@@ -1888,7 +1996,7 @@
 #define FF6_WORLD_DIVISOR_START 0x8FFF  // $8d: the divisor of the first line, in 8.8 fixed point
 #define FF6_WORLD_DIVISOR_END 0xFFFF  // $8f
 #define FF6_WORLD_BORDER 8  // the columns at each side of the screen that the window hides
-#define FF6_WORLD_BATTLE_SFX 0xC1
+#define FF6_WORLD_BATTLE_SFX FF6_BATTLE_SFX
 #define FF6_WORLD_ZOOM_STEPS 34
 #define FF6_WORLD_BATTLE_BACKGROUNDS {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 0x2F, 3, 5, 5, 6, 7}  // WorldBattleBGTbl: eight for each world
 #define FF6_WORLD_BACKGROUND_RATE_SHIFTS {3, 2, 1, 2, 3, 0, 3, 3}  // BattleBGRateTbl

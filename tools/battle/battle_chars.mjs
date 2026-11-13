@@ -12,6 +12,8 @@ const CHAR_PAL_TABLE = 0x02ce2b;  // C2/CE2B: the palette of each character
 export const CHAR_PAL_COUNT = 8;
 export const CHAR_PAL_BYTES = 32;
 const CHAR_PAL = 0x2d6300;  // ED/6300
+export const FONT_PAL_BYTES = 64;  // BattleFontPal: eight palettes of four colors for the text of the battles (bg3)
+const FONT_PAL = 0x2d62c0;  // ED/62C0
 
 const table = (rom, start, length) => Buffer.from(rom.subarray(start, start + length));
 
@@ -48,3 +50,4 @@ export const readCharPalTable = rom => table(rom, CHAR_PAL_TABLE, CHAR_PAL_TABLE
 export const readCharPal = rom => table(rom, CHAR_PAL, CHAR_PAL_COUNT * CHAR_PAL_BYTES);
 export const readStatusGfx = rom => Buffer.from(decompressLzss(rom, STATUS_GFX)).subarray(0, STATUS_GFX_BYTES);
 export const readStatusPal = rom => table(rom, STATUS_PAL, STATUS_PAL_BYTES);
+export const readFontPal = rom => table(rom, FONT_PAL, FONT_PAL_BYTES);

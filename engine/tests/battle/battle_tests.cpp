@@ -142,6 +142,7 @@ void testBattle() {
     view.start(data, rules, played, {0}, 0, 1, FF6_BATTLE_SPEED_DEFAULT, true);
     CHECK(view.active() && view.mode() == ff6::BattleMode::Fighting);
     view.setGfx(&gfx);
+    for (int frame = 0; frame < FF6_BATTLE_ENTRY_START + FF6_BATTLE_ENTRY_FRAMES; ++frame) view.update(ff6::InputState());  // it comes in
     view.draw();  // the monster of the first battle is painted where the formation puts it
     const ff6::BattleImage& picture = gfx.monster(0x19);
     size_t painted = 0;
@@ -153,7 +154,7 @@ void testBattle() {
     }
     CHECK(painted > 100);
     size_t standing = 0;  // Terra, first of the party
-    for (int y = 68; y < 68 + FF6_CHAR_HEIGHT; ++y) {
+    for (int y = 68 + FF6_CHAR_SPRITE_DY; y < 68 + FF6_CHAR_SPRITE_DY + FF6_CHAR_HEIGHT; ++y) {
         for (int x = 195; x < 195 + FF6_CHAR_WIDTH; ++x) {
             const uint8_t* pixel = &screen.pixels()[(static_cast<size_t>(y) * FF6_SCREEN_WIDTH + x) * FF6_BYTES_PER_PIXEL];
             standing += pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0;
